@@ -36,6 +36,9 @@ core-api/test-*.jpg
 core-api/test-*.png
 XIAOLOU-main/temp-build/
 
+# Root deployment guide (local reference only)
+/README.md
+
 # Local reference and design resources (not deliverable code)
 lovartai/
 .codex-backups/
