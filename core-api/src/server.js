@@ -4,6 +4,7 @@ const http = require("node:http");
 const { error, json, matchPath, noContent } = require("./http");
 const { buildRoutes } = require("./routes");
 const { SqliteStore } = require("./sqlite-store");
+const { serveCanvasLibrary } = require("./canvas-library");
 
 async function dispatch(req, res, url, routes, store) {
   for (const route of routes) {
@@ -58,6 +59,10 @@ function createServer() {
       return;
     }
 
+    if (req.method === "GET" && serveCanvasLibrary(req, res, url.pathname)) {
+      return;
+    }
+
     const handled = await dispatch(req, res, url, routes, store);
     if (!handled) {
       error(res, 404, "NOT_FOUND", "route not found");
@@ -73,10 +78,23 @@ function createServer() {
   return server;
 }
 
+function formatListenUrl(host, port) {
+  const h = (host || "127.0.0.1").trim();
+  if (h === "0.0.0.0") {
+    return `http://0.0.0.0:${port}`;
+  }
+  if (h.includes(":")) {
+    const inner = h.replace(/^\[|\]$/g, "");
+    return `http://[${inner}]:${port}`;
+  }
+  return `http://${h}:${port}`;
+}
+
 if (require.main === module) {
   const port = Number(process.env.PORT || "4100");
-  createServer().listen(port, "127.0.0.1", () => {
-    console.log(`core-api mock server listening on http://127.0.0.1:${port}`);
+  const host = (process.env.HOST || "127.0.0.1").trim();
+  createServer().listen(port, host, () => {
+    console.log(`core-api mock server listening on ${formatListenUrl(host, port)}`);
   });
 }
 

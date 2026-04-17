@@ -9,10 +9,11 @@ Thumbs.db
 **/build/
 coverage/
 
-# Environment
+# Environment — real keys stay local, never committed
 **/.env
 **/.env.local
 !**/.env.example
+scripts/openwebui.env.local
 
 # Logs
 *.log
@@ -25,6 +26,30 @@ output/
 core-api/data/
 core-api/tmp/
 core-api/uploads/
+
+# Legacy canvas iframe runtime artifacts (canvas now compiled into src/canvas/)
+XIAOLOU-main/internal/
+
+# Test / scratch files
+core-api/scripts/test-*.cjs
+core-api/test-*.jpg
+core-api/test-*.png
+XIAOLOU-main/temp-build/
+
+# Local reference and design resources (not deliverable code)
+lovartai/
+.codex-backups/
+.npm-cache/
+
+# Local PRD drafts and personal docs (Chinese-named files at repo root)
+AI漫剧*.md
+AI漫剧*.yaml
+AI漫剧*.prisma
+AI漫剧*.docx
+AI漫剧*.svg
+子智能体*.md
+纳米漫剧*.md
+内网穿透*.md
 
 # Local screenshots and exports
 屏幕截图*.png

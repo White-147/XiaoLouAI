@@ -198,6 +198,8 @@ export default function StoryboardEditor({ shotId, onBack }: StoryboardEditorPro
       setSelectedAssetIds((current) =>
         current.includes(createdAsset.id) ? current : [...current, createdAsset.id],
       );
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Asset upload failed. Please try again.");
     } finally {
       setUploadingAsset(false);
       event.target.value = "";

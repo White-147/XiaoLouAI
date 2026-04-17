@@ -67,8 +67,8 @@ class SqliteStore extends MockStore {
     }
   }
 
-  createProject(input) {
-    const result = super.createProject(input);
+  createProject(input, actorId) {
+    const result = super.createProject(input, actorId);
     this.saveSnapshot();
     return result;
   }
@@ -133,14 +133,14 @@ class SqliteStore extends MockStore {
     return result;
   }
 
-  createWalletRechargeOrder(input) {
-    const result = super.createWalletRechargeOrder(input);
+  createWalletRechargeOrder(input, actorId) {
+    const result = super.createWalletRechargeOrder(input, actorId);
     if (result) this.saveSnapshot();
     return result;
   }
 
-  confirmWalletRechargeOrder(orderId) {
-    const result = super.confirmWalletRechargeOrder(orderId);
+  confirmWalletRechargeOrder(orderId, actorId) {
+    const result = super.confirmWalletRechargeOrder(orderId, actorId);
     if (result) this.saveSnapshot();
     return result;
   }
@@ -175,6 +175,24 @@ class SqliteStore extends MockStore {
     return result;
   }
 
+  registerPersonalUser(input) {
+    const result = super.registerPersonalUser(input);
+    this.saveSnapshot();
+    return result;
+  }
+
+  registerEnterpriseAdmin(input) {
+    const result = super.registerEnterpriseAdmin(input);
+    this.saveSnapshot();
+    return result;
+  }
+
+  createOrganizationMember(organizationId, input, actorId) {
+    const result = super.createOrganizationMember(organizationId, input, actorId);
+    this.saveSnapshot();
+    return result;
+  }
+
   createTask(params) {
     const result = super.createTask(params);
     this.saveSnapshot();
@@ -183,6 +201,30 @@ class SqliteStore extends MockStore {
 
   updateTask(taskId, patch) {
     const result = super.updateTask(taskId, patch);
+    if (result) this.saveSnapshot();
+    return result;
+  }
+
+  deleteCreateImage(id, actorId) {
+    const result = super.deleteCreateImage(id, actorId);
+    if (result) this.saveSnapshot();
+    return result;
+  }
+
+  deleteCreateVideo(id, actorId) {
+    const result = super.deleteCreateVideo(id, actorId);
+    if (result) this.saveSnapshot();
+    return result;
+  }
+
+  saveCanvasProject(actorId, input) {
+    const result = super.saveCanvasProject(actorId, input);
+    this.saveSnapshot();
+    return result;
+  }
+
+  deleteCanvasProject(actorId, projectId) {
+    const result = super.deleteCanvasProject(actorId, projectId);
     if (result) this.saveSnapshot();
     return result;
   }

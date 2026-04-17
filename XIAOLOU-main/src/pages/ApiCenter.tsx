@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useActorId } from "../lib/actor-session";
+import { getKnownActors, setCurrentActorId, useActorId } from "../lib/actor-session";
 import {
   getApiCenterConfig,
   getCapabilities,
@@ -46,14 +46,15 @@ type ModelOption = {
 
 type ModelDomain = "text" | "vision" | "image" | "video" | "audio";
 
-const PAGE = "flex-1 overflow-y-auto bg-[#07090c] text-white custom-scrollbar";
+const PAGE = "flex-1 overflow-y-auto bg-background text-foreground custom-scrollbar";
 const WRAPPER = "mx-auto min-h-full max-w-[1440px] px-4 pb-12 pt-5 sm:px-5 lg:px-6";
 const PANEL =
-  "rounded-[28px] border border-white/10 bg-[#0b0d10] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.36)] sm:p-5 lg:p-6";
+  "rounded-[28px] border border-border bg-card p-4 shadow-[0_24px_80px_rgba(0,0,0,0.24)] sm:p-5 lg:p-6";
 const CARD =
-  "rounded-[24px] border border-white/10 bg-[#101317] shadow-[0_0_0_1px_rgba(255,255,255,0.02)]";
+  "rounded-[24px] border border-border bg-card shadow-[0_0_0_1px_rgba(0,0,0,0.12)]";
 const FIELD =
-  "min-h-[46px] rounded-xl border border-white/10 bg-[#0d1014] px-4 text-sm text-white outline-none transition-colors focus:border-emerald-400/45 focus:ring-2 focus:ring-emerald-400/15 disabled:cursor-not-allowed disabled:text-white/35";
+  "min-h-[46px] rounded-xl border border-input bg-background px-4 text-sm text-foreground outline-none transition-colors focus:border-indigo-400/45 focus:ring-2 focus:ring-indigo-400/15 disabled:cursor-not-allowed disabled:text-muted-foreground";
+const API_CENTER_FALLBACK_ACTOR_ID = "user_demo_001";
 
 const DOMAIN_ORDER: ModelDomain[] = ["text", "vision", "image", "video", "audio"];
 const DOMAIN_LABELS: Record<ModelDomain, string> = {
@@ -160,10 +161,10 @@ function InfoChip({
   value: string;
 }) {
   return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#0d1014] px-3 py-1.5 text-xs text-white/75">
-      <Icon className="h-3.5 w-3.5 text-white/45" />
-      <span className="text-white/45">{label}</span>
-      <span className="font-medium text-white">{value}</span>
+    <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
+      <Icon className="h-3.5 w-3.5 text-muted-foreground/70" />
+      <span className="text-muted-foreground/80">{label}</span>
+      <span className="font-medium text-foreground">{value}</span>
     </div>
   );
 }
@@ -206,13 +207,13 @@ function SectionHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h2 className="flex items-center gap-2 text-[18px] font-semibold text-white">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/5 text-white/85">
+        <h2 className="flex items-center gap-2 text-[18px] font-semibold text-foreground">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-muted text-muted-foreground">
             <Icon className="h-4 w-4" />
           </span>
           {title}
         </h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">{description}</p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
       {action}
     </div>
@@ -235,7 +236,7 @@ function PrimaryButton({
       type="button"
       disabled={disabled || loading}
       onClick={onClick}
-      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-medium text-slate-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-500/45 disabled:text-slate-900/60"
+      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-indigo-500 px-4 text-sm font-medium text-slate-950 transition-colors hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-indigo-500/45 disabled:text-slate-900/60"
     >
       {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
       {children}
@@ -423,7 +424,7 @@ function VendorCard({
               className={cn(
                 "rounded-full px-2.5 py-1 text-[11px]",
                 vendor.connected
-                  ? "bg-emerald-400/15 text-emerald-100"
+                  ? "bg-indigo-400/15 text-indigo-100"
                   : hasConfiguredKey
                     ? "bg-amber-400/15 text-amber-100"
                     : "bg-white/8 text-white/60",
@@ -536,7 +537,7 @@ function VendorCard({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-medium text-white">{model.name}</span>
                     {isDefault ? (
-                      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-100">
+                      <span className="rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-medium text-indigo-100">
                         默认
                       </span>
                     ) : null}
@@ -554,7 +555,7 @@ function VendorCard({
                   <span
                     className={cn(
                       "text-xs font-medium",
-                      isLocked ? "text-sky-100" : model.enabled ? "text-emerald-200" : "text-white/38",
+                      isLocked ? "text-sky-100" : model.enabled ? "text-indigo-200" : "text-white/38",
                     )}
                   >
                     {isLocked ? "已锁定" : model.enabled ? "已启用" : "已停用"}
@@ -571,8 +572,8 @@ function VendorCard({
                     }
                     title={isLocked ? "该模型仍被默认链路或流程映射引用，暂时不能停用。" : undefined}
                     className={cn(
-                      "relative h-7 w-12 shrink-0 rounded-full border border-white/10 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1014] disabled:cursor-not-allowed disabled:opacity-70",
-                      model.enabled ? "bg-emerald-500" : "bg-white/12",
+                      "relative h-7 w-12 shrink-0 rounded-full border border-white/10 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1014] disabled:cursor-not-allowed disabled:opacity-70",
+                      model.enabled ? "bg-indigo-500" : "bg-white/12",
                     )}
                   >
                     <span
@@ -657,6 +658,16 @@ export default function ApiCenter() {
   };
 
   useEffect(() => {
+    if (actorId === "guest") {
+      const rememberedActorId =
+        getKnownActors().find((actor) => actor.id && actor.id !== "guest")?.id ?? null;
+      const nextActorId = rememberedActorId || API_CENTER_FALLBACK_ACTOR_ID;
+      if (nextActorId !== actorId) {
+        showToast("已自动切换到可配置 API 的账号。");
+        setCurrentActorId(nextActorId);
+        return;
+      }
+    }
     void loadData();
   }, [actorId]);
 
@@ -880,7 +891,7 @@ export default function ApiCenter() {
               <button
                 type="button"
                 onClick={() => void loadData()}
-                className="inline-flex min-h-[42px] items-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-medium text-slate-950 transition-colors hover:bg-emerald-400"
+                className="inline-flex min-h-[42px] items-center gap-2 rounded-xl bg-indigo-500 px-4 text-sm font-medium text-slate-950 transition-colors hover:bg-indigo-400"
               >
                 <RefreshCw className="h-4 w-4" />
                 重新加载
@@ -1015,8 +1026,8 @@ export default function ApiCenter() {
 
       {toast ? (
         <div className="pointer-events-none fixed bottom-5 right-5 z-50">
-          <div className="flex items-center gap-2 rounded-2xl border border-emerald-400/20 bg-[#10151a] px-4 py-3 text-sm text-white shadow-[0_24px_70px_rgba(0,0,0,0.45)]">
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+          <div className="flex items-center gap-2 rounded-2xl border border-indigo-400/20 bg-[#10151a] px-4 py-3 text-sm text-white shadow-[0_24px_70px_rgba(0,0,0,0.45)]">
+            <CheckCircle2 className="h-4 w-4 text-indigo-400" />
             {toast}
           </div>
         </div>

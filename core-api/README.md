@@ -1,84 +1,98 @@
 # core-api
 
-Zero-dependency demo backend for the project. It runs on Node.js built-in HTTP modules, keeps the current API surface available for local development and UI integration, and persists the demo state in SQLite.
+Backend for XiaoLou AI 创作平台. Runs on Node.js built-in HTTP modules, persists state in SQLite.
 
 ## What it provides
 
-- REST-style demo endpoints for projects, scripts, assets, storyboards, videos, dubbings, tasks, wallet, enterprise applications, and toolbox operations.
-- Server-sent events at `/api/tasks/stream` for task progress updates.
-- SQLite-backed seed data so the API boots with a realistic project already loaded and survives server restarts.
+- REST endpoints for projects, scripts, assets, storyboards, videos, dubbings, tasks, wallet, enterprise, toolbox, and canvas operations.
+- Server-sent events at `/api/tasks/stream` for task progress.
+- SQLite-backed seed data — boots with a realistic demo project and survives restarts.
 
-## Run
+## Quick start
 
-From the repo root:
-
-```powershell
-cd D:\xuan\小楼WEB\core-api
+```bash
+cd core-api
+npm install
+cp .env.example .env.local   # then fill in your API keys
 npm run dev
 ```
 
-For live Qwen / Wan / CosyVoice calls, create `core-api/.env.local` first:
+Default port: **4100**
 
-```powershell
-Copy-Item .env.example .env.local
-```
+## Environment variables
 
-Then set:
+Copy `.env.example` → `.env.local` and set your keys:
 
 ```text
-DASHSCOPE_API_KEY=your_real_key
+YUNWU_API_KEY=your_real_key          # required for image / video generation
+YUNWU_BASE_URL=https://yunwu.ai      # default
 ```
 
-The backend auto-loads local env files from:
-
-- `core-api/.env.local`
-- `core-api/.env`
-- repo-root `.env.local` / `.env`
-- `XIAOLOU-main/.env.local` / `.env`
-
-Or run the server directly:
-
-```powershell
-node src\server.js
-```
-
-The default port is `4100`. Override it with `PORT` if needed:
-
-```powershell
-$env:PORT = 4200
-npm start
-```
-
-The default SQLite file is:
+Optional overrides:
 
 ```text
-D:\xuan\小楼WEB\core-api\data\demo.sqlite
+PORT=4100
+HOST=::                              # :: = all interfaces (default); 127.0.0.1 = local only
+CORE_API_PUBLIC_BASE_URL=https://your-domain.com   # for single-origin tunnel mode
+CORE_API_DB_PATH=./data/demo.sqlite  # SQLite path, relative to core-api/
+CORE_API_UPLOAD_DIR=./uploads        # upload directory, relative to core-api/
 ```
 
-Override it with `CORE_API_DB_PATH` if needed:
+The backend auto-loads env files from these locations (first match wins per key):
 
-```powershell
-$env:CORE_API_DB_PATH = 'D:\xuan\小楼WEB\core-api\data\custom-demo.sqlite'
-node src\server.js
+1. `core-api/.env.local`
+2. `core-api/.env`
+3. repo-root `.env.local` / `.env`
+4. `XIAOLOU-main/.env.local` / `.env`
+
+## Run without npm script
+
+```bash
+node src/server.js
 ```
 
-## Verify
+Override port inline:
 
-Run the built-in smoke check:
+```bash
+PORT=4200 node src/server.js
+```
 
-```powershell
+## Single-origin tunnel mode
+
+Expose via one public domain for both frontend and API:
+
+- `/` → frontend port 3000
+- `/api` and `/uploads` → core-api port 4100
+
+Set this in `core-api/.env.local`:
+
+```text
+CORE_API_PUBLIC_BASE_URL=https://your-domain.com
+```
+
+Set `VITE_CORE_API_BASE_URL` to the same origin in `XIAOLOU-main/.env.local`.
+
+## API Keys reference
+
+| Key | Used for | Where to get |
+|-----|----------|--------------|
+| `YUNWU_API_KEY` | Image / video generation (Yunwu gateway) | https://yunwu.ai |
+| `VOLCENGINE_ARK_API_KEY` | Seedance 2.0 video (Volcengine Ark, optional fallback) | https://console.volcengine.com/ark |
+| `PIXVERSE_API_KEY` | PixVerse video (optional) | https://app.pixverse.ai |
+
+## Smoke test
+
+```bash
 npm run verify
 ```
 
-That script starts the demo server on a random local port and checks:
-
+Starts on a random port, checks:
 - `/healthz`
 - `/api/projects`
-- `/api/projects/:projectId/overview`
-- `/api/projects/:projectId/tasks`
+- `/api/projects/:id/overview`
 - `/api/toolbox/capabilities`
 
-It also creates a project, closes the server, reopens the SQLite file, and confirms the project persisted.
+Also creates a project, restarts, and confirms SQLite persistence.
 
 ## Handy requests
 
@@ -91,10 +105,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:4100/api/demo/reset
 
 ## Notes
 
-- The backend uses Node's built-in `node:sqlite` module. In Node 24 it still prints an experimental warning, but it works correctly for the local demo flow.
-- `POST /api/demo/reset` restores the seeded demo dataset in the SQLite file.
-- New routes should stay dependency-free and preserve the existing response envelope shape:
-  - `success: true|false`
-  - `data` for successful responses
-  - `error` for failures
-  - `meta` for request metadata
+- Uses Node built-in `node:sqlite` (Node ≥ 22.5). Prints an experimental warning on Node 24 — safe to ignore.
+- `POST /api/demo/reset` restores the seeded demo dataset.
+- Canvas API: `/api/canvas/*` and `/api/canvas-library/*` (legacy aliases `/twitcanva-api/*` preserved).
+- Response envelope: `{ success, data?, error?, meta? }`.

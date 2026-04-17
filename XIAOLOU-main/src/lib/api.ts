@@ -1,7 +1,27 @@
-import { getCurrentActorId } from "./actor-session";
+import { getCurrentActorId, getAuthToken } from "./actor-session";
+import { isLocalLoopbackAccess, SUPER_ADMIN_DEMO_ACTOR_ID } from "./local-loopback";
+import type {
+  MediaCapabilitiesResponse,
+  VideoInputMode,
+  VideoGenerationMode,
+} from "./create-capabilities";
+
+export type {
+  MediaKind,
+  MediaModelProvider,
+  MediaModelStatus,
+  ImageInputMode,
+  VideoInputMode,
+  VideoGenerationMode,
+  MediaInputMode,
+  MediaCapabilitySet,
+  MediaModelCapability,
+  MediaCapabilitiesResponse,
+} from "./create-capabilities";
+export { normalizeVideoMode, VIDEO_MODE_ALIASES } from "./create-capabilities";
 
 export const API_BASE_URL =
-  import.meta.env.VITE_CORE_API_BASE_URL ?? "http://127.0.0.1:4100";
+  import.meta.env.VITE_CORE_API_BASE_URL ?? "";
 
 export type ProjectStep =
   | "global"
@@ -14,7 +34,7 @@ export type ProjectStep =
 
 export type PlatformRole = "guest" | "customer" | "ops_admin" | "super_admin";
 export type EnterpriseRole = "enterprise_member" | "enterprise_admin";
-export type WalletOwnerType = "user" | "organization";
+export type WalletOwnerType = "user" | "organization" | "platform";
 export type ProjectBillingPolicy =
   | "personal_only"
   | "organization_only"
@@ -24,6 +44,8 @@ export type User = {
   id: string;
   displayName: string;
   email: string | null;
+  phone?: string | null;
+  avatar?: string | null;
   platformRole: PlatformRole;
   status: string;
   defaultOrganizationId: string | null;
@@ -35,6 +57,17 @@ export type OrganizationSummary = {
   role: EnterpriseRole;
   membershipRole: "member" | "admin";
   status: string;
+  assetLibraryStatus?: string;
+};
+
+export type MemberUsageSummary = {
+  todayUsedCredits: number;
+  monthUsedCredits: number;
+  totalUsedCredits: number;
+  refundedCredits: number;
+  pendingFrozenCredits: number;
+  recentTaskCount: number;
+  lastActivityAt: string | null;
 };
 
 export type PermissionContext = {
@@ -277,6 +310,8 @@ export type Wallet = {
   currency: string;
   status?: string;
   allowNegative?: boolean;
+  /** 超级管理员等：展示为无限额度，不参与扣费校验 */
+  unlimitedCredits?: boolean;
   updatedAt: string;
 };
 
@@ -334,12 +369,79 @@ export type OrganizationMember = {
   userId: string;
   displayName: string;
   email: string | null;
+  phone?: string | null;
   platformRole: PlatformRole;
   role: EnterpriseRole;
   membershipRole: "member" | "admin";
+  department?: string;
+  canUseOrganizationWallet?: boolean;
   status: string;
   createdAt: string;
   updatedAt: string;
+  usageSummary?: MemberUsageSummary | null;
+};
+
+export type RegisterPersonalInput = {
+  displayName: string;
+  email: string;
+  phone?: string;
+  password: string;
+};
+
+export type RegisterEnterpriseAdminInput = {
+  companyName: string;
+  adminName: string;
+  email: string;
+  phone?: string;
+  password: string;
+  licenseNo?: string;
+  industry?: string;
+  teamSize?: string;
+};
+
+export type CreateOrganizationMemberInput = {
+  displayName: string;
+  email: string;
+  phone?: string;
+  department?: string;
+  password?: string;
+  membershipRole?: "member" | "admin";
+  canUseOrganizationWallet?: boolean;
+};
+
+export type RegistrationResult = {
+  actorId: string;
+  token?: string;
+  permissionContext: PermissionContext;
+  wallets?: Wallet[];
+  wallet?: Wallet | null;
+  organization?: {
+    id: string;
+    name: string;
+    status: string;
+    assetLibraryStatus?: string | null;
+  } | null;
+  member?: OrganizationMember;
+  onboarding: {
+    mode: string;
+    title: string;
+    detail: string;
+    tempPassword: string | null;
+    generatedPassword?: boolean;
+  };
+};
+
+export type LoginInput = {
+  email: string;
+  password: string;
+};
+
+export type LoginResult = {
+  actorId: string;
+  token: string;
+  displayName: string;
+  email: string;
+  permissionContext: PermissionContext;
 };
 
 export type AdminRechargeOrder = WalletRechargeOrder & {
@@ -395,9 +497,22 @@ export type CreateImageResult = {
   aspectRatio: string;
   resolution: string;
   referenceImageUrl?: string | null;
+  referenceImageUrls?: string[];
   imageUrl: string;
   createdAt: string;
 };
+
+export type VideoMultiReferenceKey =
+  | "scene"
+  | "character"
+  | "prop"
+  | "pose"
+  | "expression"
+  | "effect"
+  | "sketch";
+
+export type VideoMultiReferenceValue = string | string[];
+export type VideoMultiReferenceImages = Partial<Record<VideoMultiReferenceKey, VideoMultiReferenceValue>>;
 
 export type CreateVideoResult = {
   id: string;
@@ -407,7 +522,17 @@ export type CreateVideoResult = {
   duration: string;
   aspectRatio: string;
   resolution: string;
+  outputDuration?: string | null;
+  outputAspectRatio?: string | null;
+  requestedResolution?: string | null;
+  outputResolution?: string | null;
   referenceImageUrl?: string | null;
+  resolvedReferenceImageUrl?: string | null;
+  firstFrameUrl?: string | null;
+  lastFrameUrl?: string | null;
+  videoMode?: string | null;
+  inputMode?: VideoInputMode | null;
+  multiReferenceImages?: VideoMultiReferenceImages | null;
   thumbnailUrl: string;
   videoUrl: string;
   createdAt: string;
@@ -501,6 +626,18 @@ type ApiEnvelope<T> = {
   };
 };
 
+export class ApiRequestError extends Error {
+  code: string;
+  status: number;
+
+  constructor(message: string, options?: { code?: string; status?: number }) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.code = options?.code || "API_REQUEST_FAILED";
+    this.status = options?.status || 500;
+  }
+}
+
 type TaskAccepted = {
   taskId: string;
   status: string;
@@ -512,6 +649,10 @@ function isRouteNotFoundError(error: unknown) {
 }
 
 function buildFallbackPermissionContext(actorId: string): PermissionContext {
+  if (actorId === SUPER_ADMIN_DEMO_ACTOR_ID && !isLocalLoopbackAccess()) {
+    return buildFallbackPermissionContext("guest");
+  }
+
   const organization: OrganizationSummary = {
     id: "org_demo_001",
     name: "小楼影业 Demo",
@@ -620,7 +761,7 @@ function buildFallbackPermissionContext(actorId: string): PermissionContext {
     };
   }
 
-  if (actorId === "root_demo_001") {
+  if (actorId === SUPER_ADMIN_DEMO_ACTOR_ID) {
     return {
       actor: {
         id: actorId,
@@ -692,19 +833,56 @@ function normalizeWalletRecord(wallet: Wallet, actorId: string): Wallet {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const actorId = getCurrentActorId();
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Actor-Id": actorId,
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      "X-Actor-Id": actorId,
-      ...(init?.headers ?? {}),
-    },
+    headers,
     ...init,
   });
 
-  const payload = (await response.json()) as ApiEnvelope<T>;
+  const responseText = await response.text();
+  let payload: ApiEnvelope<T> | null = null;
+
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText) as ApiEnvelope<T>;
+    } catch {
+      throw new ApiRequestError(
+        response.ok
+          ? "接口返回格式无效"
+          : `接口请求失败（${response.status || "NETWORK"}）`,
+        {
+          code: "INVALID_API_RESPONSE",
+          status: response.status || 500,
+        },
+      );
+    }
+  }
+
+  if (!payload) {
+    throw new ApiRequestError(
+      response.ok
+        ? "接口返回为空"
+        : `接口请求失败（${response.status || "NETWORK"}）`,
+      {
+        code: "EMPTY_API_RESPONSE",
+        status: response.status || 500,
+      },
+    );
+  }
 
   if (!response.ok || !payload.success) {
-    throw new Error(payload.error?.message ?? "接口请求失败");
+    throw new ApiRequestError(payload.error?.message ?? "接口请求失败", {
+      code: payload.error?.code,
+      status: response.status,
+    });
   }
 
   return payload.data;
@@ -732,6 +910,13 @@ export async function getMe() {
   }
 }
 
+export async function updateMe(data: { displayName?: string; avatar?: string | null }) {
+  return await request<PermissionContext>("/api/me", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function listProjects() {
   return request<{ items: Project[]; total: number }>("/api/projects");
 }
@@ -741,6 +926,8 @@ export async function listCreateImages() {
 }
 
 export async function generateCreateImages(input: {
+  projectId?: string;
+  assetSyncMode?: "auto" | "manual";
   prompt: string;
   negativePrompt?: string;
   model?: string;
@@ -749,6 +936,7 @@ export async function generateCreateImages(input: {
   resolution?: string;
   count?: number;
   referenceImageUrl?: string;
+  referenceImageUrls?: string[];
 }) {
   return request<TaskAccepted>("/api/create/images/generate", {
     method: "POST",
@@ -760,7 +948,20 @@ export async function listCreateVideos() {
   return request<{ items: CreateVideoResult[] }>("/api/create/videos");
 }
 
+export async function getCreateImageCapabilities(mode?: string | null) {
+  const params = mode ? `?mode=${encodeURIComponent(mode)}` : "";
+  return request<MediaCapabilitiesResponse>(`/api/create/images/capabilities${params}`);
+}
+
+export async function getCreateVideoCapabilities(
+  mode: string,
+) {
+  return request<MediaCapabilitiesResponse>(`/api/create/videos/capabilities?mode=${encodeURIComponent(mode)}`);
+}
+
 export async function generateCreateVideos(input: {
+  projectId?: string;
+  assetSyncMode?: "auto" | "manual";
   prompt: string;
   model?: string;
   duration?: string;
@@ -769,10 +970,28 @@ export async function generateCreateVideos(input: {
   motionStrength?: number;
   keepConsistency?: boolean;
   referenceImageUrl?: string;
+  firstFrameUrl?: string;
+  lastFrameUrl?: string;
+  videoMode?: VideoGenerationMode;
+  multiReferenceImages?: VideoMultiReferenceImages;
+  generateAudio?: boolean;
+  networkSearch?: boolean;
 }) {
   return request<TaskAccepted>("/api/create/videos/generate", {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+export async function deleteCreateImage(imageId: string) {
+  return request<CreateImageResult>(`/api/create/images/${imageId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function deleteCreateVideo(videoId: string) {
+  return request<CreateVideoResult>(`/api/create/videos/${videoId}`, {
+    method: "DELETE",
   });
 }
 
@@ -794,6 +1013,10 @@ export async function updateProject(projectId: string, input: Partial<Project>) 
     method: "PUT",
     body: JSON.stringify(input),
   });
+}
+
+export async function getProject(projectId: string) {
+  return request<Project>(`/api/projects/${projectId}`);
 }
 
 export async function getProjectOverview(projectId: string) {
@@ -1012,6 +1235,22 @@ export async function getTask(taskId: string) {
   return request<Task>(`/api/tasks/${taskId}`);
 }
 
+export async function deleteTask(taskId: string) {
+  return request<{ deleted: boolean; taskId: string }>(`/api/tasks/${taskId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function clearTasks(projectId?: string, type?: string) {
+  const params = new URLSearchParams();
+  if (projectId) params.set("projectId", projectId);
+  if (type) params.set("type", type);
+  const search = params.toString() ? `?${params.toString()}` : "";
+  return request<{ removedCount: number }>(`/api/tasks${search}`, {
+    method: "DELETE",
+  });
+}
+
 export async function getWallet() {
   return request<Wallet>("/api/wallet");
 }
@@ -1023,12 +1262,14 @@ export async function listWallets() {
     if (!isRouteNotFoundError(error)) throw error;
 
     const actorId = getCurrentActorId();
-    if (actorId === "guest" || actorId === "ops_demo_001" || actorId === "root_demo_001") {
+    const effectiveActorId =
+      actorId === SUPER_ADMIN_DEMO_ACTOR_ID && !isLocalLoopbackAccess() ? "guest" : actorId;
+    if (effectiveActorId === "guest" || effectiveActorId === "ops_demo_001" || effectiveActorId === SUPER_ADMIN_DEMO_ACTOR_ID) {
       return { items: [] };
     }
 
     const wallet = await getWallet();
-    return { items: [normalizeWalletRecord(wallet, actorId)] };
+    return { items: [normalizeWalletRecord(wallet, effectiveActorId)] };
   }
 }
 
@@ -1112,22 +1353,30 @@ export async function updateApiVendorModel(
 
 export async function uploadFile(file: File, kind = "file") {
   const actorId = getCurrentActorId();
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": file.type || "application/octet-stream",
+    "X-Upload-Filename": encodeURIComponent(file.name),
+    "X-Actor-Id": actorId,
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   const response = await fetch(
     `${API_BASE_URL}/api/uploads?kind=${encodeURIComponent(kind)}`,
     {
       method: "POST",
-      headers: {
-        "Content-Type": file.type || "application/octet-stream",
-        "X-Upload-Filename": encodeURIComponent(file.name),
-        "X-Actor-Id": actorId,
-      },
+      headers,
       body: file,
     },
   );
 
   const payload = (await response.json()) as ApiEnvelope<UploadedFile>;
   if (!response.ok || !payload.success) {
-    throw new Error(payload.error?.message ?? "File upload failed");
+    throw new ApiRequestError(payload.error?.message ?? "File upload failed", {
+      code: payload.error?.code,
+      status: response.status,
+    });
   }
 
   return payload.data;
@@ -1145,8 +1394,86 @@ export async function listOrganizationMembers(organizationId: string) {
   return request<{ items: OrganizationMember[] }>(`/api/organizations/${organizationId}/members`);
 }
 
+export async function createOrganizationMember(
+  organizationId: string,
+  input: CreateOrganizationMemberInput,
+) {
+  return request<RegistrationResult>(`/api/organizations/${organizationId}/members`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function getOrganizationWallet(organizationId: string) {
   return request<Wallet>(`/api/organizations/${organizationId}/wallet`);
+}
+
+export async function loginWithEmail(input: LoginInput) {
+  return request<LoginResult>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function registerPersonalUser(input: RegisterPersonalInput) {
+  return request<RegistrationResult>("/api/auth/register/personal", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function registerEnterpriseAdmin(input: RegisterEnterpriseAdminInput) {
+  return request<RegistrationResult>("/api/auth/register/enterprise-admin", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export type CanvasProject = {
+  id: string;
+  actorId: string;
+  title: string;
+  thumbnailUrl: string | null;
+  canvasData: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasProjectSummary = Omit<CanvasProject, "canvasData">;
+
+export async function listCanvasProjects() {
+  return request<{ items: CanvasProjectSummary[] }>("/api/canvas-projects");
+}
+
+export async function getCanvasProject(projectId: string) {
+  return request<CanvasProject>(`/api/canvas-projects/${projectId}`);
+}
+
+export async function saveCanvasProject(input: {
+  id?: string;
+  title?: string;
+  thumbnailUrl?: string | null;
+  canvasData?: unknown;
+  expectedUpdatedAt?: string | null;
+  baseTitle?: string | null;
+  baseCanvasData?: unknown;
+}) {
+  if (input.id) {
+    return request<CanvasProject>(`/api/canvas-projects/${input.id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+  return request<CanvasProject>("/api/canvas-projects", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteCanvasProject(projectId: string) {
+  return request<{ deleted: boolean; projectId: string }>(`/api/canvas-projects/${projectId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function runToolboxCapability(

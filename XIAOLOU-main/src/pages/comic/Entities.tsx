@@ -15,6 +15,10 @@ import {
   X,
 } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import {
+  ReferenceAssetPicker,
+  type ReferenceAssetSelection,
+} from "../../components/create/ReferenceAssetPicker";
 import { cn } from "../../lib/utils";
 import {
   createAsset,
@@ -157,6 +161,17 @@ function sortByNewest<T extends { updatedAt?: string; createdAt?: string }>(item
   });
 }
 
+/** 资产列表按创建时间稳定排序，避免生图、保存等更新 updatedAt 后顺序跳动 */
+function sortAssetsStable(items: Asset[]) {
+  return [...items].sort((a, b) => {
+    const ca = a.createdAt || "";
+    const cb = b.createdAt || "";
+    const t = ca.localeCompare(cb);
+    if (t !== 0) return t;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+}
+
 function isTerminalTask(task?: Task | null) {
   return task?.status === "succeeded" || task?.status === "failed";
 }
@@ -194,7 +209,7 @@ export default function Entities() {
         listAssets(currentProjectId),
         listTasks(currentProjectId),
       ]);
-      setAssets(sortByNewest(assetResponse.items));
+      setAssets(sortAssetsStable(assetResponse.items));
       setTasks(sortByNewest(taskResponse.items));
     } finally {
       setLoading(false);
@@ -274,6 +289,12 @@ export default function Entities() {
     () => tasks.find((task) => task.type === "asset_extract") ?? null,
     [tasks],
   );
+
+  /** 自动提取已成功完成后，允许从项目资产库挑选参考图（与上传并存） */
+  const canUseAssetLibraryForReference = useMemo(() => {
+    if (assets.some((a) => a.scope === "extracted")) return true;
+    return tasks.some((t) => t.type === "asset_extract" && t.status === "succeeded");
+  }, [assets, tasks]);
 
   const latestImageTaskByAsset = useMemo(() => {
     const taskMap = new Map<string, Task>();
@@ -355,7 +376,7 @@ export default function Entities() {
 
       const refreshedAssets = await listAssets(currentProjectId);
       const extractedCount = refreshedAssets.items.filter((asset) => asset.scope === "extracted").length;
-      setAssets(sortByNewest(refreshedAssets.items));
+      setAssets(sortAssetsStable(refreshedAssets.items));
 
       if (!extractedCount) {
         window.alert("提取已完成，但没有识别到明确的角色、场景或道具。请检查剧本文本是否足够具体。");
@@ -455,6 +476,8 @@ export default function Entities() {
         ...current,
         referenceImageUrls: [uploaded.url, ...current.referenceImageUrls].slice(0, 6),
       }));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Reference upload failed. Please try again.");
     } finally {
       setPendingAction(null);
       event.target.value = "";
@@ -483,6 +506,8 @@ export default function Entities() {
           imageModel: current.imageModel === "Wan 2.6 T2I" ? "WanX 2.1 Image Edit" : current.imageModel,
         };
       });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Reference upload failed. Please try again.");
     } finally {
       setPendingAction(null);
       event.target.value = "";
@@ -498,6 +523,48 @@ export default function Entities() {
         imageModel: normalizeImageModel(nextUrls, current.imageModel),
       };
     });
+  };
+
+  const handleReferenceLibrarySelect = (sel: ReferenceAssetSelection) => {
+    setDraft((current) => {
+      const nextUrls = [sel.url, ...current.referenceImageUrls].slice(0, 6);
+      return {
+        ...current,
+        referenceImageUrls: nextUrls,
+        imageModel:
+          nextUrls.length && current.imageModel === "Wan 2.6 T2I"
+            ? "WanX 2.1 Image Edit"
+            : current.imageModel,
+      };
+    });
+  };
+
+  const handleCreateReferenceLibrarySelect = (sel: ReferenceAssetSelection) => {
+    setCreateDraftState((current) => ({
+      ...current,
+      referenceImageUrls: [sel.url, ...current.referenceImageUrls].slice(0, 6),
+    }));
+  };
+
+  /** 用资产库已有预览图直接作为本项设定图，不经过「生成图片」任务 */
+  const handleReplacePreviewFromLibrary = async (sel: ReferenceAssetSelection) => {
+    if (!selectedAsset) return;
+
+    setPendingAction("replace-preview");
+    try {
+      await updateAsset(currentProjectId, selectedAsset.id, {
+        previewUrl: sel.url,
+        mediaUrl: sel.url,
+        mediaKind: "image",
+        imageStatus: "ready",
+      });
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      window.alert("设定图替换失败，请检查网络或稍后重试。");
+    } finally {
+      setPendingAction(null);
+    }
   };
 
   return (
@@ -812,6 +879,27 @@ export default function Entities() {
                     </p>
                   </div>
 
+                  {canUseAssetLibraryForReference && selectedAsset ? (
+                    <div className="relative rounded-3xl border border-border bg-card/40 p-4">
+                      {pendingAction === "replace-preview" ? (
+                        <div className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full bg-background/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm">
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" />
+                          替换中…
+                        </div>
+                      ) : null}
+                      <div className="rounded-2xl border border-border/80 bg-background/40 p-3">
+                        <ReferenceAssetPicker
+                          projectId={currentProjectId}
+                          selectedAssetId={null}
+                          excludeAssetIds={[selectedAsset.id]}
+                          heading="设定图替换（免 AI 生成）"
+                          hint="点击缩略图即用该资产预览图替换当前项设定图，不触发「生成图片」。下方「参考图」仍可照常使用。"
+                          onSelect={(sel) => void handleReplacePreviewFromLibrary(sel)}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="rounded-3xl border border-border bg-card/40 p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -820,21 +908,40 @@ export default function Entities() {
                           上传后会优先走 `WanX 2.1 Image Edit`，用于保持角色或场景的一致性。
                         </div>
                       </div>
-                      <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent">
-                        {pendingAction === "upload-reference" ? (
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Upload className="h-4 w-4" />
-                        )}
-                        上传参考图
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(event) => void handleReferenceUpload(event)}
-                        />
-                      </label>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent">
+                          {pendingAction === "upload-reference" ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="h-4 w-4" />
+                          )}
+                          上传参考图
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(event) => void handleReferenceUpload(event)}
+                          />
+                        </label>
+                      </div>
                     </div>
+
+                    {canUseAssetLibraryForReference ? (
+                      <div className="mt-4 rounded-2xl border border-border/80 bg-background/40 p-3">
+                        <ReferenceAssetPicker
+                          projectId={currentProjectId}
+                          selectedAssetId={null}
+                          excludeAssetIds={selectedAsset ? [selectedAsset.id] : []}
+                          heading="资产库 · 参考图"
+                          hint="点击加入下方参考图列表，用于「生成图片」时的编辑类模型；与上方「设定图替换」不同。"
+                          onSelect={handleReferenceLibrarySelect}
+                        />
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-[11px] leading-5 text-muted-foreground">
+                        完成一次「自动提取」后，可在此从资产库选择已有预览图作为参考（与上传二选一或叠加使用，最多 6 张）。
+                      </p>
+                    )}
 
                     {draft.referenceImageUrls.length ? (
                       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -857,7 +964,9 @@ export default function Entities() {
                       </div>
                     ) : (
                       <div className="mt-4 rounded-2xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
-                        还没有参考图片。直接生成会走文生图；上传参考图后可以更稳地做角色、场景和道具的一致性迭代。
+                        {canUseAssetLibraryForReference
+                          ? "还没有参考图片。可从上方资产库点选，或本地上传；也可直接文生图。"
+                          : "还没有参考图片。提取完成后可从资产库选择或本地上传；直接生成会走文生图。"}
                       </div>
                     )}
                   </div>
@@ -1063,7 +1172,7 @@ export default function Entities() {
               </div>
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-sm font-medium">参考图</label>
                   <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-accent">
                     {pendingAction === "create-upload-reference" ? (
@@ -1080,6 +1189,20 @@ export default function Entities() {
                     />
                   </label>
                 </div>
+
+                {canUseAssetLibraryForReference ? (
+                  <div className="rounded-2xl border border-border/80 bg-card/30 p-3">
+                    <ReferenceAssetPicker
+                      projectId={currentProjectId}
+                      selectedAssetId={null}
+                      onSelect={handleCreateReferenceLibrarySelect}
+                    />
+                  </div>
+                ) : (
+                  <p className="text-[11px] leading-5 text-muted-foreground">
+                    完成「自动提取」后，新建资产时也可从资产库点选参考图。
+                  </p>
+                )}
 
                 {createDraftState.referenceImageUrls.length ? (
                   <div className="grid grid-cols-3 gap-3">

@@ -1,4 +1,5 @@
 import { Image as ImageIcon, Video } from "lucide-react";
+import { API_BASE_URL } from "../../lib/api";
 import { cn } from "../../lib/utils";
 
 type GeneratedMediaPlaceholderProps = {
@@ -10,11 +11,37 @@ type GeneratedMediaPlaceholderProps = {
 };
 
 export function isGeneratedMediaUrl(url?: string | null) {
-  return typeof url === "string" && url.trim().length > 0 && !url.includes("mock.assets.local");
+  return Boolean(getGeneratedMediaUrl(url));
 }
 
 export function getGeneratedMediaUrl(url?: string | null) {
-  return isGeneratedMediaUrl(url) ? url : null;
+  const normalized = String(url || "").trim();
+  if (!normalized || normalized.includes("mock.assets.local")) {
+    return null;
+  }
+
+  if (/^(?:data:|blob:)/i.test(normalized)) {
+    return normalized;
+  }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    try {
+      const parsed = new URL(normalized);
+      if (parsed.pathname.startsWith("/uploads/")) {
+        return parsed.pathname;
+      }
+    } catch {
+      // fall through
+    }
+    return normalized;
+  }
+
+  const apiBaseUrl = API_BASE_URL.replace(/\/+$/, "");
+  if (normalized.startsWith("/")) {
+    return `${apiBaseUrl}${normalized}`;
+  }
+
+  return `${apiBaseUrl}/${normalized.replace(/^\/+/, "")}`;
 }
 
 export function GeneratedMediaPlaceholder({

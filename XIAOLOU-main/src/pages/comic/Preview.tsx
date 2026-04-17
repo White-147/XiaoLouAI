@@ -1038,7 +1038,7 @@ export default function Preview() {
                                   "absolute top-2 h-20 min-w-[88px] overflow-hidden rounded-xl border text-left transition-transform hover:-translate-y-0.5",
                                   clip.type === "video"
                                     ? "border-sky-400/40 bg-sky-500/15"
-                                    : "border-emerald-400/40 bg-emerald-500/15",
+                                    : "border-indigo-400/40 bg-indigo-500/15",
                                   clip.enabled === false && "opacity-40",
                                   selectedClip?.id === clip.id && "ring-2 ring-primary",
                                 )}

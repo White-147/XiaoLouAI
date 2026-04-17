@@ -290,6 +290,8 @@ export default function VideoEditor({ shotId, onBack }: VideoEditorProps) {
     try {
       const uploaded = await uploadFile(file, "video-reference");
       setReferenceImageUrls((current) => [uploaded.url, ...current].slice(0, 6));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Reference upload failed. Please try again.");
     } finally {
       setUploadingReference(false);
       event.target.value = "";
@@ -304,6 +306,8 @@ export default function VideoEditor({ shotId, onBack }: VideoEditorProps) {
     try {
       const uploaded = await uploadFile(file, "video-start-frame");
       setStartFrameUrl(uploaded.url);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Start frame upload failed. Please try again.");
     } finally {
       setUploadingStartFrame(false);
       event.target.value = "";
@@ -318,6 +322,8 @@ export default function VideoEditor({ shotId, onBack }: VideoEditorProps) {
     try {
       const uploaded = await uploadFile(file, "video-end-frame");
       setEndFrameUrl(uploaded.url);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "End frame upload failed. Please try again.");
     } finally {
       setUploadingEndFrame(false);
       event.target.value = "";

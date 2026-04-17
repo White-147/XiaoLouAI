@@ -6,6 +6,9 @@ const {
   sendEvent
 } = require("./http");
 const { createUploadFromRequest, getPublicUploadUrl, sendUpload } = require("./uploads");
+const { decodeAuthToken } = require("./store");
+const { buildCanvasLibraryRoutes } = require("./canvas-library");
+const { isLocalLoopbackClientHint, SUPER_ADMIN_DEMO_ACTOR_ID } = require("./local-loopback-request");
 
 function route(method, path, handler) {
   return { method, path, handler, statusCode: 200 };
@@ -26,40 +29,75 @@ function failure(statusCode, code, message) {
 }
 
 function getActorId(req, url) {
-  const headerValue = req.headers["x-actor-id"];
-  if (typeof headerValue === "string" && headerValue.trim()) {
-    return headerValue.trim();
+  let resolved;
+
+  const authHeader = req.headers["authorization"];
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+    const userId = decodeAuthToken(authHeader.slice(7));
+    if (userId) resolved = userId;
   }
 
-  if (Array.isArray(headerValue) && headerValue[0]?.trim()) {
-    return headerValue[0].trim();
+  if (!resolved) {
+    const headerValue = req.headers["x-actor-id"];
+    if (typeof headerValue === "string" && headerValue.trim()) {
+      resolved = headerValue.trim();
+    } else if (Array.isArray(headerValue) && headerValue[0]?.trim()) {
+      resolved = headerValue[0].trim();
+    }
   }
 
-  const queryActorId = url?.searchParams?.get("actorId");
-  if (queryActorId && queryActorId.trim()) {
-    return queryActorId.trim();
+  if (!resolved) {
+    const queryActorId = url?.searchParams?.get("actorId");
+    if (queryActorId && queryActorId.trim()) {
+      resolved = queryActorId.trim();
+    }
   }
 
-  return undefined;
+  if (resolved === SUPER_ADMIN_DEMO_ACTOR_ID && !isLocalLoopbackClientHint(req)) {
+    return "guest";
+  }
+
+  return resolved;
 }
 
 function buildRoutes(store) {
   return [
     ...buildSystemRoutes(store),
+    ...buildAuthRoutes(store),
     ...buildWalletRoutes(store),
     ...buildApiCenterRoutes(store),
+    ...buildChatRoutes(),
     ...buildCreateRoutes(store),
     ...buildProjectRoutes(store),
     ...buildTaskRoutes(store),
     ...buildToolboxRoutes(store),
-    ...buildAdminRoutes(store)
+    ...buildAdminRoutes(store),
+    ...buildCanvasProjectRoutes(store),
+    ...buildCanvasLibraryRoutes(store),
+  ];
+}
+
+function buildAuthRoutes(store) {
+  return [
+    routeWithStatus("POST", "/api/auth/login", 200, async ({ req }) => {
+      const body = await readJsonBody(req);
+      return ok(store.loginWithEmail(body));
+    }),
+    routeWithStatus("POST", "/api/auth/register/personal", 201, async ({ req }) => {
+      const body = await readJsonBody(req);
+      return ok(store.registerPersonalUser(body));
+    }),
+    routeWithStatus("POST", "/api/auth/register/enterprise-admin", 201, async ({ req }) => {
+      const body = await readJsonBody(req);
+      return ok(store.registerEnterpriseAdmin(body));
+    }),
   ];
 }
 
 function buildSystemRoutes(store) {
   return [
-    route("GET", "/uploads/:fileName", ({ params, res }) => {
-      const served = sendUpload(res, params.fileName);
+    route("GET", "/uploads/:fileName", ({ params, res, req }) => {
+      const served = sendUpload(res, params.fileName, req);
       if (!served) return failure(404, "NOT_FOUND", "upload not found");
     }),
     routeWithStatus("POST", "/api/uploads", 201, async ({ req, url }) => {
@@ -106,6 +144,10 @@ function buildSystemRoutes(store) {
     route("GET", "/api/me", ({ req, url }) =>
       ok(store.getPermissionContext(getActorId(req, url)))
     ),
+    route("PUT", "/api/me", async ({ req, url }) => {
+      const body = await readJsonBody(req);
+      return ok(store.updateMe(getActorId(req, url), body));
+    }),
     route("GET", "/api/tasks/stream", ({ req, res, url }) => {
       const actorId = getActorId(req, url);
       res.writeHead(200, {
@@ -243,8 +285,11 @@ function buildApiCenterRoutes(store) {
 
 function buildCreateRoutes(store) {
   return [
-    route("GET", "/api/create/images", () =>
-      ok({ items: store.listCreateImages() })
+    route("GET", "/api/create/images", ({ req, url }) =>
+      ok({ items: store.listCreateImages(getActorId(req, url)) })
+    ),
+    route("GET", "/api/create/images/capabilities", ({ url }) =>
+      ok(store.getCreateImageCapabilities(url.searchParams.get("mode") || null))
     ),
     routeWithStatus("POST", "/api/create/images/generate", 202, async ({ req, url }) => {
       const body = await readJsonBody(req);
@@ -255,8 +300,11 @@ function buildCreateRoutes(store) {
         }),
       );
     }),
-    route("GET", "/api/create/videos", () =>
-      ok({ items: store.listCreateVideos() })
+    route("GET", "/api/create/videos", ({ req, url }) =>
+      ok({ items: store.listCreateVideos(getActorId(req, url)) })
+    ),
+    route("GET", "/api/create/videos/capabilities", ({ url }) =>
+      ok(store.getCreateVideoCapabilities(url.searchParams.get("mode") || null))
     ),
     routeWithStatus("POST", "/api/create/videos/generate", 202, async ({ req, url }) => {
       const body = await readJsonBody(req);
@@ -266,6 +314,16 @@ function buildCreateRoutes(store) {
           actorId: getActorId(req, url),
         }),
       );
+    }),
+    route("DELETE", "/api/create/images/:imageId", ({ params, req, url }) => {
+      const removed = store.deleteCreateImage(params.imageId, getActorId(req, url));
+      if (!removed) return failure(404, "NOT_FOUND", "image not found");
+      return ok(removed);
+    }),
+    route("DELETE", "/api/create/videos/:videoId", ({ params, req, url }) => {
+      const removed = store.deleteCreateVideo(params.videoId, getActorId(req, url));
+      if (!removed) return failure(404, "NOT_FOUND", "video not found");
+      return ok(removed);
     })
   ];
 }
@@ -378,7 +436,20 @@ function buildProjectRoutes(store) {
       if (!body.assetType || !body.name) {
         return failure(400, "BAD_REQUEST", "assetType and name are required");
       }
-      const asset = store.createAsset(params.projectId, body);
+      const persisted = await store.persistEphemeralAssetMedia(body);
+      const asset =
+        persisted.scope === "manual"
+          ? store.upsertProjectAsset(store.state, params.projectId, {
+              ...persisted,
+              scope: persisted.scope || "manual",
+            })
+          : store.createAsset(params.projectId, persisted);
+      if (asset && persisted.scope === "manual") {
+        store.touchProject(params.projectId, {
+          currentStep: "assets",
+          progressPercent: 36,
+        });
+      }
       if (!asset) return failure(404, "NOT_FOUND", "project not found");
       return ok(asset);
     }),
@@ -391,7 +462,8 @@ function buildProjectRoutes(store) {
     route("PUT", "/api/projects/:projectId/assets/:assetId", async ({ params, req, url }) => {
       store.assertProjectAccess(params.projectId, getActorId(req, url));
       const body = await readJsonBody(req);
-      const asset = store.updateAsset(params.projectId, params.assetId, body);
+      const persisted = await store.persistEphemeralAssetMedia(body);
+      const asset = store.updateAsset(params.projectId, params.assetId, persisted);
       if (!asset) return failure(404, "NOT_FOUND", "asset not found");
       return ok(asset);
     }),
@@ -562,11 +634,22 @@ function buildTaskRoutes(store) {
     route("GET", "/api/tasks", ({ req, url }) =>
       ok({ items: store.listTasks(url.searchParams.get("projectId"), getActorId(req, url)) })
     ),
+    routeWithStatus("DELETE", "/api/tasks", 200, ({ req, url }) => {
+      const projectId = url.searchParams.get("projectId");
+      const type = url.searchParams.get("type");
+      const result = store.clearTasks(projectId, getActorId(req, url), type || undefined);
+      return ok(result);
+    }),
     route("GET", "/api/tasks/:taskId", ({ params, req, url }) => {
       const task = store.getTask(params.taskId, getActorId(req, url));
       if (!task) return failure(404, "NOT_FOUND", "task not found");
       return ok(task);
-    })
+    }),
+    routeWithStatus("DELETE", "/api/tasks/:taskId", 200, ({ params, req, url }) => {
+      const task = store.deleteTask(params.taskId, getActorId(req, url));
+      if (!task) return failure(404, "NOT_FOUND", "task not found");
+      return ok({ deleted: true, taskId: params.taskId });
+    }),
   ];
 }
 
@@ -625,6 +708,10 @@ function buildAdminRoutes(store) {
     route("GET", "/api/organizations/:id/members", ({ params, req, url }) =>
       ok({ items: store.listOrganizationMembers(params.id, getActorId(req, url)) })
     ),
+    routeWithStatus("POST", "/api/organizations/:id/members", 201, async ({ params, req, url }) => {
+      const body = await readJsonBody(req);
+      return ok(store.createOrganizationMember(params.id, body, getActorId(req, url)));
+    }),
     route("GET", "/api/organizations/:id/wallet", ({ params, req, url }) =>
       ok(store.getOrganizationWallet(params.id, getActorId(req, url)))
     ),
@@ -638,6 +725,142 @@ function buildAdminRoutes(store) {
       }
       return ok(store.createEnterpriseApplication(body));
     })
+  ];
+}
+
+function buildChatRoutes() {
+  const ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3";
+  const DEFAULT_CHAT_MODEL = "doubao-seed-2-0-mini-260215";
+
+  return [
+    route("POST", "/api/chat/completions", async ({ req, res }) => {
+      const apiKey = process.env.VOLCENGINE_ARK_API_KEY;
+      if (!apiKey) {
+        return failure(
+          500,
+          "CHAT_NOT_CONFIGURED",
+          "VOLCENGINE_ARK_API_KEY is not configured. Add it to core-api/.env.local"
+        );
+      }
+
+      const body = await readJsonBody(req);
+      const messages = body.messages || [];
+      if (!messages.length) {
+        return failure(400, "BAD_REQUEST", "messages array is required");
+      }
+
+      const model = body.model || DEFAULT_CHAT_MODEL;
+      const stream = body.stream !== false;
+
+      const arkBody = JSON.stringify({
+        model,
+        messages,
+        stream,
+        temperature: body.temperature ?? 0.7,
+        max_tokens: body.max_tokens ?? 4096,
+      });
+
+      const arkRes = await fetch(`${ARK_BASE}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: arkBody,
+      });
+
+      if (!arkRes.ok) {
+        let errMsg = `Volcengine Ark returned ${arkRes.status}`;
+        try {
+          const errBody = await arkRes.text();
+          errMsg += `: ${errBody}`;
+        } catch {}
+        return failure(arkRes.status >= 500 ? 502 : arkRes.status, "ARK_ERROR", errMsg);
+      }
+
+      if (!stream) {
+        const data = await arkRes.json();
+        return data;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+
+      const reader = arkRes.body.getReader();
+      const decoder = new TextDecoder();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          res.write(chunk);
+        }
+      } catch {
+        /* connection closed */
+      } finally {
+        res.end();
+      }
+    }),
+
+    route("GET", "/api/chat/models", () => {
+      return ok({
+        models: [
+          {
+            id: DEFAULT_CHAT_MODEL,
+            name: "Doubao Seed 2.0 Mini",
+            provider: "volcengine",
+            contextLength: 256000,
+          },
+        ],
+      });
+    }),
+  ];
+}
+
+function buildCanvasProjectRoutes(store) {
+  return [
+    route("GET", "/api/canvas-projects", ({ req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      return ok({ items: store.listCanvasProjectSummaries(actorId) });
+    }),
+
+    route("GET", "/api/canvas-projects/:projectId", ({ params, req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      const project = store.getCanvasProject(actorId, params.projectId);
+      if (!project) return failure(404, "NOT_FOUND", "Canvas project not found");
+      return ok(project);
+    }),
+
+    routeWithStatus("POST", "/api/canvas-projects", 201, async ({ req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      const body = await readJsonBody(req);
+      const project = store.saveCanvasProject(actorId, body || {});
+      return ok(project);
+    }),
+
+    route("PUT", "/api/canvas-projects/:projectId", async ({ params, req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      const body = await readJsonBody(req);
+      const project = store.saveCanvasProject(actorId, { ...(body || {}), id: params.projectId });
+      return ok(project);
+    }),
+
+    routeWithStatus("DELETE", "/api/canvas-projects/:projectId", 200, ({ params, req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      const removed = store.deleteCanvasProject(actorId, params.projectId);
+      if (!removed) return failure(404, "NOT_FOUND", "Canvas project not found");
+      return ok({ deleted: true, projectId: params.projectId });
+    }),
   ];
 }
 

@@ -7,7 +7,7 @@ import { useCurrentProjectId } from "../../lib/session";
 
 const nodes = [
   { id: "global", name: "1 全局设定", path: "/comic/global" },
-  { id: "script", name: "2 故事剧本", path: "/comic/script" },
+  { id: "script", name: "2 故事叙述", path: "/comic/script" },
   { id: "entities", name: "3 场景角色道具", path: "/comic/entities" },
   { id: "storyboard", name: "4 分镜脚本", path: "/comic/storyboard" },
   { id: "video", name: "5 分镜视频", path: "/comic/video" },

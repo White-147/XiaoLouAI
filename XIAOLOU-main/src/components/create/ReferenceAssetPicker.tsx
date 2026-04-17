@@ -21,7 +21,15 @@ export type ReferenceAssetSelection = {
 type ReferenceAssetPickerProps = {
   projectId: string;
   selectedAssetId?: string | null;
+  selectedAssetIds?: string[];
+  /** 不在列表中展示的资产（例如避免把当前编辑项选为自己的参考图） */
+  excludeAssetIds?: string[];
+  /** 区块标题，默认「资产库参考图」 */
+  heading?: string;
+  /** 说明文案 */
+  hint?: string;
   onSelect: (asset: ReferenceAssetSelection) => void;
+  onToggleSelect?: (asset: ReferenceAssetSelection, selected: boolean) => void;
 };
 
 const ASSET_FILTERS = [
@@ -62,7 +70,12 @@ function assetTypeLabel(assetType: string) {
 export function ReferenceAssetPicker({
   projectId,
   selectedAssetId = null,
+  selectedAssetIds = [],
+  excludeAssetIds = [],
+  heading = "资产库参考图",
+  hint = "点击缩略图直接设为参考图，也可以拖到上方参考图区。",
   onSelect,
+  onToggleSelect,
 }: ReferenceAssetPickerProps) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,9 +106,16 @@ export function ReferenceAssetPicker({
     };
   }, [projectId]);
 
+  const excludeSet = useMemo(() => new Set(excludeAssetIds.filter(Boolean)), [excludeAssetIds]);
+  const selectedSet = useMemo(
+    () => new Set([selectedAssetId, ...selectedAssetIds].filter(Boolean)),
+    [selectedAssetId, selectedAssetIds],
+  );
+
   const referenceAssets = useMemo(
-    () => assets.filter((asset) => canUseAsReference(asset)),
-    [assets],
+    () =>
+      assets.filter((asset) => canUseAsReference(asset) && !excludeSet.has(asset.id)),
+    [assets, excludeSet],
   );
 
   const filteredAssets = useMemo(() => {
@@ -114,6 +134,10 @@ export function ReferenceAssetPicker({
   const handleSelect = (asset: Asset) => {
     const selection = toReferenceSelection(asset);
     if (!selection) return;
+    if (onToggleSelect) {
+      onToggleSelect(selection, selectedSet.has(asset.id));
+      return;
+    }
     onSelect(selection);
   };
 
@@ -130,10 +154,8 @@ export function ReferenceAssetPicker({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-medium text-foreground">资产库参考图</div>
-          <div className="text-[11px] text-muted-foreground">
-            点击缩略图直接设为参考图，也可以拖到上方参考图区。
-          </div>
+          <div className="text-sm font-medium text-foreground">{heading}</div>
+          <div className="text-[11px] text-muted-foreground">{hint}</div>
         </div>
         {loading ? (
           <LoaderCircle className="h-4 w-4 animate-spin text-primary" />
@@ -175,7 +197,7 @@ export function ReferenceAssetPicker({
           <div className="grid grid-cols-2 gap-2">
             {filteredAssets.map((asset) => {
               const previewUrl = assetPreviewUrl(asset);
-              const selected = selectedAssetId === asset.id;
+              const selected = selectedSet.has(asset.id);
 
               return (
                 <button
