@@ -3205,12 +3205,18 @@ class MockStore {
 
   resolveProviderImageSource(...candidates) {
     for (const value of candidates) {
-      if (this.isDataUrl(value) || this.isProviderAccessibleUrl(value)) {
+      if (this.isDataUrl(value)) {
         return value;
       }
 
+      // Prefer local file even for public-domain URLs — the file may live on this
+      // server under a different origin (e.g. aitianmu.cn vs 127.0.0.1:4100).
       const dataUrl = this.createDataUrlFromUpload(value);
       if (dataUrl) return dataUrl;
+
+      if (this.isProviderAccessibleUrl(value)) {
+        return value;
+      }
     }
 
     const error = new Error(
@@ -4582,9 +4588,9 @@ class MockStore {
             let candidate = rawUrl;
             try {
               const parsed = new URL(rawUrl);
-              const expires = Number(parsed.searchParams.get("Expires") || parsed.searchParams.get("expires"));
+              const expiresRaw = parsed.searchParams.get("Expires") || parsed.searchParams.get("expires");
               const isLikelyExpiringRemoteRef =
-                Number.isFinite(expires) ||
+                (expiresRaw != null && Number.isFinite(Number(expiresRaw))) ||
                 parsed.searchParams.has("Signature") ||
                 parsed.searchParams.has("OSSAccessKeyId") ||
                 /dashscope|aliyuncs/i.test(parsed.hostname || "");
@@ -4924,9 +4930,9 @@ class MockStore {
             let candidate = rawUrl;
             try {
               const parsed = new URL(rawUrl);
-              const expires = Number(parsed.searchParams.get("Expires") || parsed.searchParams.get("expires"));
+              const expiresRaw = parsed.searchParams.get("Expires") || parsed.searchParams.get("expires");
               const isLikelyExpiringRemoteRef =
-                Number.isFinite(expires) ||
+                (expiresRaw != null && Number.isFinite(Number(expiresRaw))) ||
                 parsed.searchParams.has("Signature") ||
                 parsed.searchParams.has("OSSAccessKeyId") ||
                 /dashscope|aliyuncs/i.test(parsed.hostname || "");
