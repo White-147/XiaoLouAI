@@ -29,3 +29,27 @@ export async function uploadImage(
   })
   return result
 }
+
+export async function uploadVideo(
+  file: File
+): Promise<{ file_id: string; url: string; mimeType?: string }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await fetch('/api/upload_video', {
+    method: 'POST',
+    body: formData,
+  })
+  const result = await response.json()
+  if (!response.ok) {
+    throw new Error(result?.detail || result?.message || 'Failed to upload video')
+  }
+  postXiaolouAgentAsset({
+    fileUrl: result.url,
+    fileName: fileNameFromJaazUrl(result.url) || result.file_id || file.name,
+    name: file.name,
+    mediaKind: 'video',
+    mimeType: result.mimeType || file.type || 'video/mp4',
+    source: 'upload_video',
+  })
+  return result
+}

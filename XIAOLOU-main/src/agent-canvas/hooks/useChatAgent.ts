@@ -56,6 +56,9 @@ export type AgentChatOptions = {
     toolType?: 'image' | 'video';
     preferredImageToolId?: string;
     preferredVideoToolId?: string;
+    allowedImageToolIds?: string[];
+    allowedVideoToolIds?: string[];
+    autoModelPreference?: boolean;
     webSearch?: boolean;
     includeCanvasFiles?: boolean;
     instruction?: string;
@@ -216,6 +219,9 @@ export function useChatAgent(options: UseChatAgentOptions = {}): UseChatAgentRet
                     toolType: chatOptions.toolType,
                     preferredImageToolId: chatOptions.preferredImageToolId,
                     preferredVideoToolId: chatOptions.preferredVideoToolId,
+                    allowedImageToolIds: chatOptions.allowedImageToolIds,
+                    allowedVideoToolIds: chatOptions.allowedVideoToolIds,
+                    autoModelPreference: chatOptions.autoModelPreference,
                     canvas: options.getCanvasSnapshot?.(),
                     callbacks: {
                         onDelta: (delta) => {

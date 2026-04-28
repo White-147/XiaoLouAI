@@ -299,6 +299,7 @@ export default function Layout() {
         message?.type === "xiaolou:agent-canvas-project:upsert" &&
         message.project?.canvasId
       ) {
+        if (message.project?.source === "canvas_load") return;
         const projectId = getCurrentProjectId(actorId);
         void syncAgentStudioCanvasProject(projectId, message.project)
           .then((projectAsset) => {

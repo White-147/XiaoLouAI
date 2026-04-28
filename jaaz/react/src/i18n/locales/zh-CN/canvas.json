@@ -40,6 +40,9 @@
     "shape": "形状",
     "arrow": "箭头",
     "line": "直线",
+    "freedraw": "画笔",
+    "eraser": "橡皮擦",
+    "videoUpload": "上传视频",
     "zoomFit": "缩放适应"
   },
   "popbar": {

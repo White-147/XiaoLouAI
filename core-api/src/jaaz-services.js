@@ -38,6 +38,7 @@ function resolveServiceConfig() {
   const jaazRoot = resolveWorkspacePath(process.env.JAAZ_ROOT, path.join(WORKSPACE_ROOT, "jaaz"));
   const apiPort = readNumberEnv("JAAZ_API_PORT", DEFAULT_JAAZ_API_PORT);
   const uiPort = readNumberEnv("JAAZ_UI_PORT", DEFAULT_JAAZ_UI_PORT);
+  const uiMode = String(process.env.JAAZ_UI_MODE || "auto").trim().toLowerCase();
   const pythonExecutable = resolveCommandOrPath(
     process.env.JAAZ_PYTHON,
     path.join(jaazRoot, ".venv", "Scripts", "python.exe"),
@@ -54,12 +55,22 @@ function resolveServiceConfig() {
     apiErrLog: path.join(jaazRoot, `jaaz-server-${apiPort}.err.log`),
     uiOutLog: path.join(jaazRoot, "react", "vite-dev.log"),
     uiErrLog: path.join(jaazRoot, "react", "vite-dev.err.log"),
+    uiDistDir: path.join(jaazRoot, "react", "dist"),
+    uiMode: uiMode === "dev" || uiMode === "preview" ? uiMode : "auto",
   };
 }
 
 function isDirectory(dirPath) {
   try {
     return fs.statSync(dirPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFile(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
   } catch {
     return false;
   }
@@ -206,10 +217,29 @@ async function ensureUi(config) {
     };
   }
 
+  const hasProductionBuild = isFile(path.join(config.uiDistDir, "index.html"));
+  const usePreview =
+    config.uiMode === "preview" ||
+    (config.uiMode === "auto" && hasProductionBuild);
+
+  if (config.uiMode === "preview" && !hasProductionBuild) {
+    return {
+      name: "ui",
+      port: config.uiPort,
+      listening: false,
+      started: false,
+      error: `Jaaz UI dist not found: ${config.uiDistDir}. Run npm run build in jaaz/react or set JAAZ_UI_MODE=dev.`,
+    };
+  }
+
   const npmCommand = process.platform === "win32" ? (process.env.ComSpec || "cmd.exe") : "npm";
   const npmArgs = process.platform === "win32"
-    ? ["/d", "/s", "/c", "npm.cmd", "run", "dev"]
-    : ["run", "dev"];
+    ? usePreview
+      ? ["/d", "/s", "/c", "npm.cmd", "run", "preview", "--", "--host", "0.0.0.0", "--port", String(config.uiPort)]
+      : ["/d", "/s", "/c", "npm.cmd", "run", "dev"]
+    : usePreview
+      ? ["run", "preview", "--", "--host", "0.0.0.0", "--port", String(config.uiPort)]
+      : ["run", "dev"];
   let pid = null;
   try {
     const child = spawnDetached(
@@ -237,6 +267,7 @@ async function ensureUi(config) {
     port: config.uiPort,
     listening: await waitForPort(config.uiPort),
     started: true,
+    mode: usePreview ? "preview" : "dev",
     pid,
   };
 }
@@ -260,6 +291,7 @@ async function getJaazServiceStatus() {
       name: "ui",
       port: config.uiPort,
       listening: uiListening,
+      mode: config.uiMode,
     },
   };
 }

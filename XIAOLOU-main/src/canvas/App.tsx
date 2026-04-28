@@ -71,6 +71,11 @@ import { getXiaolouCanvasDraftStorageKey } from './integrations/xiaolouCanvasSes
 import { canUseXiaolouAssetBridge, createXiaolouAsset } from './integrations/xiaolouAssetBridge';
 import { sanitizeCanvasNodesForPersistence } from './utils/canvasPersistence';
 import {
+  buildCanvasProjectSnapshot,
+  isRemoteCanvasVersionNewer,
+  mergeCanvasProjectSnapshots,
+} from './utils/canvasProjectMerge';
+import {
   hasCanvasHostServices,
   getCanvasHostServices,
   subscribeCanvasThemeChange,
@@ -638,6 +643,8 @@ export default function App() {
   const latestNodesRef = React.useRef(nodes);
   const latestGroupsRef = React.useRef(groups);
   const latestCanvasTitleRef = React.useRef(canvasTitle);
+  const latestViewportRef = React.useRef(viewport);
+  const latestIsDirtyRef = React.useRef(isDirty);
 
   // Mark as dirty when nodes or title change
   const isInitialMount = React.useRef(true);
@@ -793,7 +800,9 @@ export default function App() {
     latestNodesRef.current = nodes;
     latestGroupsRef.current = groups;
     latestCanvasTitleRef.current = canvasTitle;
-  }, [canvasTitle, groups, nodes]);
+    latestViewportRef.current = viewport;
+    latestIsDirtyRef.current = isDirty;
+  }, [canvasTitle, groups, isDirty, nodes, viewport]);
 
   // ── Project / theme sync ──────────────────────────────────────────────────
   //
@@ -907,6 +916,112 @@ export default function App() {
       },
     );
   }, [queryCanvasProjectId, setCanvasTitle, setEditingTitleValue, setNodes, setGroups, setViewport, setSelectedNodeIds]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || window.parent !== window) {
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const syncRemoteProject = async () => {
+      if (cancelled || inFlight) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+
+      const services = getCanvasHostServices();
+      if (!services?.loadProject || !services.getCanvasProjectVersion) return;
+
+      const baseVersion = services.getCanvasProjectVersion();
+      if (!baseVersion?.id) return;
+      if (queryCanvasProjectId && baseVersion.id !== queryCanvasProjectId) return;
+      const activeProjectId = baseVersion.id;
+
+      inFlight = true;
+      try {
+        const remoteProject = await services.loadProject(activeProjectId);
+        if (cancelled) return;
+        if (!isRemoteCanvasVersionNewer(remoteProject.updatedAt, baseVersion.updatedAt)) return;
+
+        const baseCanvasData = baseVersion.canvasData;
+        const remoteCanvasData = remoteProject.canvasData;
+        const baseSnapshot = buildCanvasProjectSnapshot({
+          title: baseVersion.title || remoteProject.title,
+          nodes: baseCanvasData?.nodes || [],
+          groups: baseCanvasData?.groups || [],
+          viewport: baseCanvasData?.viewport,
+        });
+        const localSnapshot = buildCanvasProjectSnapshot({
+          title: latestCanvasTitleRef.current,
+          nodes: latestNodesRef.current,
+          groups: latestGroupsRef.current,
+          viewport: latestViewportRef.current,
+        });
+        const remoteSnapshot = buildCanvasProjectSnapshot({
+          title: remoteProject.title,
+          nodes: remoteCanvasData?.nodes || [],
+          groups: remoteCanvasData?.groups || [],
+          viewport: remoteCanvasData?.viewport,
+        });
+        const hasLocalChanges = latestIsDirtyRef.current && hasMeaningfulCanvasContent({
+          nodes: latestNodesRef.current,
+          groups: latestGroupsRef.current,
+          title: latestCanvasTitleRef.current,
+        });
+        const nextSnapshot = hasLocalChanges
+          ? mergeCanvasProjectSnapshots(baseSnapshot, localSnapshot, remoteSnapshot)
+          : remoteSnapshot;
+
+        ignoreNextChange.current = !hasLocalChanges;
+        pendingContentViewportSafetyCheckRef.current = true;
+        setCanvasTitle(nextSnapshot.title || DEFAULT_CANVAS_TITLE);
+        setEditingTitleValue(nextSnapshot.title || DEFAULT_CANVAS_TITLE);
+        setNodes(sanitizeCanvasNodesForPersistence(nextSnapshot.nodes));
+        setGroups(nextSnapshot.groups);
+        setViewport(nextSnapshot.viewport);
+        setSelectedNodeIds([]);
+        setIsDirty(hasLocalChanges);
+        hydratedDraftMetaRef.current = {
+          canvasProjectId: remoteProject.id,
+          hasUnsavedChanges: hasLocalChanges,
+          savedAt: remoteProject.updatedAt || null,
+        };
+        services.adoptCanvasProjectVersion?.({
+          id: remoteProject.id,
+          title: remoteProject.title,
+          updatedAt: remoteProject.updatedAt,
+          canvasData: remoteProject.canvasData,
+        });
+        console.log('[Canvas] Remote project version merged:', remoteProject.id);
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[Canvas] Remote project sync failed:', error);
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void syncRemoteProject();
+    }, 15000);
+    const initialTimer = window.setTimeout(() => {
+      void syncRemoteProject();
+    }, 5000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void syncRemoteProject();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.clearTimeout(initialTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [queryCanvasProjectId, setCanvasTitle, setEditingTitleValue, setGroups, setNodes, setSelectedNodeIds, setViewport]);
 
   const { handleGenerate: handleGenerateSingle } = useGeneration({
     nodes,

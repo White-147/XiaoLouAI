@@ -41,6 +41,12 @@ function Canvas() {
           setCanvas(data)
           setCanvasName(data.name)
           setSessionList(data.sessions)
+          postXiaolouAgentCanvasProject({
+            canvasId: id,
+            sessionId: searchSessionId || data.sessions?.[0]?.id,
+            title: data.name,
+            source: 'canvas_load',
+          })
           // Video elements now handled by native Excalidraw embeddable elements
         }
       } catch (err) {
@@ -71,16 +77,6 @@ function Canvas() {
       source: 'canvas_rename',
     })
   }
-
-  useEffect(() => {
-    if (isLoading || !canvas) return
-    postXiaolouAgentCanvasProject({
-      canvasId: id,
-      sessionId: searchSessionId || sessionList[0]?.id,
-      title: canvasName || canvas?.name,
-      source: 'canvas_load',
-    })
-  }, [canvas, canvasName, id, isLoading, searchSessionId, sessionList])
 
   return (
     <CanvasProvider>

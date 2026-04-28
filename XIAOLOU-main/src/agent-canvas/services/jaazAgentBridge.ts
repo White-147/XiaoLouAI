@@ -98,6 +98,9 @@ export type SendJaazAgentMessageInput = {
   toolType?: 'image' | 'video';
   preferredImageToolId?: string;
   preferredVideoToolId?: string;
+  allowedImageToolIds?: string[];
+  allowedVideoToolIds?: string[];
+  autoModelPreference?: boolean;
   canvas?: JaazAgentCanvasSnapshot;
   callbacks?: JaazAgentCallbacks;
 };
@@ -124,36 +127,60 @@ function getSafeDefaultTools(
   preferredToolType?: 'image' | 'video',
   preferredImageToolId?: string,
   preferredVideoToolId?: string,
+  allowedImageToolIds?: string[],
+  allowedVideoToolIds?: string[],
+  autoModelPreference = true,
 ): JaazToolInfo[] {
-  if (!tools.length || tools.some((tool) => tool.provider !== 'xiaolou')) {
-    if (preferredToolId) {
-      const exact = tools.find((tool) => tool.id === preferredToolId);
-      if (exact) return [exact];
-    }
-    if (preferredToolType) {
-      const typed = tools.find((tool) => tool.type === preferredToolType);
-      return typed ? [typed] : tools;
-    }
-    return tools;
-  }
+  if (!tools.length) return [];
 
-  if (preferredToolId) {
-    const exact = tools.find((tool) => tool.id === preferredToolId);
+  const uniqueIds = (ids?: string[]) =>
+    Array.from(new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean)));
+  const buildPool = (type: 'image' | 'video', allowedIds?: string[]) => {
+    const typedTools = tools.filter((tool) => tool.type === type);
+    const allowed = uniqueIds(allowedIds);
+    if (!allowed.length) return typedTools;
+    const allowedSet = new Set(allowed);
+    return typedTools.filter((tool) => allowedSet.has(tool.id));
+  };
+
+  const hasSelectedPool =
+    uniqueIds(allowedImageToolIds).length > 0 ||
+    uniqueIds(allowedVideoToolIds).length > 0;
+  const imagePool = buildPool('image', allowedImageToolIds);
+  const videoPool = buildPool('video', allowedVideoToolIds);
+  const findExact = (id?: string) => id ? tools.find((tool) => tool.id === id) : undefined;
+
+  if (!autoModelPreference) {
+    const exact = findExact(preferredToolId);
     if (exact) return [exact];
+
+    if (preferredToolType === 'image') {
+      const preferred = imagePool.find((tool) => tool.id === preferredImageToolId) || imagePool[0];
+      return preferred ? [preferred] : [];
+    }
+
+    if (preferredToolType === 'video') {
+      const preferred = videoPool.find((tool) => tool.id === preferredVideoToolId) || videoPool[0];
+      return preferred ? [preferred] : [];
+    }
   }
 
   if (preferredToolType) {
-    const preferredByType = tools.find((tool) => tool.type === preferredToolType);
-    if (preferredByType) return [preferredByType];
+    const typedPool = preferredToolType === 'image' ? imagePool : videoPool;
+    return typedPool;
   }
 
+  const selectedPool = [...imagePool, ...videoPool];
+  if (selectedPool.length) return selectedPool;
+  if (hasSelectedPool) return [];
+
   const preferredImage =
-    tools.find((tool) => tool.id === preferredImageToolId) ||
+    findExact(preferredImageToolId) ||
     tools.find((tool) => tool.id === 'xiaolou_image_doubao_seedream_5_0_260128') ||
     tools.find((tool) => tool.id === 'xiaolou_image_vertex_gemini_3_pro_image_preview') ||
     tools.find((tool) => tool.type === 'image');
   const preferredVideo =
-    tools.find((tool) => tool.id === preferredVideoToolId) ||
+    findExact(preferredVideoToolId) ||
     tools.find((tool) => tool.id === 'xiaolou_video_doubao_seedance_2_0_260128') ||
     tools.find((tool) => tool.id === 'xiaolou_video_vertex_veo_3_1_generate_001') ||
     tools.find((tool) => tool.type === 'video');
@@ -525,6 +552,9 @@ export async function sendJaazAgentMessage(
     input.toolType,
     input.preferredImageToolId,
     input.preferredVideoToolId,
+    input.allowedImageToolIds,
+    input.allowedVideoToolIds,
+    input.autoModelPreference !== false,
   );
   if (!selectedTools.length) {
     throw new Error('Jaaz 图片/视频工具尚未配置');

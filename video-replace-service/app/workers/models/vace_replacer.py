@@ -46,6 +46,19 @@ _OOM_RE = re.compile(
     re.IGNORECASE,
 )
 
+_DISTRIBUTED_ENV_KEYS = (
+    "LOCAL_RANK",
+    "RANK",
+    "WORLD_SIZE",
+    "LOCAL_WORLD_SIZE",
+    "GROUP_RANK",
+    "ROLE_RANK",
+    "ROLE_WORLD_SIZE",
+    "MASTER_ADDR",
+    "MASTER_PORT",
+    "NPROC_PER_NODE",
+)
+
 from ..proc_utils import kill_process_tree
 from ...services import cv2_io
 from .yolo_detector import YOLODetector, YOLODetectorError
@@ -216,6 +229,25 @@ def _crop(img: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray:
     return img[y1:y2, x1:x2].copy()
 
 
+def _square_box_from_center(
+    cx: float,
+    cy: float,
+    side: float,
+    width: int,
+    height: int,
+) -> tuple[int, int, int, int]:
+    return _clip_box(
+        (
+            cx - side / 2,
+            cy - side / 2,
+            cx + side / 2,
+            cy + side / 2,
+        ),
+        width,
+        height,
+    )
+
+
 def _paste_fit(
     canvas: np.ndarray,
     crop: np.ndarray,
@@ -270,22 +302,23 @@ def _build_reference_board(
 
     x1, y1, x2, y2 = person_box
     body_h = max(1.0, y2 - y1)
-    body_box = _expand_box(person_box, src_w, src_h, pad_x=0.08, pad_y=0.05)
-    upper_box = _expand_box((x1, y1, x2, y1 + body_h * 0.58), src_w, src_h, pad_x=0.18, pad_y=0.16)
-
-    head_cx = (x1 + x2) / 2
-    head_cy = y1 + body_h * 0.16
-    head_side = max((x2 - x1) * 0.85, body_h * 0.20)
-    face_box = _clip_box(
-        (
-            head_cx - head_side / 2,
-            head_cy - head_side / 2,
-            head_cx + head_side / 2,
-            head_cy + head_side / 2,
-        ),
+    body_w = max(1.0, x2 - x1)
+    body_box = _expand_box(person_box, src_w, src_h, pad_x=0.10, pad_y=0.04)
+    upper_box = _expand_box((x1, y1, x2, y1 + body_h * 0.62), src_w, src_h, pad_x=0.22, pad_y=0.10)
+    outfit_box = _expand_box(
+        (x1, y1 + body_h * 0.22, x2, y1 + body_h * 0.68),
         src_w,
         src_h,
+        pad_x=0.18,
+        pad_y=0.08,
     )
+
+    head_cx = (x1 + x2) / 2
+    # Face identity is the weakest part when the reference is a full-body photo.
+    # Use a generous head crop so hair, face outline, and chin are all visible.
+    head_cy = y1 + body_h * 0.15
+    head_side = max(body_w * 1.12, body_h * 0.26)
+    face_box = _square_box_from_center(head_cx, head_cy, head_side, src_w, src_h)
 
     canvas_w, canvas_h = _estimate_vace_ref_canvas(video_path, sample_size)
     canvas = np.full((canvas_h, canvas_w, 3), 245, dtype=np.uint8)
@@ -293,20 +326,29 @@ def _build_reference_board(
     gap = max(8, int(canvas_w * 0.014))
     margin = max(10, int(canvas_w * 0.018))
     panel_h = canvas_h - margin * 2
-    left_w = int(canvas_w * 0.30)
-    mid_w = int(canvas_w * 0.34)
+    left_w = int(canvas_w * 0.27)
+    mid_w = int(canvas_w * 0.36)
     right_w = canvas_w - margin * 2 - gap * 2 - left_w - mid_w
     left = (margin, margin, left_w, panel_h)
     middle = (margin + left_w + gap, margin, mid_w, panel_h)
-    right = (margin + left_w + gap + mid_w + gap, margin, right_w, panel_h)
+    right_x = margin + left_w + gap + mid_w + gap
+    face_h = min(right_w, int(panel_h * 0.62))
+    right_face = (right_x, margin, right_w, face_h)
+    right_outfit = (
+        right_x,
+        margin + face_h + gap,
+        right_w,
+        max(1, panel_h - face_h - gap),
+    )
 
-    for rect in (left, middle, right):
+    for rect in (left, middle, right_face, right_outfit):
         x, y, w, h = rect
         cv2.rectangle(canvas, (x, y), (x + w - 1, y + h - 1), (232, 232, 232), 1)
 
     _paste_fit(canvas, _crop(ref, body_box), left, mode="contain")
     _paste_fit(canvas, _crop(ref, upper_box), middle, mode="cover")
-    _paste_fit(canvas, _crop(ref, face_box), right, mode="cover")
+    _paste_fit(canvas, _crop(ref, face_box), right_face, mode="cover")
+    _paste_fit(canvas, _crop(ref, outfit_box), right_outfit, mode="cover")
 
     if not cv2_io.imwrite(out_path, canvas, [int(cv2.IMWRITE_JPEG_QUALITY), 94]):
         raise RuntimeError(f"Could not write VACE reference board: {out_path}")
@@ -327,6 +369,25 @@ def _log_has_oom(log_path: Path) -> bool:
         return bool(_OOM_RE.search(text))
     except Exception:
         return False
+
+
+def _sanitize_single_gpu_env(env: dict[str, str]) -> None:
+    """Force Wan2.1's generate.py onto a known-good single-GPU launch shape."""
+    for key in _DISTRIBUTED_ENV_KEYS:
+        env.pop(key, None)
+
+    # Wan2.1 reads these variables directly and uses LOCAL_RANK as the CUDA
+    # device id. A stale torchrun/accelerate environment can make a one-GPU
+    # machine attempt cuda:1, which later fails as "Invalid device id".
+    env["RANK"] = "0"
+    env["WORLD_SIZE"] = "1"
+    env["LOCAL_RANK"] = "0"
+    env["LOCAL_WORLD_SIZE"] = "1"
+
+    # This app targets a single local RTX 4070-class GPU. Allow an explicit
+    # override for advanced setups, otherwise expose only physical GPU 0 so
+    # Wan2.1's cuda:0 always maps to an actual visible device.
+    env["CUDA_VISIBLE_DEVICES"] = str(os.getenv("VR_CUDA_VISIBLE_DEVICES") or "0")
 
 
 def _detect_flash_attn_build_hints(torch_module) -> list[str]:
@@ -590,6 +651,7 @@ async def run_replacement_async(
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    _sanitize_single_gpu_env(env)
 
     logger.info("[vace-replacer] cwd=%s python=%s", repo_dir_abs, python_exe)
 

@@ -40,6 +40,9 @@
     "shape": "Shape",
     "arrow": "Arrow",
     "line": "Line",
+    "freedraw": "Draw",
+    "eraser": "Eraser",
+    "videoUpload": "Upload video",
     "zoomFit": "Zoom to fit"
   },
   "popbar": {

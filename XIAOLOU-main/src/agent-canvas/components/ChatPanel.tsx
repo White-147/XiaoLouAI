@@ -337,6 +337,30 @@ function pickPreferredModel(options: ComposerModelOption[], preferredIds: string
     return preferredIds.find((id) => options.some((option) => option.id === id)) || options[0]?.id || '';
 }
 
+function normalizeSelectedModelPool(
+    selectedIds: string[],
+    options: ComposerModelOption[],
+    preferredIds: string[],
+) {
+    const optionIds = new Set(options.map((option) => option.id));
+    const kept = Array.from(new Set(selectedIds)).filter((id) => optionIds.has(id));
+    if (kept.length > 0) return kept;
+    const preferred = pickPreferredModel(options, preferredIds);
+    return preferred ? [preferred] : [];
+}
+
+function toggleModelPoolId(selectedIds: string[], id: string) {
+    if (!id) return selectedIds;
+    if (selectedIds.includes(id)) {
+        return selectedIds.length > 1 ? selectedIds.filter((item) => item !== id) : selectedIds;
+    }
+    return [...selectedIds, id];
+}
+
+function areModelPoolsEqual(a: string[], b: string[]) {
+    return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
 function modelOptionDescription(option: ComposerModelOption) {
     if (option.kind === 'image') {
         if (option.label.includes('Gemini')) return '小楼 Vertex / Gemini 图像生成能力。';
@@ -517,6 +541,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const [selectedTextModel, setSelectedTextModel] = useState('');
     const [selectedImageTool, setSelectedImageTool] = useState('');
     const [selectedVideoTool, setSelectedVideoTool] = useState('');
+    const [selectedImageToolIds, setSelectedImageToolIds] = useState<string[]>([]);
+    const [selectedVideoToolIds, setSelectedVideoToolIds] = useState<string[]>([]);
     const [modelPreferenceTab, setModelPreferenceTab] = useState<ModelPreferenceTab>('image');
     const [autoModelPreference, setAutoModelPreference] = useState(true);
     const [imageResolution, setImageResolution] = useState(PREFERRED_IMAGE_RESOLUTION);
@@ -590,20 +616,72 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }, [selectedTextModel, textModelOptions]);
 
     useEffect(() => {
-        if (!selectedImageTool && imageModelOptions.length > 0) {
-            setSelectedImageTool(pickPreferredModel(imageModelOptions, PREFERRED_IMAGE_TOOL_IDS));
+        if (!imageModelOptions.length) {
+            setSelectedImageTool('');
+            setSelectedImageToolIds([]);
+            return;
         }
-    }, [selectedImageTool, imageModelOptions]);
+
+        const nextPool = normalizeSelectedModelPool(
+            selectedImageToolIds,
+            imageModelOptions,
+            PREFERRED_IMAGE_TOOL_IDS,
+        );
+        if (!areModelPoolsEqual(selectedImageToolIds, nextPool)) {
+            setSelectedImageToolIds(nextPool);
+        }
+        if (!nextPool.includes(selectedImageTool)) {
+            setSelectedImageTool(nextPool[0] || '');
+        }
+    }, [imageModelOptions, selectedImageTool, selectedImageToolIds]);
 
     useEffect(() => {
-        if (!selectedVideoTool && videoModelOptions.length > 0) {
-            setSelectedVideoTool(pickPreferredModel(videoModelOptions, PREFERRED_VIDEO_TOOL_IDS));
+        if (!videoModelOptions.length) {
+            setSelectedVideoTool('');
+            setSelectedVideoToolIds([]);
+            return;
         }
-    }, [selectedVideoTool, videoModelOptions]);
+
+        const nextPool = normalizeSelectedModelPool(
+            selectedVideoToolIds,
+            videoModelOptions,
+            PREFERRED_VIDEO_TOOL_IDS,
+        );
+        if (!areModelPoolsEqual(selectedVideoToolIds, nextPool)) {
+            setSelectedVideoToolIds(nextPool);
+        }
+        if (!nextPool.includes(selectedVideoTool)) {
+            setSelectedVideoTool(nextPool[0] || '');
+        }
+    }, [selectedVideoTool, selectedVideoToolIds, videoModelOptions]);
 
     const selectedImageOption = useMemo(
         () => imageModelOptions.find((option) => option.id === selectedImageTool),
         [imageModelOptions, selectedImageTool],
+    );
+    const selectedVideoOption = useMemo(
+        () => videoModelOptions.find((option) => option.id === selectedVideoTool),
+        [selectedVideoTool, videoModelOptions],
+    );
+    const activeImageToolPool = useMemo(
+        () => selectedImageToolIds.length ? selectedImageToolIds : (selectedImageTool ? [selectedImageTool] : []),
+        [selectedImageTool, selectedImageToolIds],
+    );
+    const activeVideoToolPool = useMemo(
+        () => selectedVideoToolIds.length ? selectedVideoToolIds : (selectedVideoTool ? [selectedVideoTool] : []),
+        [selectedVideoTool, selectedVideoToolIds],
+    );
+    const selectedImagePoolLabels = useMemo(
+        () => activeImageToolPool
+            .map((id) => imageModelOptions.find((option) => option.id === id)?.label || id)
+            .filter(Boolean),
+        [activeImageToolPool, imageModelOptions],
+    );
+    const selectedVideoPoolLabels = useMemo(
+        () => activeVideoToolPool
+            .map((id) => videoModelOptions.find((option) => option.id === id)?.label || id)
+            .filter(Boolean),
+        [activeVideoToolPool, videoModelOptions],
     );
     const currentCanvasImageModel = useMemo(
         () => getCanvasImageModelForTool(selectedImageTool, selectedImageOption?.label),
@@ -699,6 +777,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     };
 
     const buildComposerInstruction = () => {
+        const imageModelLabel = autoModelPreference
+            ? (selectedImagePoolLabels.length ? selectedImagePoolLabels.join(' / ') : selectedImageOption?.label || currentCanvasImageModel.name)
+            : (selectedImageOption?.label || currentCanvasImageModel.name);
+        const videoModelLabel = autoModelPreference
+            ? (selectedVideoPoolLabels.length ? selectedVideoPoolLabels.join(' / ') : selectedVideoOption?.label || '自动')
+            : (selectedVideoOption?.label || '自动');
         const lines: string[] = [
             '请默认使用简体中文回复，除非用户明确要求其他语言。',
         ];
@@ -711,7 +795,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             lines.push('当前选择图像模式：优先完成图片创作、图片分析、图片生成或图片编辑任务。');
             lines.push([
                 '图像生成参数：',
-                `模型=${selectedImageOption?.label || currentCanvasImageModel.name}`,
+                `模型=${imageModelLabel}`,
                 `分辨率=${currentImageResolution || '自动'}`,
                 `宽高比=${currentImageAspectRatioLabel}`,
                 currentImageSize ? `尺寸=${currentImageSizeLabel}` : null,
@@ -719,8 +803,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             ].filter(Boolean).join('；'));
         } else if (composerMode === 'video') {
             lines.push('当前选择视频模式：优先完成视频脚本、视频生成、分镜或运镜任务。');
+            lines.push(`视频模型=${videoModelLabel}`);
         } else {
             lines.push('当前选择 Agent 模式：可综合使用 Planner Agent、图片/视频 Creator Agent 和工具调用完成任务。');
+            lines.push(`自动选择模型时，只能在用户已选模型池中选择；图像模型池=${imageModelLabel}；视频模型池=${videoModelLabel}。`);
         }
 
         return lines.join('\n');
@@ -739,16 +825,20 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             textareaRef.current.style.height = 'auto';
         }
 
-        const selectedToolId = composerMode === 'image'
-            ? selectedImageTool
-            : composerMode === 'video'
-                ? selectedVideoTool
-                : undefined;
+        const selectedToolId = autoModelPreference
+            ? undefined
+            : composerMode === 'image'
+                ? selectedImageTool
+                : composerMode === 'video'
+                    ? selectedVideoTool
+                    : undefined;
         const selectedToolType = composerMode === 'image'
             ? 'image'
             : composerMode === 'video'
                 ? 'video'
                 : undefined;
+        const allowedImageToolIds = composerMode === 'video' ? undefined : activeImageToolPool;
+        const allowedVideoToolIds = composerMode === 'image' ? undefined : activeVideoToolPool;
 
         await sendMessage(
             currentMessage,
@@ -767,6 +857,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 toolType: selectedToolType,
                 preferredImageToolId: selectedImageTool,
                 preferredVideoToolId: selectedVideoTool,
+                allowedImageToolIds,
+                allowedVideoToolIds,
+                autoModelPreference,
                 webSearch: webSearchEnabled,
                 includeCanvasFiles: canvasFilesEnabled,
                 instruction: buildComposerInstruction(),
@@ -853,6 +946,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         setShowThinkingConfirm(true);
     };
 
+    const handleToggleAutoModelPreference = () => {
+        setAutoModelPreference((value) => {
+            const next = !value;
+            if (!next) {
+                if (selectedImageTool) {
+                    setSelectedImageToolIds([selectedImageTool]);
+                }
+                if (selectedVideoTool) {
+                    setSelectedVideoToolIds([selectedVideoTool]);
+                }
+            }
+            return next;
+        });
+    };
+
     const confirmThinkingNewChat = () => {
         if (thinkingConfirmNeverAsk) {
             window.localStorage.setItem('xiaolou.agentCanvas.skipThinkingConfirm', 'true');
@@ -897,11 +1005,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         : modelPreferenceTab === 'video'
             ? videoModelOptions
             : [];
-    const modelPreferenceSelectedId = modelPreferenceTab === 'image'
-        ? selectedImageTool
+    const modelPreferenceSelectedIds = modelPreferenceTab === 'image'
+        ? activeImageToolPool
         : modelPreferenceTab === 'video'
-            ? selectedVideoTool
-            : '';
+            ? activeVideoToolPool
+            : [];
+    const modelPreferenceSelectedCount = modelPreferenceSelectedIds.length;
     const activeModelTooltip = '模型偏好';
 
     return (
@@ -1605,7 +1714,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                             <div className="text-base font-semibold text-neutral-950">模型偏好</div>
                                             <button
                                                 type="button"
-                                                onClick={() => setAutoModelPreference((value) => !value)}
+                                                onClick={handleToggleAutoModelPreference}
                                                 className="flex items-center gap-2 text-sm font-medium text-neutral-700"
                                                 aria-pressed={autoModelPreference}
                                             >
@@ -1627,6 +1736,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                             ))}
                                         </div>
 
+                                        <div className="mb-3 rounded-xl bg-neutral-50 px-3 py-2 text-xs leading-5 text-neutral-500">
+                                            {autoModelPreference
+                                                ? '自动开启时，Agent 只会在下方已勾选的模型池中选择。'
+                                                : '自动关闭时，Agent 只使用当前勾选的单个模型。'}
+                                        </div>
+
                                         {modelCatalogError ? (
                                             <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-red-600">
                                                 {modelCatalogError}
@@ -1635,6 +1750,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
                                         <div className="mb-2 text-sm font-semibold text-neutral-400">
                                             {modelPreferenceTab === 'image' ? 'Image' : modelPreferenceTab === 'video' ? 'Video' : '3D'}
+                                            {modelPreferenceTab !== '3d' && modelPreferenceSelectedCount > 0 ? ` · 已选 ${modelPreferenceSelectedCount}` : ''}
                                         </div>
 
                                         <div className="max-h-72 overflow-y-auto pr-1">
@@ -1644,7 +1760,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                                 </div>
                                             ) : modelPreferenceOptions.length > 0 ? (
                                                 modelPreferenceOptions.map((option) => {
-                                                    const selected = option.id === modelPreferenceSelectedId;
+                                                    const selected = modelPreferenceSelectedIds.includes(option.id);
                                                     const timeLabel = modelOptionTime(option);
                                                     const OptionIcon = option.kind === 'video' ? Video : Sparkles;
                                                     return (
@@ -1654,8 +1770,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                                             onClick={() => {
                                                                 if (option.kind === 'image') {
                                                                     setSelectedImageTool(option.id);
+                                                                    setSelectedImageToolIds((prev) => (
+                                                                        autoModelPreference ? toggleModelPoolId(prev, option.id) : [option.id]
+                                                                    ));
                                                                 } else if (option.kind === 'video') {
                                                                     setSelectedVideoTool(option.id);
+                                                                    setSelectedVideoToolIds((prev) => (
+                                                                        autoModelPreference ? toggleModelPoolId(prev, option.id) : [option.id]
+                                                                    ));
                                                                 }
                                                             }}
                                                             className="flex w-full items-center gap-3 rounded-xl px-2 py-3 text-left transition-colors hover:bg-neutral-50"
@@ -1706,8 +1828,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                                         onClick={() => {
                                                             if (composerMode === 'image') {
                                                                 setSelectedImageTool(option.id);
+                                                                setSelectedImageToolIds([option.id]);
                                                             } else {
                                                                 setSelectedVideoTool(option.id);
+                                                                setSelectedVideoToolIds([option.id]);
                                                             }
                                                             setActiveMenu(null);
                                                         }}

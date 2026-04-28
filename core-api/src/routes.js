@@ -104,16 +104,13 @@ function getActorId(req, url) {
   }
 
   if (headerActorId && tokenActorId && headerActorId !== tokenActorId) {
-    if (isLocalLoopbackClientHint(req)) {
-      console.warn("[routes] actor mismatch on loopback request, preferring X-Actor-Id", {
-        tokenActorId,
-        headerActorId,
-        path: url?.pathname || "",
-      });
-      resolved = headerActorId;
-    } else {
-      resolved = tokenActorId;
-    }
+    console.warn("[routes] actor mismatch on authenticated request, preferring Authorization actor", {
+      tokenActorId,
+      headerActorId,
+      path: url?.pathname || "",
+      loopback: isLocalLoopbackClientHint(req),
+    });
+    resolved = tokenActorId;
   } else if (!resolved && headerActorId) {
     resolved = headerActorId;
   }

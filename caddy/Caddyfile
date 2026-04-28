@@ -72,6 +72,39 @@ http://www.xiaolou.cn, http://xiaolou.cn {
 	}
 }
 
+http://www.aitianmu.cn, http://aitianmu.cn {
+	handle /jaaz* {
+		reverse_proxy localhost:5174
+	}
+
+	handle_path /jaaz-api/* {
+		reverse_proxy localhost:57988
+	}
+
+	handle /socket.io/* {
+		reverse_proxy localhost:57988
+	}
+
+	handle /api/* {
+		reverse_proxy localhost:4100
+	}
+
+	handle /uploads/* {
+		reverse_proxy localhost:4100
+	}
+
+	handle {
+		reverse_proxy localhost:3000
+	}
+
+	log {
+		output file D:/xuan/小楼WEB/caddy/logs/aitianmu-cn-access.log {
+			roll_size 50mb
+			roll_keep 5
+		}
+	}
+}
+
 :80 {
 	handle /jaaz* {
 		reverse_proxy localhost:5174

@@ -1,4 +1,4 @@
-import { sendMessages } from '@/api/chat'
+import { getChatSession, sendMessages } from '@/api/chat'
 import Blur from '@/components/common/Blur'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { eventBus, TEvents } from '@/lib/event'
@@ -45,6 +45,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useQueryClient } from '@tanstack/react-query'
 import MixedContent, { MixedContentImages, MixedContentText } from './Message/MixedContent'
 
+const CHAT_HISTORY_PAGE_SIZE = 80
 
 type ChatInterfaceProps = {
   canvasId: string
@@ -82,6 +83,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   }, [sessionList, searchSessionId])
 
   const [messages, setMessages] = useState<Message[]>([])
+  const [hasOlderMessages, setHasOlderMessages] = useState(false)
+  const [nextBeforeMessageId, setNextBeforeMessageId] = useState<number | null>(
+    null
+  )
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
   const [pending, setPending] = useState<PendingType>(
     initCanvas ? 'text' : false
   )
@@ -110,7 +116,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }, 200)
   }, [])
 
-  const mergeToolCallResult = (messages: Message[]) => {
+  const mergeToolCallResult = useCallback((messages: Message[]) => {
     const messagesWithToolCallResult = messages.map((message, index) => {
       if (message.role === 'assistant' && message.tool_calls) {
         for (const toolCall of message.tool_calls) {
@@ -131,7 +137,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     })
 
     return messagesWithToolCallResult
-  }
+  }, [])
 
   const handleDelta = useCallback(
     (data: TEvents['Socket::Session::Delta']) => {
@@ -516,21 +522,81 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     sessionIdRef.current = sessionId
 
-    const resp = await fetch('/api/chat_session/' + sessionId)
-    const data = await resp.json()
-    const msgs = data?.length ? data : []
+    const page = await getChatSession(sessionId, {
+      limit: CHAT_HISTORY_PAGE_SIZE,
+    })
+    const msgs = page.messages?.length ? page.messages : []
 
+    mergedToolCallIds.current = []
     setMessages(mergeToolCallResult(msgs))
+    setHasOlderMessages(page.hasMore)
+    setNextBeforeMessageId(page.nextBeforeId)
     if (msgs.length > 0) {
       setInitCanvas(false)
     }
 
     scrollToBottom()
-  }, [sessionId, scrollToBottom, setInitCanvas])
+  }, [mergeToolCallResult, sessionId, scrollToBottom, setInitCanvas])
 
   useEffect(() => {
     initChat()
   }, [sessionId, initChat])
+
+  const loadOlderMessages = useCallback(async () => {
+    if (
+      !sessionId ||
+      !hasOlderMessages ||
+      !nextBeforeMessageId ||
+      loadingOlderMessages
+    ) {
+      return
+    }
+
+    const scrollEl = scrollRef.current
+    const previousScrollHeight = scrollEl?.scrollHeight || 0
+    const previousScrollTop = scrollEl?.scrollTop || 0
+
+    setLoadingOlderMessages(true)
+    try {
+      const page = await getChatSession(sessionId, {
+        limit: CHAT_HISTORY_PAGE_SIZE,
+        beforeId: nextBeforeMessageId,
+      })
+      setMessages((current) => {
+        mergedToolCallIds.current = []
+        return mergeToolCallResult([...page.messages, ...current])
+      })
+      setHasOlderMessages(page.hasMore)
+      setNextBeforeMessageId(page.nextBeforeId)
+      requestAnimationFrame(() => {
+        if (!scrollRef.current) return
+        scrollRef.current.scrollTop =
+          scrollRef.current.scrollHeight - previousScrollHeight + previousScrollTop
+      })
+    } finally {
+      setLoadingOlderMessages(false)
+    }
+  }, [
+    hasOlderMessages,
+    loadingOlderMessages,
+    mergeToolCallResult,
+    nextBeforeMessageId,
+    sessionId,
+  ])
+
+  useEffect(() => {
+    const scrollEl = scrollRef.current
+    if (!scrollEl) return
+
+    const handleLoadOlderOnTop = () => {
+      if (scrollEl.scrollTop <= 80) {
+        void loadOlderMessages()
+      }
+    }
+
+    scrollEl.addEventListener('scroll', handleLoadOlderOnTop)
+    return () => scrollEl.removeEventListener('scroll', handleLoadOlderOnTop)
+  }, [loadOlderMessages])
 
   const onSelectSession = (sessionId: string) => {
     setSession(sessionList.find((s) => s.id === sessionId) || null)
@@ -620,6 +686,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <ScrollArea className='h-[calc(100vh-45px)]' viewportRef={scrollRef}>
           {messages.length > 0 ? (
             <div className='flex flex-col flex-1 px-4 pb-50 pt-15'>
+              {hasOlderMessages && (
+                <div className='flex justify-center pb-3'>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='sm'
+                    disabled={loadingOlderMessages}
+                    onClick={() => void loadOlderMessages()}
+                    className='text-xs text-muted-foreground'
+                  >
+                    {loadingOlderMessages ? '加载中...' : '加载更早对话'}
+                  </Button>
+                </div>
+              )}
               {/* Messages */}
               {messages.map((message, idx) => (
                 <div key={`${idx}`} className='flex flex-col gap-4 mb-2'>
