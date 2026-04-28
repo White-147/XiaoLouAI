@@ -31,6 +31,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable
 
+import numpy as np
+
 # Matches tqdm / generate.py step lines like "  3%|▎  | 1/30 [00:45<…]"
 _STEP_RE = re.compile(r"\b(\d+)/(\d+)\s*\[")
 
@@ -45,6 +47,8 @@ _OOM_RE = re.compile(
 )
 
 from ..proc_utils import kill_process_tree
+from ...services import cv2_io
+from .yolo_detector import YOLODetector, YOLODetectorError
 
 if TYPE_CHECKING:
     from ...config import Settings
@@ -58,6 +62,12 @@ _DEFAULT_IDLE_TIMEOUT_S = 600
 _ALLOWED_INFERENCE_FPS = {15, 30, 60}
 _DEFAULT_INFERENCE_FPS = 15
 _DEFAULT_MAX_FRAME_NUM = 21
+_DEFAULT_PERSON_REPLACE_PROMPT = (
+    "Replace the masked person with the same person shown in the reference "
+    "image board. Strongly match the reference face, hairstyle, body shape, "
+    "outfit colors, and identity. Preserve the original video motion, camera, "
+    "lighting, background, and composition."
+)
 
 
 def _snap_wan_frame_num(frame_num: int) -> int:
@@ -95,6 +105,219 @@ def _probe_video_stats(video_path: Path) -> tuple[float, int, float]:
 
 
 # ── OOM detection helper ──────────────────────────────────────────────────
+
+
+def _probe_video_size(video_path: Path) -> tuple[int, int]:
+    """Return (width, height) for target reference-board sizing."""
+    import cv2
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return 0, 0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    cap.release()
+    return width, height
+
+
+def _parse_sample_area(sample_size: str) -> int:
+    try:
+        w_raw, h_raw = str(sample_size).lower().split("*", 1)
+        return max(1, int(w_raw) * int(h_raw))
+    except Exception:
+        return 832 * 480
+
+
+def _estimate_vace_ref_canvas(video_path: Path, sample_size: str) -> tuple[int, int]:
+    """Estimate the actual VACE condition size as (width, height)."""
+    source_w, source_h = _probe_video_size(video_path)
+    if source_w <= 0 or source_h <= 0:
+        return (832, 480) if "832*480" in str(sample_size) else (480, 832)
+
+    ratio = source_h / max(1, source_w)
+    latent_area = max(1, _parse_sample_area(sample_size) // (16 * 16))
+    h_units = max(1, int(round(math.sqrt(latent_area * ratio))))
+    w_units = max(1, int(latent_area / h_units))
+    return w_units * 16, h_units * 16
+
+
+def _clip_box(box: tuple[float, float, float, float], width: int, height: int) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = box
+    ix1 = max(0, min(width - 1, int(round(x1))))
+    iy1 = max(0, min(height - 1, int(round(y1))))
+    ix2 = max(ix1 + 1, min(width, int(round(x2))))
+    iy2 = max(iy1 + 1, min(height, int(round(y2))))
+    return ix1, iy1, ix2, iy2
+
+
+def _expand_box(
+    box: tuple[float, float, float, float],
+    width: int,
+    height: int,
+    *,
+    pad_x: float,
+    pad_y: float,
+) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = box
+    bw = max(1.0, x2 - x1)
+    bh = max(1.0, y2 - y1)
+    return _clip_box(
+        (x1 - bw * pad_x, y1 - bh * pad_y, x2 + bw * pad_x, y2 + bh * pad_y),
+        width,
+        height,
+    )
+
+
+def _center_box(width: int, height: int) -> tuple[int, int, int, int]:
+    box_w = width * 0.72
+    box_h = height * 0.86
+    return _clip_box(
+        (
+            (width - box_w) / 2,
+            (height - box_h) / 2,
+            (width + box_w) / 2,
+            (height + box_h) / 2,
+        ),
+        width,
+        height,
+    )
+
+
+def _resolve_yolo_weights(settings: "Settings") -> str:
+    weights = Path(str(getattr(settings, "yolo_weights", "yolov8n.pt")))
+    if weights.is_absolute() or weights.exists():
+        return str(weights)
+    service_root = Path(__file__).resolve().parents[3]
+    candidate = service_root / weights
+    return str(candidate if candidate.exists() else weights)
+
+
+def _detect_reference_person_box(reference_path: Path, settings: "Settings") -> tuple[float, float, float, float] | None:
+    try:
+        detector = YOLODetector(weights=_resolve_yolo_weights(settings), device="cpu")
+        detector.load()
+        boxes = detector.detect(reference_path, conf=0.25, max_detections=3)
+        detector.unload()
+    except YOLODetectorError as exc:
+        logger.warning("[vace-reference] YOLO reference crop skipped: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[vace-reference] reference crop detection failed: %s", exc)
+        return None
+
+    if not boxes:
+        return None
+    best = boxes[0]
+    return best.x1, best.y1, best.x2, best.y2
+
+
+def _crop(img: np.ndarray, box: tuple[int, int, int, int]) -> np.ndarray:
+    x1, y1, x2, y2 = box
+    return img[y1:y2, x1:x2].copy()
+
+
+def _paste_fit(
+    canvas: np.ndarray,
+    crop: np.ndarray,
+    rect: tuple[int, int, int, int],
+    *,
+    mode: str,
+) -> None:
+    import cv2
+
+    x, y, w, h = rect
+    if crop.size == 0 or w <= 0 or h <= 0:
+        return
+    ch, cw = crop.shape[:2]
+    if mode == "cover":
+        scale = max(w / max(1, cw), h / max(1, ch))
+    else:
+        scale = min(w / max(1, cw), h / max(1, ch))
+    nw = max(1, int(round(cw * scale)))
+    nh = max(1, int(round(ch * scale)))
+    interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+    resized = cv2.resize(crop, (nw, nh), interpolation=interpolation)
+    if mode == "cover":
+        sx = max(0, (nw - w) // 2)
+        sy = max(0, (nh - h) // 2)
+        canvas[y:y + h, x:x + w] = resized[sy:sy + h, sx:sx + w]
+        return
+
+    px = x + (w - nw) // 2
+    py = y + (h - nh) // 2
+    canvas[py:py + nh, px:px + nw] = resized
+
+
+def _build_reference_board(
+    reference_path: Path,
+    video_path: Path,
+    out_path: Path,
+    *,
+    sample_size: str,
+    settings: "Settings",
+) -> Path:
+    """Create a VACE-ready reference board with enlarged identity cues."""
+    ref = cv2_io.imread(reference_path)
+    if ref is None:
+        raise RuntimeError(f"Could not read reference image: {reference_path}")
+
+    import cv2
+
+    src_h, src_w = ref.shape[:2]
+    person_box = _detect_reference_person_box(reference_path, settings)
+    if person_box is None:
+        person_box = _center_box(src_w, src_h)
+
+    x1, y1, x2, y2 = person_box
+    body_h = max(1.0, y2 - y1)
+    body_box = _expand_box(person_box, src_w, src_h, pad_x=0.08, pad_y=0.05)
+    upper_box = _expand_box((x1, y1, x2, y1 + body_h * 0.58), src_w, src_h, pad_x=0.18, pad_y=0.16)
+
+    head_cx = (x1 + x2) / 2
+    head_cy = y1 + body_h * 0.16
+    head_side = max((x2 - x1) * 0.85, body_h * 0.20)
+    face_box = _clip_box(
+        (
+            head_cx - head_side / 2,
+            head_cy - head_side / 2,
+            head_cx + head_side / 2,
+            head_cy + head_side / 2,
+        ),
+        src_w,
+        src_h,
+    )
+
+    canvas_w, canvas_h = _estimate_vace_ref_canvas(video_path, sample_size)
+    canvas = np.full((canvas_h, canvas_w, 3), 245, dtype=np.uint8)
+
+    gap = max(8, int(canvas_w * 0.014))
+    margin = max(10, int(canvas_w * 0.018))
+    panel_h = canvas_h - margin * 2
+    left_w = int(canvas_w * 0.30)
+    mid_w = int(canvas_w * 0.34)
+    right_w = canvas_w - margin * 2 - gap * 2 - left_w - mid_w
+    left = (margin, margin, left_w, panel_h)
+    middle = (margin + left_w + gap, margin, mid_w, panel_h)
+    right = (margin + left_w + gap + mid_w + gap, margin, right_w, panel_h)
+
+    for rect in (left, middle, right):
+        x, y, w, h = rect
+        cv2.rectangle(canvas, (x, y), (x + w - 1, y + h - 1), (232, 232, 232), 1)
+
+    _paste_fit(canvas, _crop(ref, body_box), left, mode="contain")
+    _paste_fit(canvas, _crop(ref, upper_box), middle, mode="cover")
+    _paste_fit(canvas, _crop(ref, face_box), right, mode="cover")
+
+    if not cv2_io.imwrite(out_path, canvas, [int(cv2.IMWRITE_JPEG_QUALITY), 94]):
+        raise RuntimeError(f"Could not write VACE reference board: {out_path}")
+    return out_path
+
+
+def _build_effective_prompt(prompt: str | None) -> str:
+    user_prompt = (prompt or "").strip()
+    if not user_prompt:
+        return _DEFAULT_PERSON_REPLACE_PROMPT
+    return f"{_DEFAULT_PERSON_REPLACE_PROMPT} User prompt: {user_prompt}"
 
 
 def _log_has_oom(log_path: Path) -> bool:
@@ -295,6 +518,8 @@ async def run_replacement_async(
     python_exe = _resolve_venv_python()
     effective_prompt = prompt or "将视频中的人物替换为参考图中的人物，保持动作流畅自然，背景不变。"
 
+    effective_prompt = _build_effective_prompt(prompt)
+
     inference_fps = _normalize_inference_fps(inference_fps)
     max_frame_num = min(
         _DEFAULT_MAX_FRAME_NUM,
@@ -341,6 +566,25 @@ async def run_replacement_async(
         except Exception as cb_exc:  # noqa: BLE001
             logger.debug("[vace-replacer] on_message raised: %s", cb_exc)
 
+    reference_for_vace_path = reference_path_abs
+    reference_board_path = result_path_abs.parent / f"_ref_{result_path_abs.stem}.jpg"
+    try:
+        reference_for_vace_path = await asyncio.to_thread(
+            _build_reference_board,
+            reference_path_abs,
+            video_path_abs,
+            reference_board_path,
+            sample_size=str(sample_size),
+            settings=settings,
+        )
+        logger.info("[vace-replacer] prepared VACE reference board: %s", reference_for_vace_path)
+        if on_message is not None:
+            res = on_message("VACE reference image optimized: face, upper body, and full body crops enlarged.")
+            if asyncio.iscoroutine(res):
+                await res
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[vace-replacer] reference board preprocessing failed; using original image: %s", exc)
+
     env = os.environ.copy()
     env["PYTHONPATH"] = str(repo_dir_abs) + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONUNBUFFERED"] = "1"
@@ -374,7 +618,7 @@ async def run_replacement_async(
             "--size", str(sample_size),
             "--src_video", str(video_path_abs),
             "--src_mask", str(mask_video_path),
-            "--src_ref_images", str(reference_path_abs),
+            "--src_ref_images", str(reference_for_vace_path),
             "--save_file", str(result_path_abs),
             "--t5_cpu",
         ]
