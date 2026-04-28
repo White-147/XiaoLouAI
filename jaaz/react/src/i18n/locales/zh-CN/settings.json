@@ -1,0 +1,110 @@
+{
+  "title": "设置",
+  "messages": {
+    "settingsSaved": "设置保存成功",
+    "settingsReset": "设置已重置为默认值",
+    "failedToSave": "保存设置失败",
+    "failedToLoad": "加载配置失败",
+    "restartRequired": "请重启应用以使代理设置生效"
+  },
+  "models": {
+    "title": "模型",
+    "placeholder": "输入模型名称",
+    "addModel": "添加模型",
+    "types": {
+      "text": "语言模型",
+      "image": "生图模型",
+      "video": "视频生成模型"
+    }
+  },
+  "provider": {
+    "title": "提供商",
+    "addProvider": "添加提供商",
+    "providerName": "提供商名称",
+    "providerNamePlaceholder": "输入提供商名称",
+    "apiUrl": "API 地址",
+    "apiUrlPlaceholder": "输入 API 地址",
+    "apiKey": "API 密钥",
+    "apiKeyPlaceholder": "输入 API 密钥",
+    "apiKeyDescription": "您的 API 密钥将被安全存储",
+    "maxTokens": "最大令牌数",
+    "maxTokensPlaceholder": "输入最大令牌数",
+    "maxTokensDescription": "响应中的最大令牌数",
+    "customProvider": "✨ 自定义提供商",
+    "imageGeneration": "🎨 图像生成",
+    "delete": "删除",
+    "save": "保存",
+    "cancel": "取消",
+    "noModelsSelected": "请添加至少一个模型"
+  },
+  "proxy": {
+    "title": "代理设置",
+    "mode": "代理模式",
+    "selectMode": "选择代理模式",
+    "modes": {
+      "no_proxy": "不使用代理",
+      "system": "系统代理",
+      "custom": "自定义代理"
+    },
+    "enable": "启用代理",
+    "url": "代理地址",
+    "urlPlaceholder": "http://proxy.example.com:8080",
+    "testConnection": "测试连接",
+    "testing": "测试中...",
+    "testSuccess": "代理连接测试成功",
+    "testFailed": "代理连接测试失败: {{message}}",
+    "testError": "代理连接测试出错",
+    "status": {
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "misconfigured": "配置错误"
+    }
+  },
+  "comfyui": {
+    "title": "ComfyUI",
+    "localImageGeneration": "🎨 本地图像生成",
+    "enable": "启用",
+    "debugStatus": "🔍 调试状态",
+    "status": {
+      "disabled": "已禁用",
+      "running": "运行中",
+      "installed": "已安装（未运行）",
+      "notInstalled": "未安装",
+      "notRunning": "未运行",
+      "checking": "检查中..."
+    },
+    "urlDescription": "ComfyUI 服务地址，如果已安装请输入地址",
+    "invalidUrl": "请输入有效的 URL 地址（如：http://127.0.0.1:8188）",
+    "notInstalledTitle": "ComfyUI 未安装",
+    "notInstalledDescription": "安装 ComfyUI 以启用 Flux 模型的本地图像生成",
+    "installButton": "安装 ComfyUI",
+    "startButton": "启动 ComfyUI",
+    "uninstallButton": "卸载 ComfyUI",
+    "confirmUninstall": "确定要卸载 ComfyUI 吗？这将完全从您的系统中移除 ComfyUI，包括所有已下载的模型和配置。",
+    "confirmUninstallButton": "确认卸载",
+    "uninstallProgress": {
+      "title": "正在卸载 ComfyUI",
+      "preparing": "准备卸载中...",
+      "inProgress": "卸载进行中... 请稍候。",
+      "logTitle": "卸载日志：",
+      "completed": "卸载完成"
+    },
+    "notInstalled": "ComfyUI 未安装",
+    "deleteWorkflowConfirmation": "您确定要删除此工作流吗？",
+    "addInput": "添加输入参数",
+    "editWorkflow": "编辑工作流",
+    "addWorkflow": "添加工作流",
+    "save": "保存",
+    "submit": "提交",
+    "uploadWorkflowApiJson": "上传工作流API JSON",
+    "workflowInputsConfiguration": "工作流输入参数设置",
+    "defaultValue": "默认值",
+    "describeInput": "请描述这个参数是做什么的，让LLM可以理解这个参数的作用，来更智能的调用工具，动态传入正确参数",
+    "workflowName": "工作流名称，只能包含a-Z, 0-9, 下划线_",
+    "workflowDescription": "工作流描述，描述工作流的用途，功能作用，让大模型更好的调用",
+    "workflowNameInvalid": "工作流名称只能允许字母、数字、下划线，以方便大模型动态调用"
+  },
+  "saveSettings": "保存设置",
+  "close": "关闭",
+  "cancel": "取消"
+}

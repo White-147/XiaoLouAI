@@ -1,0 +1,82 @@
+[project]
+name = "xiaolou-video-replace-service"
+version = "0.3.0"
+description = "Video character replacement service for XIAOLOU — SAM2 + VACE/Wan2.1 full deep-learning pipeline"
+requires-python = ">=3.10,<3.13"
+
+dependencies = [
+  # Web
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "python-multipart>=0.0.12",
+  "sse-starlette>=2.1",
+  # Config / validation
+  "pydantic>=2.9",
+  "pydantic-settings>=2.5",
+  # Storage / DB
+  "aiosqlite>=0.20",
+  "aiofiles>=24.1",
+  # Media (H.264/AAC finalization + ffmpeg bundled fallback)
+  "opencv-contrib-python>=4.10",
+  "numpy>=1.26,<2.0",
+  "Pillow>=10.4",
+  "imageio>=2.34",
+  "imageio-ffmpeg>=0.5",
+  "ffmpeg-python>=0.2",
+  # Video decoding (required by Wan2.1 VACE vace_processor.py)
+  "decord>=0.6.0",
+  # HTTP (for asset URL imports)
+  "httpx>=0.27",
+  # Detection
+  "ultralytics>=8.4",
+  # VACE / Wan2.1 runtime (imported by their generate.py)
+  "einops>=0.8",
+  "transformers>=4.44",
+  "accelerate>=1.0",
+  "diffusers>=0.30",
+  "huggingface_hub>=0.25",
+  "safetensors>=0.4",
+  "sentencepiece>=0.2",
+  "protobuf>=4.25",
+  "tqdm>=4.66",
+  "easydict>=1.13",
+  "ftfy>=6.2",
+  # SAM2 hydra/omegaconf config loader
+  "omegaconf>=2.3",
+  "hydra-core>=1.3",
+  "iopath>=0.1.10",
+  "pyyaml",
+]
+
+[project.optional-dependencies]
+# GPU-only extras (installed separately from a CUDA wheel index):
+#   pip install --index-url https://download.pytorch.org/whl/cu124 torch torchvision torchaudio
+# and:
+#   pip install git+https://github.com/facebookresearch/sam2.git
+gpu = [
+  # Listed here for reference; users must use the pytorch wheel index above
+  # because PyPI doesn't host CUDA-enabled builds.
+  "torch>=2.4",
+  "torchvision>=0.19",
+]
+
+dev = [
+  "ruff>=0.6",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["setuptools>=68,<82"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP"]
+ignore = ["E501"]

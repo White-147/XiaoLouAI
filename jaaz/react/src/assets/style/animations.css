@@ -1,0 +1,14 @@
+.brush-icon-animation {
+  animation: brush-icon-animation 1s infinite;
+  transform-origin: top center;
+  animation-direction: alternate;
+}
+
+@keyframes brush-icon-animation {
+  0% {
+    transform: rotate(-8deg) translateY(-1px) translateX(-1px);
+  }
+  100% {
+    transform: rotate(1deg) translateX(2px);
+  }
+}

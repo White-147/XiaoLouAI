@@ -1,0 +1,52 @@
+#root {
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+h2 {
+  font-size: 1.5rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+h3 {
+  font-size: 1.25rem;
+  font-weight: 400;
+  margin-bottom: 0.5rem;
+}
+h4 {
+  font-size: 1rem;
+  font-weight: 300;
+  margin-bottom: 0.5rem;
+}
+.mdxeditor [role="textbox"] {
+  height: calc(100vh - 200px);
+}
+.mdxeditor p {
+  margin-bottom: 0.8rem;
+}
+
+.mdxeditor ul {
+  list-style-type: disc; /* Use bullet points for unordered lists */
+  margin-left: 1.5rem; /* Add some indentation */
+}
+
+/* Style ordered lists (numbered) */
+.mdxeditor ol {
+  list-style-type: decimal; /* Use numbers for ordered lists */
+  margin-left: 1.5rem; /* Add some indentation */
+}
+
+/* Style for list items */
+.mdxeditor li {
+  margin-bottom: 0.5rem; /* Add spacing between list items */
+}
+
+/* Optional: Style for nested lists (nested ordered or unordered lists) */
+.mdxeditor ul ul,
+.mdxeditor ol ol {
+  margin-left: 1.5rem; /* Indent nested lists */
+}

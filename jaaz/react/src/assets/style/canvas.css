@@ -1,0 +1,186 @@
+.excalidraw .shapes-section {
+  display: none !important;
+}
+
+/* Conditionally hide left toolbar panel when embeddable is selected */
+.excalidraw.hide-left-panel .App-menu__left {
+  display: none !important;
+}
+
+/* Video overlay styles */
+.video-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  pointer-events: none;
+  width: 100%;
+  height: 100%;
+}
+
+.video-overlay video {
+  object-fit: contain;
+  pointer-events: auto;
+}
+
+.excalidraw .Stack.Stack_vertical.App-menu_top__left>div {
+  display: none !important;
+}
+
+.ToolIcon__keybinding {
+  display: none !important;
+}
+
+/* Enable embeddable tool for video integration */
+/* .excalidraw .dropdown-menu .dropdown-menu-item[data-testid='toolbar-embeddable'] {
+  display: none !important;
+} */
+
+.excalidraw .dropdown-menu .dropdown-menu-item[data-testid='toolbar-laser']+div {
+  display: none !important;
+}
+
+.excalidraw .layer-ui__wrapper__top-right {
+  display: none !important;
+}
+
+.excalidraw .FixedSideContainer.FixedSideContainer_side_top.App-top-bar {
+  display: none !important;
+}
+
+.excalidraw .layer-ui__wrapper__footer.App-menu.App-menu_bottom {
+  display: none !important;
+}
+
+.excalidraw .App-bottom-bar {
+  display: none !important;
+}
+
+.scroll-back-to-content {
+  bottom: 80px !important;
+}
+
+.excalidraw .popover {
+  z-index: 60 !important;
+}
+
+.excalidraw .popover .context-menu {
+  border-radius: 10px !important;
+  border-color: color-mix(in oklab, var(--primary) 10%, transparent) !important;
+  background-color: color-mix(in oklab,
+      var(--background) 70%,
+      transparent) !important;
+  backdrop-filter: blur(60px) !important;
+  box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.1) !important;
+  font-size: 14px !important;
+}
+
+.excalidraw .popover .context-menu .context-menu-item-separator {
+  border-color: color-mix(in oklab, var(--primary) 8%, transparent) !important;
+  margin: 4px 0 !important;
+}
+
+/* 自定义深色模式修复类 */
+.excalidraw-custom.excalidraw-dark-fix-wm76394yjopk {
+  /* 移除所有滤镜效果 */
+  filter: none !important;
+}
+
+.excalidraw-custom.excalidraw-dark-fix-wm76394yjopk * {
+  /* 确保所有子元素也不受滤镜影响 */
+  filter: none !important;
+}
+
+/* 为自定义深色模式设置适当的颜色 */
+.excalidraw-custom.excalidraw-dark-fix-wm76394yjopk {
+  --color-primary: #f5f5f5 !important;
+  --color-primary-darker: #e0e0e0 !important;
+  --color-primary-darkest: #cccccc !important;
+  --color-primary-light: #ffffff !important;
+  background-color: #121212 !important;
+  color: #f5f5f5 !important;
+}
+
+/* 直接覆盖Excalidraw的核心CSS类 */
+.excalidraw-wrapper .excalidraw.theme--dark {
+  filter: none !important;
+}
+
+.excalidraw-wrapper .excalidraw.theme--dark .App-menu_top,
+.excalidraw-wrapper .excalidraw.theme--dark .App-menu_bottom,
+.excalidraw-wrapper .excalidraw.theme--dark .App-menu_left,
+.excalidraw-wrapper .excalidraw.theme--dark .App-menu_right {
+  filter: none !important;
+}
+
+.excalidraw-wrapper .excalidraw.theme--dark .layer-ui__wrapper {
+  filter: none !important;
+}
+
+/* 覆盖Excalidraw的画布滤镜 */
+.excalidraw-wrapper .excalidraw.theme--dark .FixedSideContainer {
+  filter: none !important;
+}
+
+/* 覆盖Excalidraw的元素滤镜 */
+.excalidraw-wrapper .excalidraw.theme--dark .excalidraw-element {
+  filter: none !important;
+}
+
+/* 最直接的解决方案：覆盖所有Excalidraw容器元素 */
+.excalidraw.theme--dark,
+.excalidraw.theme--dark *,
+.excalidraw-wrapper,
+.excalidraw-wrapper *,
+.excalidraw-container,
+.excalidraw-container * {
+  filter: none !important;
+}
+
+/* 覆盖Excalidraw的主要容器 */
+.excalidraw-app {
+  filter: none !important;
+}
+
+/* 覆盖Excalidraw的画布容器 */
+.excalidraw-canvas {
+  filter: none !important;
+}
+
+/* 覆盖Excalidraw的场景容器 */
+.scene-container {
+  filter: none !important;
+}
+
+/* 为深色模式设置适当的背景色和文本颜色 */
+.excalidraw.theme--dark {
+  --color-canvas-background: #121212 !important;
+  background-color: #121212 !important;
+  color: #f5f5f5 !important;
+}
+
+/* 确保深色模式下的文本元素颜色正确 */
+.excalidraw-wrapper .excalidraw.theme--dark .Layer_textarea {
+  filter: none !important;
+  color: #f5f5f5 !important;
+}
+
+/* 确保深色模式下的UI元素颜色正确 */
+.excalidraw-wrapper .excalidraw.theme--dark .ToolIcon__icon,
+.excalidraw-wrapper .excalidraw.theme--dark .ToolIcon__label {
+  filter: none !important;
+  color: #f5f5f5 !important;
+}
+
+/* 确保深色模式下的按钮颜色正确 */
+.excalidraw-wrapper .excalidraw.theme--dark button {
+  filter: none !important;
+}
+
+/* 确保深色模式下的输入框颜色正确 */
+.excalidraw-wrapper .excalidraw.theme--dark input,
+.excalidraw-wrapper .excalidraw.theme--dark textarea {
+  filter: none !important;
+  color: #f5f5f5 !important;
+  background-color: #333333 !important;
+}

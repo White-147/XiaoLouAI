@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* Custom scrollbar — Lovart style (translucent warm overlay) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #171612; /* Lovart --bg-base-secondary dark */
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(245, 244, 239, 0.15); /* Lovart --border-neutral-l1 approximation */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 244, 239, 0.25);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #100f09; /* Lovart --bg-base-default dark */
+  color: #f5f4ef;            /* Lovart --text-default dark */
+  overflow: hidden;
+  /* "GT Standard" is Lovart's proprietary font; system stack is used as fallback */
+  font-family: "GT Standard", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* During drag/pan: promote layers to GPU & contain layout reflow */
+.canvas-dragging video {
+  pointer-events: none;
+}
+
+.canvas-dragging .pointer-events-auto {
+  will-change: transform;
+}
+
+.canvas-dragging [data-canvas-node] {
+  contain: layout style paint;
+}

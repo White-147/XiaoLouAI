@@ -1,0 +1,102 @@
+{
+  "title": "Settings",
+  "messages": {
+    "settingsSaved": "Settings saved successfully",
+    "settingsReset": "Settings reset to default",
+    "failedToSave": "Failed to save settings",
+    "failedToLoad": "Failed to load configuration",
+    "restartRequired": "Please restart the application for proxy settings to take effect"
+  },
+  "models": {
+    "title": "Models",
+    "placeholder": "Enter model name",
+    "addModel": "Add Model",
+    "types": {
+      "text": "text",
+      "image": "image",
+      "video": "video"
+    }
+  },
+  "provider": {
+    "title": "Providers",
+    "addProvider": "Add Provider",
+    "providerName": "Provider Name",
+    "providerNamePlaceholder": "Enter provider name",
+    "apiUrl": "API URL",
+    "apiUrlPlaceholder": "Enter API URL",
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "Enter API key",
+    "apiKeyDescription": "Your API key will be stored securely",
+    "maxTokens": "Max Tokens",
+    "maxTokensPlaceholder": "Enter your max tokens",
+    "maxTokensDescription": "The maximum number of tokens in the response",
+    "customProvider": "✨ Custom Provider",
+    "imageGeneration": "🎨 Image Generation",
+    "delete": "Delete",
+    "save": "Save",
+    "cancel": "Cancel",
+    "noModelsSelected": "Please add at least one model"
+  },
+  "proxy": {
+    "title": "Proxy Settings",
+    "mode": "Proxy Mode",
+    "selectMode": "Select proxy mode",
+    "modes": {
+      "no_proxy": "No Proxy",
+      "system": "System Proxy",
+      "custom": "Custom Proxy"
+    },
+    "enable": "Enable Proxy",
+    "url": "Proxy URL",
+    "urlPlaceholder": "http://proxy.example.com:8080",
+    "testConnection": "Test Connection",
+    "testing": "Testing...",
+    "testSuccess": "Proxy connection test successful",
+    "testFailed": "Proxy connection test failed: {{message}}",
+    "testError": "Proxy connection test error",
+    "status": {
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "misconfigured": "Misconfigured"
+    }
+  },
+  "comfyui": {
+    "title": "ComfyUI",
+    "localImageGeneration": "🎨 Local Image Generation",
+    "enable": "Enable",
+    "debugStatus": "🔍 Debug Status",
+    "status": {
+      "disabled": "Disabled",
+      "running": "Running",
+      "installed": "Installed (Not Running)",
+      "notInstalled": "Not Installed",
+      "notRunning": "Not Running",
+      "checking": "Checking..."
+    },
+    "urlDescription": "ComfyUI service URL, enter the address if already installed",
+    "invalidUrl": "Please enter a valid URL (e.g., http://127.0.0.1:8188)",
+    "notInstalledTitle": "ComfyUI Not Installed",
+    "notInstalledDescription": "Install ComfyUI to enable local image generation with Flux models",
+    "installButton": "Install ComfyUI",
+    "startButton": "Start ComfyUI",
+    "uninstallButton": "Uninstall ComfyUI",
+    "confirmUninstall": "Are you sure you want to uninstall ComfyUI? This will completely remove ComfyUI from your system, including all downloaded models and configurations.",
+    "confirmUninstallButton": "Confirm Uninstall",
+    "deleteWorkflowConfirmation": "Are you sure you want to delete this workflow?",
+    "uninstallProgress": {
+      "title": "Uninstalling ComfyUI",
+      "preparing": "Preparing to uninstall...",
+      "inProgress": "Uninstallation in progress... Please wait.",
+      "logTitle": "Uninstallation Log:",
+      "completed": "Uninstallation completed"
+    },
+    "notInstalled": "ComfyUI is not installed",
+    "addWorkflow": "Add Workflow",
+    "addInput": "Add Input",
+    "workflows": "Workflows",
+    "editWorkflow": "Edit Workflow"
+  },
+  "saveSettings": "Save Settings",
+  "close": "Close",
+  "cancel": "Cancel"
+}
