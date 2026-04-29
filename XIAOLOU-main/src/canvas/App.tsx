@@ -39,6 +39,7 @@ import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
 import { extractVideoLastFrame } from './utils/videoHelpers';
+import { getNodeRect } from './utils/nodeGeometry';
 import { generateUUID } from './utils/secureContextPolyfills';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { DEFAULT_XIAOLOU_IMAGE_TO_VIDEO_MODEL_ID } from './config/canvasVideoModels';
@@ -1029,10 +1030,15 @@ export default function App() {
     generationAccess,
   });
 
+  // Keep a ref to handleGenerate so setTimeout callbacks can access the latest version
+  const handleGenerateRef = React.useRef<(id: string) => void>(() => undefined);
+
   const handleGenerate = React.useCallback((id: string) => {
     const sourceNode = nodes.find((node) => node.id === id);
     if (!sourceNode) return;
 
+    const isPlainImageNode = sourceNode.type === NodeType.IMAGE;
+    const isPlainVideoNode = sourceNode.type === NodeType.VIDEO;
     const isImageGenerationNode =
       sourceNode.type === NodeType.IMAGE || sourceNode.type === NodeType.IMAGE_EDITOR;
     const batchCount = isImageGenerationNode
@@ -1040,8 +1046,6 @@ export default function App() {
       : 1;
 
     if (
-      !isImageGenerationNode ||
-      batchCount <= 1 ||
       sourceNode.status === NodeStatus.LOADING ||
       (generationAccess && !generationAccess.canGenerate)
     ) {
@@ -1056,38 +1060,97 @@ export default function App() {
       }
       return count;
     }, 0);
+    const hasPromptSource = Boolean(sourceNode.prompt?.trim()) || textPromptCount > 0;
+    const isPromptOptionalKlingFrameToFrameVideo =
+      isPlainVideoNode &&
+      (sourceNode.videoModel || sourceNode.model || '').startsWith('kling-') &&
+      sourceNode.videoMode === 'frame-to-frame' &&
+      (sourceNode.parentIds?.length || 0) >= 2;
 
-    if (!sourceNode.prompt?.trim() && textPromptCount === 0) {
+    const sourceRect = getNodeRect(sourceNode);
+    const siblingX = sourceRect.right + 100;
+    const siblingYStep = Math.max(sourceRect.height + 80, 500);
+    const createGenerationClone = (
+      index: number,
+      totalCount: number,
+      parentIds: string[],
+    ): NodeData => {
+      const totalHeight = (totalCount - 1) * siblingYStep;
+      const startYOffset = -totalHeight / 2;
+
+      return {
+        ...sourceNode,
+        id: generateUUID(),
+        x: siblingX,
+        y: sourceNode.y + startYOffset + (index * siblingYStep),
+        status: NodeStatus.IDLE,
+        loadingKind: undefined,
+        resultUrl: undefined,
+        resultAspectRatio: undefined,
+        errorMessage: undefined,
+        taskId: undefined,
+        generationStartTime: undefined,
+        lastFrame: undefined,
+        angleMode: false,
+        batchCount: 1,
+        parentIds: [...parentIds],
+        frameInputs: sourceNode.frameInputs?.map((input) => ({ ...input })),
+        characterReferenceUrls: sourceNode.characterReferenceUrls
+          ? [...sourceNode.characterReferenceUrls]
+          : undefined,
+      };
+    };
+
+    const hasGeneratedPlainMediaResult =
+      (isPlainImageNode || isPlainVideoNode) &&
+      typeof sourceNode.resultUrl === 'string' &&
+      sourceNode.resultUrl.trim().length > 0;
+
+    if (hasGeneratedPlainMediaResult) {
+      if (!hasPromptSource && !isPromptOptionalKlingFrameToFrameVideo) {
+        void handleGenerateSingle(id);
+        return;
+      }
+
+      const cloneCount = isPlainImageNode ? batchCount : 1;
+      const clonedNodes = Array.from({ length: cloneCount }, (_, index) =>
+        createGenerationClone(
+          index,
+          cloneCount,
+          (sourceNode.parentIds || []).filter((parentId) => parentId !== sourceNode.id),
+        ),
+      );
+
+      setNodes((prev) => [...prev, ...clonedNodes]);
+      setSelectedNodeIds(clonedNodes.map((node) => node.id));
+
+      clonedNodes.forEach((node, index) => {
+        window.setTimeout(() => {
+          void handleGenerateRef.current(node.id);
+        }, 150 + (index * 350));
+      });
+      return;
+    }
+
+    if (!isImageGenerationNode || batchCount <= 1) {
       void handleGenerateSingle(id);
       return;
     }
 
-    const startX = sourceNode.x + 360;
-    const yStep = 500;
+    if (!hasPromptSource) {
+      void handleGenerateSingle(id);
+      return;
+    }
+
     const siblingCount = batchCount - 1;
-    const totalHeight = (siblingCount - 1) * yStep;
-    const startYOffset = -totalHeight / 2;
     const extraParentIds =
       sourceNode.resultUrl && !sourceNode.parentIds?.includes(sourceNode.id)
         ? [sourceNode.id, ...(sourceNode.parentIds || [])]
         : [...(sourceNode.parentIds || [])];
 
-    const clonedNodes: NodeData[] = Array.from({ length: siblingCount }, (_, index) => ({
-      ...sourceNode,
-      id: generateUUID(),
-      x: startX,
-      y: sourceNode.y + startYOffset + (index * yStep),
-      status: NodeStatus.IDLE,
-      resultUrl: undefined,
-      resultAspectRatio: undefined,
-      errorMessage: undefined,
-      taskId: undefined,
-      generationStartTime: undefined,
-      lastFrame: undefined,
-      angleMode: false,
-      batchCount: 1,
-      parentIds: extraParentIds,
-    }));
+    const clonedNodes: NodeData[] = Array.from({ length: siblingCount }, (_, index) =>
+      createGenerationClone(index, siblingCount, extraParentIds),
+    );
 
     if (clonedNodes.length > 0) {
       setNodes((prev) => [...prev, ...clonedNodes]);
@@ -1097,13 +1160,11 @@ export default function App() {
 
     clonedNodes.forEach((node, index) => {
       window.setTimeout(() => {
-        void handleGenerateSingle(node.id);
+        void handleGenerateRef.current(node.id);
       }, 150 + (index * 350));
     });
-  }, [generationAccess, handleGenerateSingle, nodes, setNodes]);
+  }, [generationAccess, handleGenerateSingle, nodes, setNodes, setSelectedNodeIds]);
 
-  // Keep a ref to handleGenerate so setTimeout callbacks can access the latest version
-  const handleGenerateRef = React.useRef(handleGenerate);
   React.useEffect(() => {
     handleGenerateRef.current = handleGenerate;
   }, [handleGenerate]);
