@@ -29,7 +29,7 @@ type JaazMessage = {
 };
 
 export type JaazAgentAttachment = {
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'audio';
   url: string;
   nodeId?: string;
   base64?: string;

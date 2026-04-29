@@ -19,11 +19,18 @@ import { ChangeAnglePanel } from './ChangeAnglePanel';
 import { LocalModel, getLocalModels } from '../../services/localModelService';
 import {
     CANVAS_IMAGE_MODELS,
-    normalizeCanvasImageModelId
+    getCanvasImageQualityOptions,
+    getCanvasImageResolutionOptions,
+    normalizeCanvasImageModelId,
+    normalizeCanvasImageOutputCount,
+    shouldShowCanvasImageOutputCount,
+    shouldShowCanvasImageQuality,
+    shouldShowCanvasImageResolution
 } from '../../config/canvasImageModels';
 import { useImageCapabilities } from '../../hooks/useMediaCapabilities';
 import { useFloatingPanelOffset } from '../../hooks/useFloatingPanelOffset';
 import { ReferencePromptInput, type PromptImageReference } from './ReferencePromptInput';
+import { useCreateCreditQuote } from '../../../lib/useCreateCreditQuote';
 
 interface NodeControlsProps {
     data: NodeData;
@@ -42,6 +49,7 @@ interface NodeControlsProps {
     onPickFromLibrary?: (nodeId: string) => void;
     onSelect: (id: string) => void;
     zoom: number;
+    creditQuoteProjectId?: string | null;
     canvasTheme?: 'dark' | 'light';
     allowCameraAngle?: boolean;
 }
@@ -60,9 +68,16 @@ type CanvasImageModelCompat = {
     supportsMultiImage: boolean;
     recommended?: boolean;
     resolutions: string[];
+    resolutionControl?: 'none' | 'fixed' | 'selectable';
+    qualities?: string[];
+    qualityControl?: 'none' | 'fixed' | 'selectable';
     aspectRatios: string[];
     defaultResolution?: string;
+    defaultQuality?: string;
     defaultAspectRatio?: string;
+    supportsNativeOutputCount?: boolean;
+    maxOutputImages?: number;
+    defaultOutputCount?: number;
 };
 
 function capabilityToImageModel(cap: BridgeMediaModelCapability): CanvasImageModelCompat {
@@ -78,13 +93,20 @@ function capabilityToImageModel(cap: BridgeMediaModelCapability): CanvasImageMod
         supportsMultiImage: !!multiMode?.supported,
         recommended: cap.recommended,
         resolutions: primaryMode?.supportedResolutions || [],
+        resolutionControl: primaryMode?.resolutionControl,
+        qualities: primaryMode?.supportedQualities || [],
+        qualityControl: primaryMode?.qualityControl,
         aspectRatios: primaryMode?.supportedAspectRatios || [],
         defaultResolution: primaryMode?.defaultResolution || undefined,
+        defaultQuality: primaryMode?.defaultQuality || undefined,
         defaultAspectRatio: primaryMode?.defaultAspectRatio || undefined,
+        supportsNativeOutputCount: !!primaryMode?.supportsNativeOutputCount,
+        maxOutputImages: primaryMode?.maxOutputImages || undefined,
+        defaultOutputCount: primaryMode?.defaultOutputCount || undefined,
     };
 }
 
-const STATIC_IMAGE_MODELS = CANVAS_IMAGE_MODELS;
+const STATIC_IMAGE_MODELS = CANVAS_IMAGE_MODELS.filter((model) => !model.hiddenUnlessConfigured);
 
 // Lovart-style per-ratio pixel dimensions at the 2K base. Other resolutions
 // scale linearly (each output dim multiplied by base/2048), then snapped to
@@ -228,6 +250,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     onPickFromLibrary,
     onSelect,
     zoom,
+    creditQuoteProjectId = null,
     canvasTheme = 'dark',
     allowCameraAngle = true
 }) => {
@@ -400,6 +423,12 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
         if (newModel?.resolutions && newModel.resolutions.length > 0 && data.resolution && !newModel.resolutions.includes(data.resolution)) {
             updates.resolution = newModel.resolutions.includes('2K') ? '2K' : newModel.resolutions[0];
         }
+        if (newModel && !shouldShowCanvasImageResolution(newModel)) {
+            updates.resolution = '';
+        }
+        if (newModel) {
+            updates.batchCount = normalizeCanvasImageOutputCount(newModel, data.batchCount);
+        }
         onUpdate(data.id, updates);
         setOpenPopup(null);
     };
@@ -427,8 +456,16 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
         if (isLocalModelNode) {
             return ['512'];
         }
-        return currentImageModel.resolutions?.length ? currentImageModel.resolutions : [];
+        return getCanvasImageResolutionOptions(currentImageModel);
     }, [currentImageModel.resolutions, isLocalModelNode]);
+    const qualityOptions = useMemo(
+        () => getCanvasImageQualityOptions(currentImageModel),
+        [currentImageModel],
+    );
+    const showQualitySettings = !isLocalModelNode && shouldShowCanvasImageQuality(currentImageModel);
+    const showResolutionSettings = isLocalModelNode || shouldShowCanvasImageResolution(currentImageModel);
+    const showOutputCountSettings = !isLocalModelNode && shouldShowCanvasImageOutputCount(currentImageModel);
+    const showDimensionSettings = showQualitySettings && !showResolutionSettings;
 
     const preferredAspectRatio = useMemo(
         () => currentImageModel.defaultAspectRatio || imageAspectRatioOptions.find((option) => option === '1:1') || imageAspectRatioOptions[0] || '1:1',
@@ -457,9 +494,13 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
         ) {
             updates.resolution = preferredResolution;
         }
+        if (resolutionOptions.length === 0 && data.resolution) {
+            updates.resolution = '';
+        }
 
-        if (!Number.isFinite(Number(data.batchCount)) || Number(data.batchCount) < 1 || Number(data.batchCount) > MAX_BATCH_COUNT) {
-            updates.batchCount = 1;
+        const nextBatchCount = normalizeCanvasImageOutputCount(currentImageModel, data.batchCount);
+        if (Number(data.batchCount || 1) !== nextBatchCount) {
+            updates.batchCount = nextBatchCount;
         }
 
         if (Object.keys(updates).length > 0) {
@@ -481,17 +522,38 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
         preferredAspectRatio,
         preferredResolution,
         resolutionOptions,
+        currentImageModel,
     ]);
 
-    const currentBatchCount = Math.max(1, Math.min(MAX_BATCH_COUNT, Number(data.batchCount) || 1));
+    const currentBatchCount = normalizeCanvasImageOutputCount(currentImageModel, data.batchCount);
     const currentSizeLabel = data.aspectRatio || preferredAspectRatio;
     const currentResolution = data.resolution || preferredResolution;
     const currentAspectRatioLabel = RATIO_DISPLAY[currentSizeLabel] || currentSizeLabel;
-    const currentResolutionLabel = currentResolution || '自动';
+    const currentResolutionLabel = showResolutionSettings ? (currentResolution || '自动') : '';
+    const currentQualityLabel = showQualitySettings ? (qualityOptions[0] || '') : '';
+    const maxOutputCount = currentImageModel.maxOutputImages || 1;
     const sizeInfo = computeRatioDimensions(currentSizeLabel, currentResolution || preferredResolution || '1K');
+    const shouldQuoteImageGeneration =
+        canGenerate &&
+        (data.type === NodeType.IMAGE || data.type === NodeType.IMAGE_EDITOR) &&
+        !isLocalModelNode;
+    const imageGenerationQuote = useCreateCreditQuote(
+        shouldQuoteImageGeneration ? 'create_image_generate' : null,
+        {
+            projectId: creditQuoteProjectId || undefined,
+            count: showOutputCountSettings ? currentBatchCount : 1,
+            model: normalizedImageModelId,
+            aspectRatio: currentSizeLabel,
+            resolution: showResolutionSettings ? (currentResolution || undefined) : undefined,
+        },
+        shouldQuoteImageGeneration,
+    );
+    const generateCreditLabel = imageGenerationQuote.isLoading
+        ? '...'
+        : String(imageGenerationQuote.quote?.credits ?? 0);
     const countOptions = useMemo(
-        () => Array.from({ length: MAX_BATCH_COUNT }, (_, index) => index + 1),
-        [],
+        () => Array.from({ length: maxOutputCount }, (_, index) => index + 1),
+        [maxOutputCount],
     );
     const isSettingsOpen = openPopup === 'settings';
 
@@ -504,7 +566,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     };
 
     const handleBatchCountSelect = (value: number) => {
-        onUpdate(data.id, { batchCount: value });
+        onUpdate(data.id, { batchCount: normalizeCanvasImageOutputCount(currentImageModel, value) });
     };
 
     const handleCanvasSelectNode = (nodeId: string) => {
@@ -573,13 +635,23 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
             data.aspectRatio,
             data.resolution,
             data.batchCount,
+            generateCreditLabel,
         ],
     });
 
     const isDark = canvasTheme === 'dark';
-    const generationMetaLabel = `${currentResolutionLabel} · ${currentAspectRatioLabel} · ${currentBatchCount}张`;
+    const generationMetaLabel = [
+        currentQualityLabel,
+        showResolutionSettings ? currentResolutionLabel : null,
+        currentAspectRatioLabel,
+        showOutputCountSettings ? `${currentBatchCount} img` : null,
+    ].filter(Boolean).join(' · ');
     const isGenerateDisabled = isLoading || !canGenerate;
-    const generateButtonTitle = !canGenerate ? generateDisabledReason || '当前账号暂无创作权限' : '生成';
+    const generateButtonTitle = !canGenerate
+        ? generateDisabledReason || '当前账号暂无创作权限'
+        : imageGenerationQuote.quote
+            ? `生成，预计消耗 ${imageGenerationQuote.quote.credits} 积分`
+            : '生成';
     const shouldShowReferenceStrip = isImageNode && canAttachReferenceImages;
     const promptReferenceOptions = useMemo<PromptImageReference[]>(
         () => connectedImageNodes.map((node, index) => ({
@@ -869,6 +941,37 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                             图像设置
                                         </div>
 
+                                        {showQualitySettings && (
+                                        <div className="space-y-3">
+                                            <div className={`text-sm font-medium ${isDark ? 'text-neutral-200' : 'text-[#171512]'}`}>
+                                                质量
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {qualityOptions.map((option) => {
+                                                    const isSelected = currentQualityLabel === option;
+                                                    return (
+                                                        <button
+                                                            key={option}
+                                                            type="button"
+                                                            className={`min-w-[64px] rounded-full border px-4 py-2 text-sm transition-colors ${
+                                                                isSelected
+                                                                    ? (isDark
+                                                                        ? 'border-white bg-white text-[#171717]'
+                                                                        : 'border-[#171512] bg-white text-[#171512] shadow-[0_6px_18px_rgba(23,21,18,0.08)]')
+                                                                    : (isDark
+                                                                        ? 'border-neutral-700 bg-[#1f1f1f] text-neutral-300 hover:border-neutral-500'
+                                                                        : 'border-[#e9e2d8] bg-white text-[#4e493f] hover:border-[#d7cec2]')
+                                                            }`}
+                                                        >
+                                                            {option}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                        )}
+
+                                        {showResolutionSettings && (
                                         <div className="space-y-3">
                                             <div className={`text-sm font-medium ${isDark ? 'text-neutral-200' : 'text-[#171512]'}`}>
                                                 分辨率
@@ -897,7 +1000,9 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                                 })}
                                             </div>
                                         </div>
+                                        )}
 
+                                        {showDimensionSettings && (
                                         <div className="space-y-3">
                                             <div className={`flex items-center gap-1 text-sm font-medium ${isDark ? 'text-neutral-200' : 'text-[#171512]'}`}>
                                                 <span>尺寸</span>
@@ -922,6 +1027,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                                 </div>
                                             </div>
                                         </div>
+                                        )}
 
                                         <div className="space-y-3">
                                             <div className={`flex items-center gap-1 text-sm font-medium ${isDark ? 'text-neutral-200' : 'text-[#171512]'}`}>
@@ -956,6 +1062,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                             </div>
                                         </div>
 
+                                        {showOutputCountSettings && (
                                         <div className="space-y-3">
                                             <div className={`text-sm font-medium ${isDark ? 'text-neutral-200' : 'text-[#171512]'}`}>
                                                 生成数量
@@ -984,6 +1091,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                                 })}
                                             </div>
                                         </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -1100,7 +1208,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                     title={generateButtonTitle}
                                 >
                                     <Zap size={13} />
-                                    <span>14</span>
+                                    <span className="tabular-nums">{generateCreditLabel}</span>
                                 </button>
                             )}
                         </div>

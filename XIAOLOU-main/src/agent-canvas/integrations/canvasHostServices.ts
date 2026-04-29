@@ -14,6 +14,7 @@ export type HostGenerateImagePayload = {
   model: string;
   aspectRatio?: string;
   resolution?: string;
+  count?: number;
   referenceImageUrls?: string[];
   onTaskIdAssigned?: (taskId: string) => void;
 };
@@ -28,6 +29,13 @@ export type HostGenerateVideoPayload = {
   firstFrameUrl?: string;
   lastFrameUrl?: string;
   multiReferenceImageUrls?: string[];
+  referenceVideoUrls?: string[];
+  referenceAudioUrls?: string[];
+  editMode?: string;
+  editPresetId?: string;
+  motionReferenceVideoUrl?: string;
+  characterReferenceImageUrl?: string;
+  qualityMode?: string;
   videoMode?: string;
   generateAudio?: boolean;
   networkSearch?: boolean;
@@ -40,7 +48,7 @@ export type HostRecoverGenerationRequest =
 
 export type HostRecoverGenerationResult =
   | { status: 'pending' }
-  | { status: 'succeeded'; resultUrl: string; previewUrl?: string; model?: string }
+  | { status: 'succeeded'; resultUrl: string; resultUrls?: string[]; previewUrl?: string; model?: string }
   | { status: 'failed'; error?: string };
 
 export type HostFindStrayGenerationRequest = {
@@ -57,7 +65,7 @@ export type HostAssetItem = {
   category: string;
   url: string;
   previewUrl?: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'audio';
   description?: string;
   sourceTaskId?: string;
   generationPrompt?: string;
@@ -104,7 +112,7 @@ export type CanvasHostServices = {
   readonly actorId: string | null;
   readonly projectId: string | null;
   readonly initialTheme: 'light' | 'dark';
-  generateImage(payload: HostGenerateImagePayload): Promise<{ resultUrl: string; model?: string; taskId?: string }>;
+  generateImage(payload: HostGenerateImagePayload): Promise<{ resultUrl: string; resultUrls?: string[]; model?: string; taskId?: string }>;
   generateVideo(payload: HostGenerateVideoPayload): Promise<{ resultUrl: string; previewUrl?: string; model?: string; taskId?: string }>;
   getImageCapabilities(mode?: string | null): Promise<BridgeMediaCapabilitiesResponse>;
   getVideoCapabilities(mode?: string): Promise<BridgeMediaCapabilitiesResponse>;

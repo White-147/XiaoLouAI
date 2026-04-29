@@ -10,6 +10,7 @@ export type MediaKind = "image" | "video";
 
 export type MediaModelProvider =
   | "google"
+  | "google-vertex"
   | "kling"
   | "openai"
   | "volcengine"
@@ -19,7 +20,7 @@ export type MediaModelProvider =
   | "pixverse"
   | "other";
 
-export type MediaModelStatus = "stable" | "experimental" | "failing" | "preview";
+export type MediaModelStatus = "stable" | "experimental" | "failing" | "preview" | "untested";
 
 export type ImageInputMode = "text_to_image" | "image_to_image" | "multi_image";
 
@@ -27,7 +28,11 @@ export type VideoInputMode =
   | "text_to_video"
   | "single_reference"
   | "start_end_frame"
-  | "multi_param";
+  | "multi_param"
+  | "video_reference"
+  | "video_edit"
+  | "motion_control"
+  | "video_extend";
 
 /**
  * Video mode values accepted by the generation API (`/api/create/videos/generate`).
@@ -38,7 +43,10 @@ export type VideoGenerationMode =
   | "text_to_video"
   | "image_to_video"
   | "start_end_frame"
-  | "multi_param";
+  | "multi_param"
+  | "video_edit"
+  | "motion_control"
+  | "video_extend";
 
 export type MediaInputMode = ImageInputMode | VideoInputMode;
 
@@ -47,14 +55,26 @@ export interface MediaCapabilitySet {
   status: MediaModelStatus;
   supportedAspectRatios: string[];
   supportedResolutions: string[];
+  supportedQualities?: string[];
   supportedDurations?: string[];
   durationControl?: "fixed" | "selectable";
   aspectRatioControl?: "fixed" | "selectable";
-  resolutionControl?: "fixed" | "selectable";
+  resolutionControl?: "none" | "fixed" | "selectable";
+  qualityControl?: "none" | "fixed" | "selectable";
+  outputCountControl?: "fixed" | "selectable";
   defaultAspectRatio?: string | null;
   defaultResolution?: string | null;
+  defaultQuality?: string | null;
+  defaultOutputCount?: number | null;
+  maxOutputImages?: number | null;
+  supportsNativeOutputCount?: boolean;
   defaultDuration?: string | null;
   maxReferenceImages?: number;
+  maxReferenceVideos?: number;
+  maxReferenceAudios?: number;
+  qualityModes?: string[];
+  editModes?: string[];
+  requires?: string[];
   note?: string | null;
 }
 
@@ -66,6 +86,9 @@ export interface MediaModelCapability {
   status: MediaModelStatus;
   note?: string | null;
   recommended?: boolean;
+  maxReferenceImages?: number;
+  maxReferenceVideos?: number;
+  maxReferenceAudios?: number;
   inputModes: Partial<Record<MediaInputMode, MediaCapabilitySet>>;
 }
 
@@ -87,6 +110,7 @@ export const VIDEO_MODE_ALIASES: Record<string, string> = {
   "text-to-video": "text_to_video",
   "motion-control": "motion_control",
   "video-edit": "video_edit",
+  "video-extend": "video_extend",
 };
 
 export function normalizeVideoMode(mode: string | null | undefined): string {

@@ -10,6 +10,8 @@ import { CanvasNodeUploadSource, NodeData, NodeStatus, NodeType } from '../../ty
 import { NodeConnectors } from './NodeConnectors';
 import { NodeContent } from './NodeContent';
 import { NodeControls } from './NodeControls';
+import { ImageNodeFloatingToolbar, type ImageNodeToolbarActionId } from './ImageNodeFloatingToolbar';
+import { VideoNodeFloatingToolbar } from './VideoNodeFloatingToolbar';
 import { VideoSettingsPanel } from './video-settings';
 import { ChangeAnglePanel } from './ChangeAnglePanel';
 import { areNodeDataEqualExceptPosition, areConnectedCanvasNodeInputsEqual } from './nodeRenderEquality';
@@ -57,6 +59,7 @@ interface CanvasNodeProps {
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onConnectorDown: (e: React.PointerEvent, id: string, side: 'left' | 'right') => void;
   isHoveredForConnection?: boolean;
+  creditQuoteProjectId?: string | null;
   onOpenEditor?: (nodeId: string) => void;
   onUpload?: (nodeId: string, imageSource: CanvasNodeUploadSource) => void;
   onAttachReferenceImages?: (nodeId: string, imageSources: CanvasNodeUploadSource[]) => void;
@@ -88,6 +91,8 @@ interface CanvasNodeProps {
   // Resize handle wiring — the parent owns the resize state so the snap
   // engine / drag hook never fight with it.
   onResizeHandlePointerDown?: (e: React.PointerEvent, nodeId: string, handle: ResizeHandle) => void;
+  /** 图片节点主浮层操作（与 ImageNodeToolbarActionId 一一对应，可选） */
+  onImageNodeToolbarAction?: (nodeId: string, action: ImageNodeToolbarActionId) => void;
 }
 
 const CanvasNodeInner: React.FC<CanvasNodeProps> = ({
@@ -111,6 +116,7 @@ const CanvasNodeInner: React.FC<CanvasNodeProps> = ({
   onContextMenu,
   onConnectorDown,
   isHoveredForConnection,
+  creditQuoteProjectId,
   onOpenEditor,
   onUpload,
   onAttachReferenceImages,
@@ -135,6 +141,7 @@ const CanvasNodeInner: React.FC<CanvasNodeProps> = ({
   allowChatDrag = true,
   allowCameraAngle = true,
   onResizeHandlePointerDown,
+  onImageNodeToolbarAction,
 }) => {
   // ============================================================================
   // STATE
@@ -166,9 +173,10 @@ const CanvasNodeInner: React.FC<CanvasNodeProps> = ({
   const floatingTitleInputClassName = isDark
     ? 'border border-blue-400/60 bg-[#11100d]/96 text-[#f5f4ef] shadow-[0_12px_30px_rgba(37,99,235,0.18)]'
     : 'border border-blue-300 bg-white/96 text-[#100f09] shadow-[0_12px_30px_rgba(37,99,235,0.12)]';
+  /** 图片/视频成功条：仅当选中节点时显示，悬停未选中节点不显示 */
   const mediaToolbarVisibilityClassName = selected
     ? 'opacity-100 pointer-events-auto'
-    : 'pointer-events-none opacity-0 group-hover/nodecard:pointer-events-auto group-hover/nodecard:opacity-100';
+    : 'pointer-events-none opacity-0';
 
   // ============================================================================
   // EFFECTS
@@ -690,304 +698,60 @@ const CanvasNodeInner: React.FC<CanvasNodeProps> = ({
           <div className="pointer-events-none absolute -inset-[2px] z-10 rounded-[18px] border border-transparent transition-colors duration-150 group-hover/node:border-blue-400/70 group-hover/node:shadow-[0_0_0_1px_rgba(96,165,250,0.18)]" />
         )}
 
-        {/* Unified Toolbar - Appears above the card for Image nodes on hover */}
+        {/* 图片结果节点主浮层（与参考条一致；同步 / 拖对话在「更多」内） */}
         {data.type === NodeType.IMAGE && isSuccess && data.resultUrl && (
           <div
             data-node-toolbar="media"
             data-node-owner-id={data.id}
-            className={`absolute -top-[54px] left-0 right-0 flex justify-center transition-opacity z-[140] ${mediaToolbarVisibilityClassName}`}
-            style={{
-              transform: `scale(${localScale})`,
-              transformOrigin: 'bottom center'
-            }}
+            className={`pointer-events-auto absolute -top-24 left-1/2 z-[140] w-[min(100vw-1.5rem,56rem)] max-w-[calc(100vw-0.5rem)] min-w-0 -translate-x-1/2 transition-opacity ${mediaToolbarVisibilityClassName}`}
           >
-            <div className="flex items-center gap-1 px-2 py-1.5 bg-[#171612]/95 rounded-full border border-[rgba(245,244,239,0.12)] shadow-xl backdrop-blur-md">
-              {/* Multi-angle controls - Hidden for storyboard-generated scenes */}
-              {!(data.prompt && data.prompt.startsWith('Extract panel #')) && (
-                <>
-                  {allowCameraAngle && (
-                    <>
-                      <button
-                        onClick={() => onUpdate(data.id, {
-                          angleMode: !data.angleMode,
-                          angleSettings: data.angleSettings || { mode: 'camera', rotation: 0, tilt: 0, scale: 0, wideAngle: false }
-                        })}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${data.angleMode
-                          ? 'bg-blue-500 text-white'
-                          : 'text-neutral-300 hover:bg-neutral-700 hover:text-white'
-                          }`}
-                      >
-                        <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                          <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                          <line x1="12" y1="22.08" x2="12" y2="12" />
-                        </svg>
-                        多角度
-                      </button>
-                      <div className="w-px h-4 bg-neutral-600 mx-1" />
-                    </>
-                  )}
-                  {onSyncToProjectAssets ? (
-                    <button
-                      onClick={() => onSyncToProjectAssets(data.id)}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                    title="上传图片"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="17 8 12 3 7 8" />
-                      <line x1="12" y1="3" x2="12" y2="15" />
-                    </svg>
-                    同步
-                    </button>
-                  ) : null}
-                </>
-              )}
-              {/* Expand Button */}
-              <button
-                onClick={() => onExpand?.(data.resultUrl!)}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                title="查看原图"
-              >
-                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="15 3 21 3 21 9" />
-                  <polyline points="9 21 3 21 3 15" />
-                  <line x1="21" y1="3" x2="14" y2="10" />
-                  <line x1="3" y1="21" x2="10" y2="14" />
-                </svg>
-              </button>
-              {/* Post to X Button */}
-              {allowSocialShare && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onPostToX?.(data.id, data.resultUrl!, 'image'); }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                  title="发布到 X"
-                >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="currentColor">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                  </svg>
-                </button>
-              )}
-              {/* Download Button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (data.resultUrl) {
-                    const filename = `image_${data.id}.png`;
-                    const cleanUrl = data.resultUrl.split('?')[0];
-                    if (data.resultUrl.startsWith('data:')) {
-                      const link = document.createElement('a');
-                      link.href = data.resultUrl;
-                      link.download = filename;
-                      document.body.appendChild(link);
-                      link.click();
-                      document.body.removeChild(link);
-                    } else {
-                      fetch(cleanUrl, { cache: 'no-store' })
-                        .then(res => res.blob())
-                        .then(blob => {
-                          const url = window.URL.createObjectURL(blob);
-                          const link = document.createElement('a');
-                          link.href = url;
-                          link.download = filename;
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                          window.URL.revokeObjectURL(url);
-                        })
-                        .catch(() => {
-                          const link = document.createElement('a');
-                          link.href = cleanUrl;
-                          link.download = filename;
-                          link.target = '_blank';
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                        });
-                    }
-                  }
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                title="下载"
-              >
-                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-              </button>
-              {/* Drag to Chat Handle */}
-              {allowChatDrag && (
-                <div
-                  draggable
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('application/json', JSON.stringify({
-                      nodeId: data.id,
-                      url: data.resultUrl,
-                      type: 'image'
-                    }));
-                    e.dataTransfer.effectAllowed = 'copy';
-                    onDragStart?.(data.id, true);
-                  }}
-                  onDragEnd={() => onDragEnd?.()}
-                  className="p-1.5 bg-cyan-500/80 hover:bg-cyan-400 rounded-full text-white cursor-grab active:cursor-grabbing"
-                  title="拖拽到对话"
-                >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="9" cy="5" r="1" fill="currentColor" />
-                    <circle cx="9" cy="12" r="1" fill="currentColor" />
-                    <circle cx="9" cy="19" r="1" fill="currentColor" />
-                    <circle cx="15" cy="5" r="1" fill="currentColor" />
-                    <circle cx="15" cy="12" r="1" fill="currentColor" />
-                    <circle cx="15" cy="19" r="1" fill="currentColor" />
-                  </svg>
-                </div>
-              )}
-            </div>
+            <ImageNodeFloatingToolbar
+              nodeId={data.id}
+              isDark={isDark}
+              resultUrl={data.resultUrl}
+              localScale={localScale}
+              isStoryboardExtract={!!(data.prompt && data.prompt.startsWith('Extract panel #'))}
+              allowCameraAngle={allowCameraAngle}
+              angleMode={!!data.angleMode}
+              onUpdateAngleMode={(open) => {
+                onUpdate(data.id, {
+                  angleMode: open,
+                  angleSettings: data.angleSettings || {
+                    mode: 'camera',
+                    rotation: 0,
+                    tilt: 0,
+                    scale: 0,
+                    wideAngle: false,
+                  },
+                });
+              }}
+              onExpand={onExpand}
+              onOpenEditor={onOpenEditor}
+              onSyncToProjectAssets={onSyncToProjectAssets}
+              onToolbarAction={onImageNodeToolbarAction}
+            />
           </div>
         )}
 
-        {/* Video Toolbar - Appears above the card for Video nodes on hover */}
+        {/* 视频结果：节点右侧竖向浮层（图一仅图标；悬停浮层为图二：文案 + 行高亮） */}
         {data.type === NodeType.VIDEO && isSuccess && data.resultUrl && (
           <div
             data-node-toolbar="media"
             data-node-owner-id={data.id}
-            className={`absolute -top-[54px] left-0 right-0 flex justify-center transition-opacity z-[140] ${mediaToolbarVisibilityClassName}`}
+            className={`pointer-events-auto absolute top-1/2 z-[140] transition-opacity ${mediaToolbarVisibilityClassName}`}
             style={{
-              transform: `scale(${localScale})`,
-              transformOrigin: 'bottom center'
+              left: '100%',
+              marginLeft: '8px',
+              transform: `translateY(-50%) scale(${localScale})`,
+              transformOrigin: 'left center',
             }}
           >
-            <div className="flex items-center gap-1 px-2 py-1.5 bg-[#171612]/95 rounded-full border border-[rgba(245,244,239,0.12)] shadow-xl backdrop-blur-md">
-              {onSyncToProjectAssets ? (
-                <button
-                  onClick={() => onSyncToProjectAssets(data.id)}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                  title="同步到项目资产库"
-                >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                  同步
-                </button>
-              ) : null}
-              {/* Expand Button */}
-              <button
-                onClick={() => onExpand?.(data.resultUrl!)}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                title="查看原图"
-              >
-                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="15 3 21 3 21 9" />
-                  <polyline points="9 21 3 21 3 15" />
-                  <line x1="21" y1="3" x2="14" y2="10" />
-                  <line x1="3" y1="21" x2="10" y2="14" />
-                </svg>
-              </button>
-              {/* Post to X Button */}
-              {allowSocialShare && (
-                <>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onPostToX?.(data.id, data.resultUrl!, 'video'); }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                    title="发布到 X"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="currentColor">
-                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onPostToTikTok?.(data.id, data.resultUrl!); }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                    title="发布到 TikTok"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="currentColor">
-                      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" />
-                    </svg>
-                  </button>
-                </>
-              )}
-              {/* Download Button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (data.resultUrl) {
-                    const filename = `video_${data.id}.mp4`;
-                    const cleanUrl = data.resultUrl.split('?')[0];
-                    fetch(cleanUrl, { cache: 'no-store' })
-                      .then(res => res.blob())
-                      .then(blob => {
-                        const url = window.URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = filename;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        window.URL.revokeObjectURL(url);
-                      })
-                      .catch(() => {
-                        const link = document.createElement('a');
-                        link.href = cleanUrl;
-                        link.download = filename;
-                        link.target = '_blank';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                      });
-                  }
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="p-1.5 text-neutral-300 hover:bg-neutral-700 hover:text-white rounded-full transition-colors"
-                title="下载"
-              >
-                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-              </button>
-              {/* Drag to Chat Handle */}
-              {allowChatDrag && (
-                <div
-                  draggable
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('application/json', JSON.stringify({
-                      nodeId: data.id,
-                      url: data.resultUrl,
-                      type: 'video'
-                    }));
-                    e.dataTransfer.effectAllowed = 'copy';
-                    onDragStart?.(data.id, true);
-                  }}
-                  onDragEnd={() => onDragEnd?.()}
-                  className="p-1.5 bg-cyan-500/80 hover:bg-cyan-400 rounded-full text-white cursor-grab active:cursor-grabbing"
-                  title="拖拽到对话"
-                >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="9" cy="5" r="1" fill="currentColor" />
-                    <circle cx="9" cy="12" r="1" fill="currentColor" />
-                    <circle cx="9" cy="19" r="1" fill="currentColor" />
-                    <circle cx="15" cy="5" r="1" fill="currentColor" />
-                    <circle cx="15" cy="12" r="1" fill="currentColor" />
-                    <circle cx="15" cy="19" r="1" fill="currentColor" />
-                  </svg>
-                </div>
-              )}
-            </div>
+            <VideoNodeFloatingToolbar
+              nodeId={data.id}
+              isDark={isDark}
+              resultUrl={data.resultUrl}
+              onToolbarAction={onImageNodeToolbarAction}
+            />
           </div>
         )}
 
@@ -1232,6 +996,7 @@ const CanvasNodeInner: React.FC<CanvasNodeProps> = ({
                 onPickFromLibrary={onPickFromLibrary}
                 onSelect={onSelect}
                 zoom={zoom}
+                creditQuoteProjectId={creditQuoteProjectId}
                 canvasTheme={canvasTheme}
                 allowCameraAngle={allowCameraAngle}
               />
@@ -1257,10 +1022,12 @@ function areCanvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps): 
   if (prev.canvasTheme !== next.canvasTheme) return false;
   if (prev.canGenerate !== next.canGenerate) return false;
   if (prev.generateDisabledReason !== next.generateDisabledReason) return false;
+  if (prev.creditQuoteProjectId !== next.creditQuoteProjectId) return false;
   if (prev.allowSocialShare !== next.allowSocialShare) return false;
   if (prev.allowChatDrag !== next.allowChatDrag) return false;
   if (prev.allowCameraAngle !== next.allowCameraAngle) return false;
   if (prev.onSyncToProjectAssets !== next.onSyncToProjectAssets) return false;
+  if (prev.onImageNodeToolbarAction !== next.onImageNodeToolbarAction) return false;
   return true;
 }
 

@@ -9,6 +9,12 @@ import React, { useRef, useEffect } from 'react';
 import { ChevronDown, Check, Banana, Image as ImageIcon, Crop, Monitor } from 'lucide-react';
 import { ImageModel, FALLBACK_IMAGE_MODELS } from './imageEditor.types';
 import { OpenAIIcon, KlingIcon } from '../../icons/BrandIcons';
+import {
+    getCanvasImageMaxOutputCount,
+    normalizeCanvasImageOutputCount,
+    shouldShowCanvasImageOutputCount,
+    shouldShowCanvasImageResolution,
+} from '../../../config/canvasImageModels';
 
 // ============================================================================
 // TYPES
@@ -80,6 +86,9 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     const availableModels = hasInputImage
         ? allModels.filter(m => m.supportsImageToImage)
         : allModels;
+    const showResolutionControl = shouldShowCanvasImageResolution(currentModel);
+    const showBatchControl = shouldShowCanvasImageOutputCount(currentModel);
+    const maxBatchCount = getCanvasImageMaxOutputCount(currentModel);
 
     // --- Effects ---
 
@@ -229,6 +238,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                 </div>
 
                 {/* Resolution */}
+                {showResolutionControl && (
                 <div className="relative" ref={resolutionDropdownRef}>
                     <button
                         onClick={() => setShowResolutionDropdown(!showResolutionDropdown)}
@@ -240,8 +250,8 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
                     {showResolutionDropdown && (
                         <div className="absolute bottom-full mb-2 right-0 w-24 bg-[#252525] border border-neutral-700 rounded-lg shadow-xl overflow-hidden z-50">
-                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">Quality</div>
-                            {(currentModel.resolutions || ['1K']).map(res => (
+                            <div className="px-3 py-2 text-[10px] font-bold text-neutral-500 uppercase tracking-wider bg-[#1f1f1f]">Resolution</div>
+                            {(currentModel.resolutions || []).map(res => (
                                 <button
                                     key={res}
                                     onClick={() => onResolutionChange(res)}
@@ -254,21 +264,24 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                         </div>
                     )}
                 </div>
+                )}
 
                 {/* Batch Count */}
+                {showBatchControl && (
                 <div className="flex items-center bg-neutral-700/50 rounded-md px-2 py-1.5 gap-1 text-[11px] text-neutral-300 font-medium border border-neutral-600">
                     <button
                         className="hover:text-white disabled:opacity-50"
-                        onClick={() => setBatchCount(Math.max(1, batchCount - 1))}
+                        onClick={() => setBatchCount(normalizeCanvasImageOutputCount(currentModel, batchCount - 1))}
                         disabled={batchCount <= 1}
                     >‹</button>
                     <span className="w-3 text-center">{batchCount}</span>
                     <button
                         className="hover:text-white disabled:opacity-50"
-                        onClick={() => setBatchCount(Math.min(4, batchCount + 1))}
-                        disabled={batchCount >= 4}
+                        onClick={() => setBatchCount(normalizeCanvasImageOutputCount(currentModel, batchCount + 1))}
+                        disabled={batchCount >= maxBatchCount}
                     >›</button>
                 </div>
+                )}
 
                 {/* Generate Button */}
                 <button

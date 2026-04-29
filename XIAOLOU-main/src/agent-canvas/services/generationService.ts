@@ -1,9 +1,9 @@
-/**
+﻿/**
  * generationService.ts
  * 
  * Frontend service layer for AI content generation.
  * When running embedded (bridge available), all generation requests go through the
- * host bridge — no static model whitelist. When running standalone, requests go
+ * host bridge 鈥?no static model whitelist. When running standalone, requests go
  * to the local canvas backend.
  */
 
@@ -48,12 +48,19 @@ export interface GenerateVideoParams {
   imageBase64?: string;
   lastFrameBase64?: string;
   multiReferenceImageUrls?: string[];
-  videoMode?: 'text_to_video' | 'image_to_video' | 'start_end_frame' | 'multi_param';
+  referenceVideoUrls?: string[];
+  referenceAudioUrls?: string[];
+  videoMode?: 'text_to_video' | 'image_to_video' | 'start_end_frame' | 'multi_param' | 'video_edit' | 'motion_control' | 'video_extend';
   aspectRatio?: string;
   resolution?: string;
   duration?: number;
   videoModel?: string;
   motionReferenceUrl?: string;
+  motionReferenceVideoUrl?: string;
+  characterReferenceImageUrl?: string;
+  editMode?: string;
+  editPresetId?: string;
+  qualityMode?: string;
   generateAudio?: boolean;
   networkSearch?: boolean;
   nodeId?: string;
@@ -313,7 +320,7 @@ export const generateVideo = async (params: GenerateVideoParams): Promise<Genera
     const normalizedVideoModelId = normalizeCanvasVideoModelId(rawVideoModelId);
     const requestedVideoMode = String(params.videoMode || '').trim().toLowerCase();
 
-    if (canUseXiaolouImageGenerationBridge() && !params.motionReferenceUrl) {
+    if (canUseXiaolouImageGenerationBridge()) {
       const isMultiRef = params.multiReferenceImageUrls && params.multiReferenceImageUrls.length > 0;
 
       if (isMultiRef) {
@@ -327,7 +334,10 @@ export const generateVideo = async (params: GenerateVideoParams): Promise<Genera
           resolution: params.resolution,
           duration: params.duration,
           multiReferenceImageUrls: inlinedUrls.filter(Boolean),
+          referenceVideoUrls: params.referenceVideoUrls,
+          referenceAudioUrls: params.referenceAudioUrls,
           videoMode: 'multi_param',
+          qualityMode: params.qualityMode,
           generateAudio: params.generateAudio,
           networkSearch: params.networkSearch,
           onTaskIdAssigned: params.onTaskIdAssigned,
@@ -354,6 +364,10 @@ export const generateVideo = async (params: GenerateVideoParams): Promise<Genera
       const lastFrameUrl = params.lastFrameBase64
         ? await inlineReferenceImageUrl(params.lastFrameBase64)
         : undefined;
+      const characterReferenceImageUrl = params.characterReferenceImageUrl
+        ? await inlineReferenceImageUrl(params.characterReferenceImageUrl)
+        : referenceImageUrl;
+      const motionReferenceVideoUrl = params.motionReferenceVideoUrl || params.motionReferenceUrl || params.referenceVideoUrls?.[0];
       if (requestedVideoMode === 'start_end_frame' && (!firstFrameUrl || !lastFrameUrl)) {
         throw new Error('首尾帧模式要求同时提供首帧和尾帧。');
       }
@@ -361,15 +375,21 @@ export const generateVideo = async (params: GenerateVideoParams): Promise<Genera
         ? 'multi_param'
         : requestedVideoMode === 'start_end_frame'
           ? 'start_end_frame'
-          : requestedVideoMode === 'image_to_video'
-            ? 'image_to_video'
-            : requestedVideoMode === 'text_to_video'
-              ? 'text_to_video'
-              : lastFrameUrl
-                ? 'start_end_frame'
-                : referenceImageUrl
+          : requestedVideoMode === 'video_edit'
+            ? 'video_edit'
+            : requestedVideoMode === 'motion_control'
+              ? 'motion_control'
+              : requestedVideoMode === 'video_extend'
+                ? 'video_extend'
+                : requestedVideoMode === 'image_to_video'
                   ? 'image_to_video'
-                  : 'text_to_video';
+                  : requestedVideoMode === 'text_to_video'
+                    ? 'text_to_video'
+                    : lastFrameUrl
+                      ? 'start_end_frame'
+                      : referenceImageUrl
+                        ? 'image_to_video'
+                        : 'text_to_video';
 
       const data = await generateVideoWithXiaolou({
         prompt: params.prompt,
@@ -377,9 +397,18 @@ export const generateVideo = async (params: GenerateVideoParams): Promise<Genera
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
         duration: params.duration,
-        referenceImageUrl: videoMode === 'image_to_video' ? referenceImageUrl : undefined,
+        referenceImageUrl: videoMode === 'image_to_video' || videoMode === 'motion_control' || videoMode === 'video_edit'
+          ? referenceImageUrl
+          : undefined,
         firstFrameUrl,
         lastFrameUrl,
+        referenceVideoUrls: params.referenceVideoUrls,
+        referenceAudioUrls: params.referenceAudioUrls,
+        editMode: params.editMode,
+        editPresetId: params.editPresetId,
+        motionReferenceVideoUrl,
+        characterReferenceImageUrl: videoMode === 'motion_control' ? characterReferenceImageUrl : params.characterReferenceImageUrl,
+        qualityMode: params.qualityMode,
         videoMode,
         generateAudio: params.generateAudio,
         networkSearch: params.networkSearch,

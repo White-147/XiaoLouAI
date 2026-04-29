@@ -20,6 +20,7 @@ import {
     getDefaultCanvasImageAspectRatio,
     getDefaultCanvasImageResolution,
     normalizeCanvasImageAspectRatio,
+    normalizeCanvasImageOutputCount,
     normalizeCanvasImageResolution,
 } from '../../config/canvasImageModels';
 import { useImageCapabilities } from '../../hooks/useMediaCapabilities';
@@ -75,9 +76,16 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                     supportsMultiImage: !!multiMode?.supported,
                     recommended: cap.recommended,
                     resolutions: primaryMode?.supportedResolutions || [],
+                    resolutionControl: primaryMode?.resolutionControl,
+                    qualities: primaryMode?.supportedQualities || [],
+                    qualityControl: primaryMode?.qualityControl,
                     aspectRatios: primaryMode?.supportedAspectRatios || [],
                     defaultResolution: primaryMode?.defaultResolution || undefined,
+                    defaultQuality: primaryMode?.defaultQuality || undefined,
                     defaultAspectRatio: primaryMode?.defaultAspectRatio || undefined,
+                    supportsNativeOutputCount: !!primaryMode?.supportsNativeOutputCount,
+                    maxOutputImages: primaryMode?.maxOutputImages || undefined,
+                    defaultOutputCount: primaryMode?.defaultOutputCount || undefined,
                 };
             });
         }
@@ -373,7 +381,11 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         if (nextResolution !== selectedResolution) {
             setSelectedResolution(nextResolution);
         }
-    }, [currentModel, selectedAspectRatio, selectedResolution]);
+        const nextBatchCount = normalizeCanvasImageOutputCount(currentModel, batchCount);
+        if (nextBatchCount !== batchCount) {
+            setBatchCount(nextBatchCount);
+        }
+    }, [batchCount, currentModel, selectedAspectRatio, selectedResolution]);
 
     // Restore brush canvas data from node when modal opens
     useEffect(() => {
@@ -490,7 +502,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
             aspectRatio: normalizeCanvasImageAspectRatio(selectedModel, selectedAspectRatio),
             resolution: normalizeCanvasImageResolution(selectedModel, selectedResolution)
         });
-        onGenerate(nodeId, prompt, batchCount);
+        onGenerate(nodeId, prompt, normalizeCanvasImageOutputCount(currentModel, batchCount));
     };
 
     const handleModelChange = (modelId: string) => {
@@ -499,13 +511,16 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
         const nextAspectRatio = normalizeCanvasImageAspectRatio(modelId, selectedAspectRatio || newModel?.defaultAspectRatio);
         const nextResolution = normalizeCanvasImageResolution(modelId, selectedResolution || newModel?.defaultResolution);
+        const nextBatchCount = normalizeCanvasImageOutputCount(newModel, batchCount);
         setSelectedAspectRatio(nextAspectRatio);
         setSelectedResolution(nextResolution);
+        setBatchCount(nextBatchCount);
 
         onUpdate(nodeId, {
             imageModel: modelId,
             aspectRatio: nextAspectRatio,
             resolution: nextResolution,
+            batchCount: nextBatchCount,
         });
         setShowModelDropdown(false);
     };

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Play, Trash2, X } from 'lucide-react';
+import { AudioLines, Play, Trash2, X } from 'lucide-react';
 import {
   canUseXiaolouAssetBridge,
   deleteXiaolouAsset,
@@ -14,7 +14,7 @@ type LibraryAsset = {
   category: string;
   url: string;
   previewUrl?: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'audio';
   description?: string;
 };
 
@@ -23,15 +23,17 @@ type AssetLibrarySource = 'local' | 'xiaolou';
 interface AssetLibraryPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectAsset: (url: string, type: 'image' | 'video') => void;
+  onSelectAsset: (url: string, type: 'image' | 'video' | 'audio') => void;
   panelY?: number;
   variant?: 'panel' | 'modal';
   canvasTheme?: 'dark' | 'light';
+  mediaFilter?: 'image' | 'video' | 'audio' | null;
 }
 
 const CATEGORIES = ['All', 'Character', 'Scene', 'Item', 'Style', 'Sound Effect', 'Others'];
 
 function normalizeLocalAsset(asset: any): LibraryAsset {
+  const rawType = asset?.type || asset?.mediaKind;
   return {
     id: String(asset?.id || ''),
     name: String(asset?.name || 'Asset'),
@@ -39,7 +41,7 @@ function normalizeLocalAsset(asset: any): LibraryAsset {
     url: resolveCanvasMediaUrl(String(asset?.url || '')),
     previewUrl:
       typeof asset?.previewUrl === 'string' ? resolveCanvasMediaUrl(asset.previewUrl) : undefined,
-    type: asset?.type === 'video' ? 'video' : 'image',
+    type: rawType === 'video' ? 'video' : rawType === 'audio' ? 'audio' : 'image',
     description: typeof asset?.description === 'string' ? asset.description : undefined,
   };
 }
@@ -63,6 +65,7 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
   panelY = 100,
   variant = 'panel',
   canvasTheme = 'dark',
+  mediaFilter = null,
 }) => {
   const isDark = canvasTheme === 'dark';
   const hasProjectAssetBridge = canUseXiaolouAssetBridge();
@@ -147,6 +150,7 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
       onSelectAsset={onSelectAsset}
       onDeleteAsset={handleDeleteAsset}
       canvasTheme={canvasTheme}
+      mediaFilter={mediaFilter}
     />
   );
 
@@ -218,9 +222,10 @@ type AssetLibraryContentProps = {
   assetSource: AssetLibrarySource;
   hasProjectAssetBridge: boolean;
   onSourceChange: React.Dispatch<React.SetStateAction<AssetLibrarySource>>;
-  onSelectAsset: (url: string, type: 'image' | 'video') => void;
+  onSelectAsset: (url: string, type: 'image' | 'video' | 'audio') => void;
   onDeleteAsset: (id: string, event: React.MouseEvent) => Promise<void>;
   canvasTheme?: 'dark' | 'light';
+  mediaFilter?: 'image' | 'video' | 'audio' | null;
 };
 
 const AssetLibraryContent: React.FC<AssetLibraryContentProps> = ({
@@ -234,13 +239,17 @@ const AssetLibraryContent: React.FC<AssetLibraryContentProps> = ({
   onSelectAsset,
   onDeleteAsset,
   canvasTheme = 'dark',
+  mediaFilter = null,
 }) => {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const isDark = canvasTheme === 'dark';
 
   const filteredAssets = useMemo(
-    () => assets.filter((asset) => selectedCategory === 'All' || asset.category === selectedCategory),
-    [assets, selectedCategory],
+    () => assets.filter((asset) =>
+      (!mediaFilter || asset.type === mediaFilter) &&
+      (selectedCategory === 'All' || asset.category === selectedCategory),
+    ),
+    [assets, mediaFilter, selectedCategory],
   );
 
   const handleDeleteClick = (event: React.MouseEvent, id: string) => {
@@ -348,6 +357,11 @@ const AssetLibraryContent: React.FC<AssetLibraryContentProps> = ({
                       </div>
                     </div>
                   </>
+                ) : asset.type === 'audio' ? (
+                  <div className={`flex h-full w-full flex-col items-center justify-center gap-2 ${isDark ? 'text-neutral-300' : 'text-neutral-500'}`}>
+                    <AudioLines size={24} />
+                    <span className="max-w-full truncate px-3 text-xs">{asset.name}</span>
+                  </div>
                 ) : (
                   <img
                     src={previewUrl}

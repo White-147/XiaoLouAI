@@ -1,16 +1,12 @@
-import React, { memo, useState, useRef, useEffect, useMemo } from 'react';
+﻿import React, { memo, useState, useRef, useEffect, useMemo } from 'react';
 import {
     Upload, ChevronDown, ChevronUp, Check, Zap, Loader2,
     Film, Image as ImageIcon, AudioLines, Video, X, Play,
     Paperclip, Layout, PenLine, Mic, Users, AlertCircle,
-    Maximize2, Minimize2,
+    Maximize2, Minimize2, SlidersHorizontal,
 } from 'lucide-react';
 import { NodeData, NodeType } from '../../../types';
-import { useVideoSettings, ReferenceType } from './useVideoSettings';
-import { AspectRatioSelector } from './AspectRatioSelector';
-import { DurationSlider } from './DurationSlider';
-import { QualitySelector } from './QualitySelector';
-import { AudioToggle } from './AudioToggle';
+import { useVideoSettings, ReferenceType, type VideoMaterialTabId } from './useVideoSettings';
 import { AssetLibraryModal } from './AssetLibraryModal';
 import { GoogleIcon, KlingIcon, HailuoIcon } from '../../icons/BrandIcons';
 import { buildCanvasApiUrl, resolveCanvasMediaUrl } from '../../../integrations/twitcanvaRuntimePaths';
@@ -38,7 +34,7 @@ export interface VideoSettingsPanelProps {
     canvasTheme?: 'dark' | 'light';
 }
 
-type MaterialTab = 'video' | 'image' | 'audio' | 'first-frame' | 'last-frame';
+type MaterialTab = VideoMaterialTabId;
 type PopupType = 'refType' | 'settings' | 'model' | 'cameraShot' | null;
 
 const CAMERA_SHOTS = [
@@ -70,30 +66,26 @@ function getModelIcon(provider: string, size = 16) {
     }
 }
 
-const REF_TYPES: { id: ReferenceType; label: string; icon: React.ReactNode }[] = [
-    { id: 'reference', label: '参考图/视频', icon: <ImageIcon size={14} /> },
-    { id: 'video-edit', label: '视频编辑', icon: <PenLine size={14} /> },
-    { id: 'first-last-frame', label: '首尾帧', icon: <Layout size={14} /> },
-];
-
-type TabDef = { id: MaterialTab; label: string; icon: React.ReactNode };
-
-const TABS_REFERENCE: TabDef[] = [
-    { id: 'video', label: '视频', icon: <Film size={16} /> },
-    { id: 'image', label: '图片', icon: <ImageIcon size={16} /> },
-    { id: 'audio', label: '音频', icon: <AudioLines size={16} /> },
-];
-
-const TABS_VIDEO_EDIT: TabDef[] = [
-    { id: 'video', label: '视频', icon: <Film size={16} /> },
-    { id: 'image', label: '图片', icon: <ImageIcon size={16} /> },
-];
-
-function getTabsForRefType(refType: ReferenceType): TabDef[] {
-    switch (refType) {
-        case 'video-edit': return TABS_VIDEO_EDIT;
-        default: return TABS_REFERENCE;
+function getReferenceTypeIcon(type: ReferenceType, size = 14) {
+    switch (type) {
+        case 'video-edit': return <PenLine size={size} />;
+        case 'first-last-frame': return <Layout size={size} />;
+        case 'multi-reference': return <ImageIcon size={size} />;
+        case 'motion-control': return <SlidersHorizontal size={size} />;
+        default: return <ImageIcon size={size} />;
     }
+}
+
+function getMaterialTabIcon(type: MaterialTab, size = 18) {
+    if (type === 'video') return <Film size={size} />;
+    if (type === 'audio') return <AudioLines size={size} />;
+    return <ImageIcon size={size} />;
+}
+
+function getNodeMediaLabel(type: 'video' | 'image' | 'audio') {
+    if (type === 'video') return '视频';
+    if (type === 'audio') return '音频';
+    return '图片';
 }
 
 const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
@@ -118,7 +110,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
     const settings = useVideoSettings({ data, inputUrl, connectedImageNodes, onUpdate });
 
     const isFirstLastFrame = settings.referenceType === 'first-last-frame';
-    const visibleTabs = isFirstLastFrame ? [] : getTabsForRefType(settings.referenceType);
+    const visibleTabs = isFirstLastFrame ? [] : settings.visibleMaterialTabs;
 
     const [activeTab, setActiveTab] = useState<MaterialTab>(visibleTabs[0]?.id ?? 'image');
     const [openPopup, setOpenPopup] = useState<PopupType>(null);
@@ -126,7 +118,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
     const [showAssetLibrary, setShowAssetLibrary] = useState(false);
     const [selectedCameraShot, setSelectedCameraShot] = useState<string | null>(null);
     const [showCanvasPicker, setShowCanvasPicker] = useState(false);
-    const [canvasPickerType, setCanvasPickerType] = useState<'video' | 'image'>('image');
+    const [canvasPickerType, setCanvasPickerType] = useState<'video' | 'image' | 'audio'>('image');
     const [isPanelExpanded, setIsPanelExpanded] = useState(false);
 
     // Frame-slot state (first-last-frame mode)
@@ -149,11 +141,12 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
 
     useEffect(() => {
         if (!isFirstLastFrame) {
-            const tabs = getTabsForRefType(settings.referenceType);
-            setActiveTab(tabs[0]?.id ?? 'image');
+            setActiveTab((current) => (
+                visibleTabs.some((tab) => tab.id === current) ? current : visibleTabs[0]?.id ?? 'image'
+            ));
         }
         setOpenTabDropdown(null);
-    }, [settings.referenceType, isFirstLastFrame]);
+    }, [isFirstLastFrame, settings.referenceType, visibleTabs]);
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -254,7 +247,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
         }
     };
 
-    // ─── Frame slot upload (single image only) ───────────────────────────────
+    // Frame slot upload accepts a single image.
     const handleFrameSlotFileSelected = async (files: FileList | null, slot: 'start' | 'end') => {
         if (!files || files.length === 0) return;
         const file = files[0]; // Only ever use the first file
@@ -314,7 +307,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
         onUpdate(data.id, { parentIds: currentParentIds.filter(pid => pid !== nodeId) });
     };
 
-    const handleCanvasSelectClick = (type: 'video' | 'image') => {
+    const handleCanvasSelectClick = (type: 'video' | 'image' | 'audio') => {
         setOpenTabDropdown(null);
         setCanvasPickerType(type);
         setShowCanvasPicker(true);
@@ -347,7 +340,10 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
         ],
     });
 
-    const currentRefType = REF_TYPES.find(r => r.id === settings.referenceType) || REF_TYPES[0];
+    const currentRefType =
+        settings.availableReferenceTypeOptions.find(r => r.id === settings.referenceType) ||
+        settings.availableReferenceTypeOptions[0] ||
+        { id: 'reference' as ReferenceType, label: '参考图/视频' };
 
     // Compute frame slot states
     const startFrame = settings.frameInputsWithUrls.find(f => f.order === 'start');
@@ -356,7 +352,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
     const isFrameSlotMissing = isFirstLastFrame && !bothFramesFilled;
     const generateDisabled = isLoading || isFrameSlotMissing || !canGenerate;
     const promptReferenceOptions = useMemo<PromptImageReference[]>(
-        () => connectedImageNodes.map((node, index) => ({
+        () => connectedImageNodes.filter((node) => node.type !== NodeType.AUDIO).map((node, index) => ({
             id: node.id,
             url: node.url,
             label: `参考图${index + 1}`,
@@ -364,7 +360,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
         [connectedImageNodes],
     );
 
-    // ─── Frame Slots UI (Lovart-style explicit slots) ──────────────────────────
+    // Frame slots UI.
     const renderFrameSlot = (slot: 'start' | 'end', frameData: typeof startFrame) => {
         const label = slot === 'start' ? '首帧' : '尾帧';
         const hasFrame = !!frameData;
@@ -503,7 +499,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                 <div className={`${dropdownClasses} w-auto min-w-[240px]`}>
                     <button onClick={() => handleLocalUploadClick('audio')} className={itemClasses}>
                         <Mic size={15} className={iconClasses} />
-                        音频
+                        上传音频
                     </button>
                     <button onClick={handleOpenLibraryFromDropdown} className={itemStartClasses}>
                         <Users size={15} className={`mt-0.5 flex-shrink-0 ${iconClasses}`} />
@@ -513,6 +509,10 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                 角色素材需通过素材库审核后方可使用
                             </div>
                         </div>
+                    </button>
+                    <button onClick={() => handleCanvasSelectClick('audio')} className={itemClasses}>
+                        <Layout size={15} className={iconClasses} />
+                        从画布选择
                     </button>
                 </div>
             );
@@ -560,50 +560,172 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => onSelect(data.id)}
         >
-            {/* ─── Floating Video Settings Popover (above card) ─── */}
+            {/* Floating video settings popover. */}
             {openPopup === 'settings' && (
                 <div
                     ref={settingsRef}
                     className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50"
                 >
-                    <div className={`w-[340px] rounded-2xl shadow-2xl p-6 border ${
+                    <div className={`w-[430px] rounded-2xl shadow-2xl p-5 border ${
                         isDark ? 'bg-[#1a1a1a] border-neutral-700' : 'bg-white border-neutral-200'
                     }`}>
-                        <h3 className={`text-base font-bold mb-5 ${isDark ? 'text-white' : 'text-neutral-900'}`}>
-                            视频设置
+                        <h3 className={`text-sm font-medium mb-4 ${isDark ? 'text-neutral-200' : 'text-neutral-700'}`}>
+                            Generate method
                         </h3>
-                        <div className="space-y-6">
-                            <AspectRatioSelector
-                                options={settings.availableAspectRatios}
-                                value={data.aspectRatio || 'Auto'}
-                                onChange={settings.handleAspectRatioChange}
-                                isDark={isDark}
-                            />
-                            <DurationSlider
-                                availableDurations={settings.availableDurations}
-                                value={settings.currentDuration}
-                                onChange={settings.handleDurationChange}
-                                isDark={isDark}
-                            />
-                            <QualitySelector
-                                options={settings.availableResolutions}
-                                value={data.resolution || '720p'}
-                                onChange={settings.handleResolutionChange}
-                                isDark={isDark}
-                            />
-                            <AudioToggle
-                                audioEnabled={data.generateAudio !== false}
-                                onAudioToggle={settings.handleAudioToggle}
-                                isDark={isDark}
-                                networkSearchEnabled={data.networkSearch === true}
-                                onNetworkSearchToggle={settings.handleNetworkSearchToggle}
-                            />
+                        {settings.availableReferenceTypeOptions.length > 1 && (
+                            <div className={`mb-5 grid gap-1 rounded-xl p-1 ${
+                                isDark ? 'bg-neutral-900' : 'bg-neutral-100'
+                            }`} style={{ gridTemplateColumns: `repeat(${settings.availableReferenceTypeOptions.length}, minmax(0, 1fr))` }}>
+                                {settings.availableReferenceTypeOptions.map((type) => (
+                                    <button
+                                        key={type.id}
+                                        type="button"
+                                        onClick={() => settings.handleReferenceTypeChange(type.id)}
+                                        className={`h-9 rounded-lg px-2 text-sm transition-colors whitespace-nowrap ${
+                                            settings.referenceType === type.id
+                                                ? isDark
+                                                    ? 'bg-neutral-700 text-white'
+                                                    : 'bg-white text-neutral-900 shadow-sm'
+                                                : isDark
+                                                    ? 'text-neutral-400 hover:text-neutral-200'
+                                                    : 'text-neutral-500 hover:text-neutral-800'
+                                        }`}
+                                    >
+                                        {type.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <div className="space-y-5">
+                            {settings.availableAspectRatios.length > 0 && (
+                                <div>
+                                    <div className={`mb-2 text-sm ${isDark ? 'text-neutral-300' : 'text-neutral-600'}`}>Size</div>
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {settings.availableAspectRatios.map((ratio) => (
+                                            <button
+                                                key={ratio}
+                                                type="button"
+                                                onClick={() => settings.handleAspectRatioChange(ratio)}
+                                                className={`h-14 rounded-xl border text-sm transition-colors ${
+                                                    settings.currentAspectRatio === ratio
+                                                        ? isDark ? 'border-neutral-500 bg-neutral-700 text-white' : 'border-neutral-300 bg-neutral-200 text-neutral-900'
+                                                        : isDark ? 'border-neutral-700 text-neutral-300 hover:bg-neutral-800' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                                                }`}
+                                            >
+                                                {ratio}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {settings.availableResolutions.length > 0 && (
+                                <div>
+                                    <div className={`mb-2 text-sm ${isDark ? 'text-neutral-300' : 'text-neutral-600'}`}>Resolution</div>
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {settings.availableResolutions.map((resolution) => (
+                                            <button
+                                                key={resolution}
+                                                type="button"
+                                                onClick={() => settings.handleResolutionChange(resolution)}
+                                                className={`h-12 rounded-xl border text-sm transition-colors ${
+                                                    settings.currentResolution === resolution
+                                                        ? isDark ? 'border-neutral-500 bg-neutral-700 text-white' : 'border-neutral-300 bg-neutral-200 text-neutral-900'
+                                                        : isDark ? 'border-neutral-700 text-neutral-300 hover:bg-neutral-800' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                                                }`}
+                                            >
+                                                {resolution}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {settings.availableDurations.length > 0 && (
+                                <div>
+                                    <div className={`mb-2 text-sm ${isDark ? 'text-neutral-300' : 'text-neutral-600'}`}>Duration</div>
+                                    <div className="grid grid-cols-4 gap-3">
+                                        {settings.availableDurations.map((duration) => (
+                                            <button
+                                                key={duration}
+                                                type="button"
+                                                onClick={() => settings.handleDurationChange(duration)}
+                                                className={`h-12 rounded-xl border text-sm transition-colors ${
+                                                    settings.currentDuration === duration
+                                                        ? isDark ? 'border-neutral-500 bg-neutral-700 text-white' : 'border-neutral-300 bg-neutral-200 text-neutral-900'
+                                                        : isDark ? 'border-neutral-700 text-neutral-300 hover:bg-neutral-800' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                                                }`}
+                                            >
+                                                {duration}s
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {settings.qualityModeOptions.length > 0 && (
+                                <div>
+                                    <div className={`mb-2 text-sm ${isDark ? 'text-neutral-300' : 'text-neutral-600'}`}>Mode</div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {settings.qualityModeOptions.map((mode) => (
+                                            <button
+                                                key={mode}
+                                                type="button"
+                                                onClick={() => settings.handleQualityModeChange(mode)}
+                                                className={`h-11 rounded-xl border text-sm transition-colors ${
+                                                    settings.currentQualityMode === mode
+                                                        ? isDark ? 'border-neutral-500 bg-neutral-700 text-white' : 'border-neutral-300 bg-neutral-200 text-neutral-900'
+                                                        : isDark ? 'border-neutral-700 text-neutral-300 hover:bg-neutral-800' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                                                }`}
+                                            >
+                                                {mode}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {settings.referenceType === 'video-edit' && settings.editModeOptions.length > 0 && (
+                                <div>
+                                    <div className={`mb-2 text-sm ${isDark ? 'text-neutral-300' : 'text-neutral-600'}`}>Edit mode</div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {settings.editModeOptions.map((mode) => (
+                                            <button
+                                                key={mode}
+                                                type="button"
+                                                onClick={() => settings.handleEditModeChange(mode)}
+                                                className={`h-11 rounded-xl border text-sm transition-colors ${
+                                                    settings.currentEditMode === mode
+                                                        ? isDark ? 'border-neutral-500 bg-neutral-700 text-white' : 'border-neutral-300 bg-neutral-200 text-neutral-900'
+                                                        : isDark ? 'border-neutral-700 text-neutral-300 hover:bg-neutral-800' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                                                }`}
+                                            >
+                                                {mode}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {settings.supportsAudioOutput && (
+                                <div className="flex items-center justify-between">
+                                    <span className={`text-sm ${isDark ? 'text-neutral-300' : 'text-neutral-600'}`}>音频</span>
+                                    <button
+                                        type="button"
+                                        onClick={settings.handleAudioToggle}
+                                        className={`relative h-7 w-12 rounded-full transition-colors ${
+                                            data.generateAudio !== false
+                                                ? 'bg-neutral-900'
+                                                : isDark ? 'bg-neutral-700' : 'bg-neutral-200'
+                                        }`}
+                                    >
+                                        <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${
+                                            data.generateAudio !== false ? 'translate-x-5' : 'translate-x-1'
+                                        }`} />
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* ─── Asset Library Modal (general or frame-slot mode) ─── */}
+            {/* Asset library modal. */}
             {showAssetLibrary && (
                 <AssetLibraryModal
                     onClose={() => setShowAssetLibrary(false)}
@@ -626,8 +748,8 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                 />
             )}
 
-            {/* ─── Main Card ─── */}
-            <div className={`relative rounded-2xl shadow-xl cursor-default transition-colors duration-200 ${
+            {/* Main card */}
+            <div className={`relative rounded-[28px] shadow-2xl cursor-default transition-colors duration-200 overflow-visible ${
                 isDark
                     ? 'bg-[#1a1a1a] border border-neutral-800'
                     : 'bg-white border border-neutral-200'
@@ -654,16 +776,18 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                 </button>
                 {/* Notice + Upload Row (hidden in first-last-frame mode) */}
                 {!isFirstLastFrame && (
-                    <div className="px-4 pt-3.5 pb-2 pr-12 flex items-center justify-between gap-3">
-                        <span className={`text-xs whitespace-nowrap ${isDark ? 'text-neutral-500' : 'text-neutral-500'}`}>
+                    <div className={`mx-3 mt-3 h-[52px] rounded-2xl px-4 pr-3 flex items-center justify-between gap-3 ${
+                        isDark ? 'bg-neutral-900/80' : 'bg-neutral-100/80'
+                    }`}>
+                        <span className={`text-sm whitespace-nowrap ${isDark ? 'text-neutral-300' : 'text-neutral-700'}`}>
                             角色素材需通过素材库审核后方可使用
                         </span>
                         <button
                             onClick={handleUploadClick}
-                            className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg transition-colors flex-shrink-0 border ${
+                            className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl transition-colors flex-shrink-0 border ${
                                 isDark
                                     ? 'text-neutral-300 hover:bg-neutral-800 border-neutral-700'
-                                    : 'text-neutral-700 hover:bg-neutral-50 border-neutral-200'
+                                    : 'text-neutral-800 bg-white hover:bg-neutral-50 border-neutral-200'
                             }`}
                         >
                             <Upload size={13} strokeWidth={2} />
@@ -672,7 +796,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                     </div>
                 )}
 
-                {/* ─── First-Last-Frame Slots UI ─── */}
+                {/* First-last-frame slots */}
                 {isFirstLastFrame ? (
                     <div className="px-4 pt-3.5 pb-3 pr-12">
                         <p className={`text-[11px] mb-2.5 leading-snug ${isDark ? 'text-neutral-500' : 'text-neutral-400'}`}>
@@ -744,28 +868,34 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                 ) : (
                     <>
                         {/* Tab Bar (with dropdown positioning container) */}
-                        <div className="relative px-4 pb-1" ref={tabAreaRef}>
+                        <div className="relative px-3 pt-3 pb-2" ref={tabAreaRef}>
                             {/* Tab Dropdown (positioned above tabs) */}
                             {renderTabDropdown()}
 
                             {/* Tab Buttons */}
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap gap-2">
                                 {visibleTabs.map(tab => (
                                     <button
                                         key={tab.id}
                                         onClick={() => handleTabClick(tab.id)}
-                                        className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-medium border transition-all duration-150
+                                        title={tab.required ? `${tab.label}为必填素材` : tab.label}
+                                        className={`flex h-16 w-16 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-2xl text-xs font-medium leading-tight transition-all duration-150
                                             ${activeTab === tab.id
                                                 ? isDark
-                                                    ? 'border-neutral-500 bg-neutral-800 text-white'
-                                                    : 'border-neutral-300 bg-white text-neutral-800 shadow-sm'
+                                                    ? 'bg-neutral-800 text-white ring-1 ring-neutral-600'
+                                                    : 'bg-neutral-100 text-neutral-700 shadow-sm'
                                                 : isDark
-                                                    ? 'border-transparent text-neutral-500 hover:text-neutral-300'
-                                                    : 'border-transparent text-neutral-400 hover:text-neutral-600'
+                                                    ? 'text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300'
+                                                    : 'bg-neutral-100/70 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600'
                                             }`}
                                     >
-                                        {tab.icon}
-                                        {tab.label}
+                                        {getMaterialTabIcon(tab.id, 16)}
+                                        <span className="max-w-[3.5rem] text-center leading-tight">{tab.label}</span>
+                                        {tab.maxItems > 1 && (
+                                            <span className={isDark ? 'text-[9px] text-neutral-500' : 'text-[9px] text-neutral-400'}>
+                                                最多 {tab.maxItems}
+                                            </span>
+                                        )}
                                     </button>
                                 ))}
                             </div>
@@ -778,7 +908,14 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                     <div key={node.id} className={`relative flex-shrink-0 w-[72px] h-[90px] rounded-xl overflow-hidden border group/thumb ${
                                         isDark ? 'border-neutral-700 bg-neutral-900' : 'border-neutral-200 bg-neutral-100'
                                     }`}>
-                                        {node.type === NodeType.VIDEO ? (
+                                        {node.type === NodeType.AUDIO ? (
+                                            <div className={`flex h-full w-full flex-col items-center justify-center gap-2 ${
+                                                isDark ? 'bg-neutral-900 text-neutral-500' : 'bg-neutral-100 text-neutral-400'
+                                            }`}>
+                                                <AudioLines size={18} />
+                                                <span className="text-[11px]">音频</span>
+                                            </div>
+                                        ) : node.type === NodeType.VIDEO ? (
                                             <>
                                                 <img src={node.url} alt="" className="w-full h-full object-cover" />
                                                 <div className="absolute inset-0 flex items-center justify-center">
@@ -803,15 +940,20 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                         {showCanvasPicker && (() => {
                             const currentParentIds = data.parentIds || [];
                             const connectedSet = new Set(currentParentIds);
-                            const targetType = canvasPickerType === 'video' ? NodeType.VIDEO : NodeType.IMAGE;
+                            const targetType = canvasPickerType === 'video'
+                                ? NodeType.VIDEO
+                                : canvasPickerType === 'audio'
+                                    ? NodeType.AUDIO
+                                    : NodeType.IMAGE;
                             const pickable = availableCanvasNodes.filter(
                                 n => n.type === targetType && n.id !== data.id
                             );
+                            const pickerLabel = getNodeMediaLabel(canvasPickerType);
                             return (
                                 <div className={`px-4 py-2 border-t ${isDark ? 'border-neutral-800' : 'border-neutral-100'}`}>
                                     <div className="flex items-center justify-between mb-2">
                                         <span className={`text-xs font-medium ${isDark ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                                            点击选择画布中的{canvasPickerType === 'video' ? '视频' : '图片'}节点
+                                            点击选择画布中的{pickerLabel}节点
                                         </span>
                                         <button
                                             onClick={() => setShowCanvasPicker(false)}
@@ -824,7 +966,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                     </div>
                                     {pickable.length === 0 ? (
                                         <div className={`text-xs py-4 text-center ${isDark ? 'text-neutral-600' : 'text-neutral-400'}`}>
-                                            画布中暂无可用的{canvasPickerType === 'video' ? '视频' : '图片'}节点
+                                            画布中暂无可用的{pickerLabel}节点
                                         </div>
                                     ) : (
                                         <div className="flex gap-2 overflow-x-auto pb-1" onWheel={e => e.stopPropagation()}>
@@ -846,7 +988,14 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                                                 : isDark ? 'border-neutral-700 hover:border-neutral-500' : 'border-neutral-200 hover:border-neutral-400'
                                                         }`}
                                                     >
-                                                        {node.type === NodeType.VIDEO ? (
+                                                        {node.type === NodeType.AUDIO ? (
+                                                            <div className={`flex h-full w-full flex-col items-center justify-center gap-2 ${
+                                                                isDark ? 'bg-neutral-900 text-neutral-500' : 'bg-neutral-100 text-neutral-400'
+                                                            }`}>
+                                                                <AudioLines size={18} />
+                                                                <span className="text-[11px]">音频</span>
+                                                            </div>
+                                                        ) : node.type === NodeType.VIDEO ? (
                                                             <>
                                                                 <img src={node.url} alt="" className="w-full h-full object-cover" />
                                                                 <div className="absolute inset-0 flex items-center justify-center">
@@ -922,7 +1071,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                     </div>
                 )}
 
-                {/* ─── Bottom Bar ─── */}
+                {/* Bottom bar */}
                 {!canGenerate && generateDisabledReason && (
                     <div className={`mx-4 mb-2 flex items-center gap-1.5 text-[11px] rounded-lg px-2.5 py-1.5 ${
                         isDark ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'
@@ -940,7 +1089,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                 <div className={`relative flex items-center gap-1 px-2.5 py-2 border-t ${
                     isDark ? 'border-neutral-800' : 'border-neutral-100'
                 }`}>
-                    {/* Reference Type dropdown — rendered here (outside any overflow:hidden), anchored to refTypeRef button */}
+                    {/* Reference Type dropdown rendered here so it can escape the bottom bar. */}
                     {openPopup === 'refType' && (
                         <div
                             ref={refTypeRef}
@@ -948,7 +1097,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                 isDark ? 'bg-[#1e1e1e] border-neutral-700' : 'bg-white border-neutral-200'
                             }`}
                         >
-                            {REF_TYPES.map(type => (
+                            {settings.availableReferenceTypeOptions.map(type => (
                                 <button
                                     key={type.id}
                                     onClick={() => {
@@ -963,7 +1112,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                         }`}
                                 >
                                     <span className="flex items-center gap-2.5">
-                                        {type.icon}
+                                        {getReferenceTypeIcon(type.id)}
                                         {type.label}
                                     </span>
                                     {settings.referenceType === type.id && (
@@ -974,7 +1123,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                         </div>
                     )}
 
-                    {/* Left group — no overflow:hidden so dropdowns aren't clipped */}
+                    {/* Left group keeps dropdown anchors visible. */}
                     <div className="flex items-center gap-0.5 flex-1 min-w-0">
                         {/* Reference Type Selector button */}
                         <div className="relative flex-shrink-0" ref={refTypeButtonRef}>
@@ -986,7 +1135,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                         : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700'
                                 }`}
                             >
-                                {currentRefType.icon}
+                                {getReferenceTypeIcon(currentRefType.id)}
                                 <span className="font-medium whitespace-nowrap">{currentRefType.label}</span>
                                 {openPopup === 'refType'
                                     ? <ChevronUp size={11} className="opacity-60" />
@@ -1027,7 +1176,7 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                     isDark ? 'bg-[#1e1e1e] border-neutral-700' : 'bg-white border-neutral-200'
                                 }`}>
                                     <h4 className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-neutral-900'}`}>
-                                        基础镜头
+                                        鍩虹闀滃ご
                                     </h4>
                                     <div className="flex flex-wrap gap-2">
                                         {CAMERA_SHOTS.map(shot => (

@@ -25,6 +25,7 @@ const ScriptBreakdown = lazy(() => import("./pages/create/ScriptBreakdown"));
 const VideoReverse = lazy(() => import("./pages/create/VideoReverse"));
 const StoryboardGrid25 = lazy(() => import("./pages/create/StoryboardGrid25"));
 const Playground = lazy(() => import("./pages/Playground"));
+const CreditUsage = lazy(() => import("./pages/CreditUsage"));
 // Placeholder components for other routes
 const Placeholder = ({ title }: { title: string }) => (
   <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -67,6 +68,14 @@ export default function App() {
           />
           <Route path="enterprise" element={<EnterpriseConsole />} />
           <Route path="wallet/recharge" element={<WalletRecharge />} />
+          <Route
+            path="wallet/usage"
+            element={
+              <DeferredRoute>
+                <CreditUsage />
+              </DeferredRoute>
+            }
+          />
           <Route path="admin/login" element={<AdminLogin />} />
           <Route path="admin/orders" element={<AdminOrders />} />
           <Route path="script-plaza" element={<ScriptPlaza />} />

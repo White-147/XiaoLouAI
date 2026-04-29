@@ -19,6 +19,9 @@ type CanvasVideoModeConfig = {
   resolutions: string[];
   aspectRatios: string[];
   maxReferenceImages?: number;
+  maxReferenceVideos?: number;
+  maxReferenceAudios?: number;
+  supportsGenerateAudio?: boolean;
 };
 
 export type CanvasVideoModelOption = {
@@ -29,6 +32,9 @@ export type CanvasVideoModelOption = {
   supportsImageToVideo: boolean;
   supportsMultiImage: boolean;
   supportsStartEndFrame?: boolean;
+  supportsGenerateAudio?: boolean;
+  maxReferenceVideos?: number;
+  maxReferenceAudios?: number;
   recommended?: boolean;
   textToVideo?: CanvasVideoModeConfig;
   imageToVideo?: CanvasVideoModeConfig;
@@ -153,6 +159,7 @@ export const XIAOLOU_IMAGE_TO_VIDEO_MODELS: CanvasVideoModelOption[] = [
     supportsTextToVideo: false,
     supportsImageToVideo: true,
     supportsMultiImage: false,
+    supportsGenerateAudio: true,
     imageToVideo: {
       durations: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
       resolutions: ['Auto'],
@@ -167,27 +174,42 @@ export const XIAOLOU_IMAGE_TO_VIDEO_MODELS: CanvasVideoModelOption[] = [
     supportsImageToVideo: true,
     supportsMultiImage: true,
     supportsStartEndFrame: true,
+    supportsGenerateAudio: true,
+    maxReferenceVideos: 3,
+    maxReferenceAudios: 3,
     recommended: false,
     textToVideo: {
       durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
       resolutions: ['720p', '480p'],
       aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+      maxReferenceVideos: 3,
+      maxReferenceAudios: 3,
+      supportsGenerateAudio: true,
     },
     imageToVideo: {
       durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
       resolutions: ['720p', '480p'],
       aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'],
+      maxReferenceVideos: 3,
+      maxReferenceAudios: 3,
+      supportsGenerateAudio: true,
     },
     startEndFrame: {
       durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
       resolutions: ['720p', '480p'],
       aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'],
+      maxReferenceVideos: 3,
+      maxReferenceAudios: 3,
+      supportsGenerateAudio: true,
     },
     multiImage: {
       durations: [4, 5, 8, 10, 15],
       resolutions: ['1080p', '720p', '480p'],
       aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
       maxReferenceImages: 7,
+      maxReferenceVideos: 3,
+      maxReferenceAudios: 3,
+      supportsGenerateAudio: true,
     },
   },
   {
@@ -197,21 +219,33 @@ export const XIAOLOU_IMAGE_TO_VIDEO_MODELS: CanvasVideoModelOption[] = [
     supportsTextToVideo: true,
     supportsImageToVideo: true,
     supportsMultiImage: true,
+    supportsGenerateAudio: true,
+    maxReferenceVideos: 3,
+    maxReferenceAudios: 3,
     textToVideo: {
       durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
       resolutions: ['720p', '480p'],
       aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+      maxReferenceVideos: 3,
+      maxReferenceAudios: 3,
+      supportsGenerateAudio: true,
     },
     imageToVideo: {
       durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
       resolutions: ['720p', '480p'],
       aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'],
+      maxReferenceVideos: 3,
+      maxReferenceAudios: 3,
+      supportsGenerateAudio: true,
     },
     multiImage: {
       durations: [4, 5, 8, 10, 15],
       resolutions: ['1080p', '720p', '480p'],
       aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
       maxReferenceImages: 7,
+      maxReferenceVideos: 3,
+      maxReferenceAudios: 3,
+      supportsGenerateAudio: true,
     },
   },
 
@@ -226,6 +260,7 @@ export const XIAOLOU_IMAGE_TO_VIDEO_MODELS: CanvasVideoModelOption[] = [
     supportsImageToVideo: true,
     supportsMultiImage: true,
     supportsStartEndFrame: true,
+    supportsGenerateAudio: true,
     recommended: true,
     textToVideo: { durations: VEO_DURATIONS, resolutions: VEO_RESOLUTIONS, aspectRatios: VEO_ASPECT_RATIOS },
     imageToVideo: { durations: VEO_DURATIONS, resolutions: VEO_RESOLUTIONS, aspectRatios: VEO_ASPECT_RATIOS },
@@ -240,6 +275,7 @@ export const XIAOLOU_IMAGE_TO_VIDEO_MODELS: CanvasVideoModelOption[] = [
     supportsImageToVideo: true,
     supportsMultiImage: true,
     supportsStartEndFrame: true,
+    supportsGenerateAudio: true,
     recommended: false,
     textToVideo: { durations: VEO_DURATIONS, resolutions: ['1080p', '720p'], aspectRatios: VEO_ASPECT_RATIOS },
     imageToVideo: { durations: VEO_DURATIONS, resolutions: ['1080p', '720p'], aspectRatios: VEO_ASPECT_RATIOS },
@@ -254,6 +290,7 @@ export const XIAOLOU_IMAGE_TO_VIDEO_MODELS: CanvasVideoModelOption[] = [
     supportsImageToVideo: true,
     supportsMultiImage: false,
     supportsStartEndFrame: true,
+    supportsGenerateAudio: true,
     recommended: false,
     textToVideo: { durations: VEO_DURATIONS, resolutions: ['1080p', '720p'], aspectRatios: VEO_ASPECT_RATIOS },
     imageToVideo: { durations: VEO_DURATIONS, resolutions: ['1080p', '720p'], aspectRatios: VEO_ASPECT_RATIOS },
@@ -279,6 +316,9 @@ function toVideoCapSet(config: CanvasVideoModeConfig): BridgeMediaCapabilitySet 
     defaultResolution: config.resolutions[0] || null,
     defaultDuration: durations[0] || null,
     ...(config.maxReferenceImages != null ? { maxReferenceImages: config.maxReferenceImages } : {}),
+    ...(config.maxReferenceVideos != null ? { maxReferenceVideos: config.maxReferenceVideos } : {}),
+    ...(config.maxReferenceAudios != null ? { maxReferenceAudios: config.maxReferenceAudios } : {}),
+    ...(config.supportsGenerateAudio ? { supportsGenerateAudio: true } : {}),
   };
 }
 
@@ -306,6 +346,9 @@ export function buildFallbackVideoCapabilities(
       kind: 'video' as const,
       status: 'stable' as const,
       recommended: m.recommended,
+      maxReferenceVideos: m.maxReferenceVideos,
+      maxReferenceAudios: m.maxReferenceAudios,
+      supportsGenerateAudio: m.supportsGenerateAudio,
       inputModes,
     };
   });

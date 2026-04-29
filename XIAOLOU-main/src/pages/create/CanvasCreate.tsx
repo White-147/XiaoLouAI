@@ -171,6 +171,9 @@ function normalizeBridgeVideoMode(mode?: string | null) {
   if (normalized === "multi-reference") return "multi_param";
   if (normalized === "image-to-video") return "image_to_video";
   if (normalized === "text-to-video") return "text_to_video";
+  if (normalized === "motion-control") return "motion_control";
+  if (normalized === "video-edit") return "video_edit";
+  if (normalized === "video-extend") return "video_extend";
   return normalized;
 }
 
@@ -781,6 +784,10 @@ export default function CanvasCreate() {
         const readyProjectId = await resolveReadyProjectId();
         const requestedMode = normalizeBridgeVideoMode(payload.videoMode);
         const isMultiRef = Array.isArray(payload.multiReferenceImageUrls) && payload.multiReferenceImageUrls.length > 0;
+        const isVideoReferenceMode =
+          requestedMode === "video_edit" ||
+          requestedMode === "motion_control" ||
+          requestedMode === "video_extend";
         const isStartEnd =
           requestedMode === "start_end_frame" ||
           (!isMultiRef && Boolean(payload.firstFrameUrl && payload.lastFrameUrl));
@@ -814,8 +821,14 @@ export default function CanvasCreate() {
         if (requestedMode === "start_end_frame" && (!firstFrameUrl || !lastFrameUrl)) {
           throw new Error("首尾帧模式要求同时提供首帧和尾帧。");
         }
+        if (isVideoReferenceMode && !(payload.referenceVideoUrls?.length || payload.motionReferenceVideoUrl)) {
+          throw new Error("该视频模式要求提供参考视频素材。");
+        }
 
         const videoMode =
+          requestedMode === "video_edit" ? "video_edit" :
+          requestedMode === "motion_control" ? "motion_control" :
+          requestedMode === "video_extend" ? "video_extend" :
           requestedMode === "multi_param" ? "multi_param" :
           requestedMode === "start_end_frame" ? "start_end_frame" :
           requestedMode === "image_to_video" ? "image_to_video" :
@@ -838,6 +851,15 @@ export default function CanvasCreate() {
           firstFrameUrl: isStartEnd ? firstFrameUrl : undefined,
           lastFrameUrl: isStartEnd ? lastFrameUrl : undefined,
           multiReferenceImages,
+          referenceVideoUrls: payload.referenceVideoUrls?.filter(Boolean),
+          referenceAudioUrls: payload.referenceAudioUrls?.filter(Boolean),
+          editMode: payload.editMode,
+          editPresetId: payload.editPresetId,
+          motionReferenceVideoUrl: payload.motionReferenceVideoUrl || payload.referenceVideoUrls?.[0],
+          characterReferenceImageUrl: payload.characterReferenceImageUrl
+            ? await inlineReferenceImageUrl(payload.characterReferenceImageUrl)
+            : referenceImageUrl,
+          qualityMode: payload.qualityMode,
           videoMode,
           generateAudio: payload.generateAudio,
           networkSearch: payload.networkSearch,
@@ -1190,7 +1212,7 @@ export default function CanvasCreate() {
       data-testid="canvas-create-root"
       className="relative h-full w-full overflow-hidden bg-[#050505]"
     >
-      {isCanvasProjectReadyToRender ? <CanvasApp /> : null}
+      {isCanvasProjectReadyToRender ? <CanvasApp creditQuoteProjectId={currentProjectId} /> : null}
       {!isCanvasProjectReadyToRender ? (
         <div className="pointer-events-auto absolute inset-0 z-[120] flex items-center justify-center bg-black/48 px-6 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl border border-white/12 bg-[#111111]/92 p-6 text-white shadow-2xl">

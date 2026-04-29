@@ -48,6 +48,98 @@ export const GoogleIcon: React.FC<IconProps> = ({ size = 16, className }) => (
     </svg>
 );
 
+export const GeminiIcon: React.FC<IconProps> = ({ size = 16, className }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        className={className}
+    >
+        <path
+            d="M12 2.25c1.1 5.12 4.63 8.65 9.75 9.75-5.12 1.1-8.65 4.63-9.75 9.75-1.1-5.12-4.63-8.65-9.75-9.75 5.12-1.1 8.65-4.63 9.75-9.75Z"
+            fill="currentColor"
+        />
+    </svg>
+);
+
+export const BlackForestLabsIcon: React.FC<IconProps> = ({ size = 16, className }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={size}
+        height={size}
+        viewBox="0 0 196 140"
+        fill="none"
+        className={className}
+    >
+        <path
+            d="M139.757 59.839h-20.846L98.065 30.472 33.038 121.982h20.89l44.136-62.141H118.91l-44.137 62.141h20.949l44.035-62.143L196 139.025h-15.732v.001h-17.175v-16.977l-23.336-32.843-23.206 32.78v17.039H62.668v.002H41.821v-.002H0L98.065.974l41.692 58.865Z"
+            fill="currentColor"
+        />
+    </svg>
+);
+
+export const SeedIcon: React.FC<IconProps> = ({ size = 16, className }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={size}
+        height={size}
+        viewBox="0 0 16 16"
+        fill="currentColor"
+        className={className}
+    >
+        <rect x="2" y="8" width="3" height="6" rx="1" />
+        <rect x="6.5" y="4" width="3" height="10" rx="1" />
+        <rect x="11" y="1" width="3" height="13" rx="1" />
+    </svg>
+);
+
+export const QwenIcon: React.FC<IconProps> = ({ size = 16, className }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        className={className}
+    >
+        <path
+            d="M12 1.6 20.4 6v7.9L12 22.4l-8.4-8.5V6L12 1.6Z"
+            fill="currentColor"
+        />
+        <path
+            d="M7.15 7.1h9.55l-1.95 2.35H9.2l2.75 3.1-1.62 2.05-4.45-5.18 1.27-2.32Zm9.88 4.16-1.54 2.1 2.1 2.55h-3.23L11.1 12.1l1.55-2.05 4.38 1.21Z"
+            fill="white"
+        />
+    </svg>
+);
+
+export const PixVerseIcon: React.FC<IconProps> = ({ size = 16, className }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={size}
+        height={size}
+        viewBox="0 0 16 16"
+        fill="none"
+        className={className}
+    >
+        <path d="M2.2 2.2h5.9c3.4 0 5.7 2.3 5.7 5.8s-2.3 5.8-5.7 5.8H2.2V2.2Zm3.1 2.7v6.2h2.6c1.7 0 2.8-1.2 2.8-3.1S9.6 4.9 7.9 4.9H5.3Z" fill="currentColor" />
+    </svg>
+);
+
+export const KlingMonoIcon: React.FC<IconProps> = ({ size = 16, className }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={size}
+        height={size}
+        viewBox="0 0 16 16"
+        fill="currentColor"
+        className={className}
+    >
+        <path d="M3 2.75h2.45v4.22l4.2-4.22h3.05L7.9 7.55l5.1 5.7H9.8L5.45 8.38v4.87H3V2.75Z" />
+    </svg>
+);
+
 export const KlingIcon: React.FC<IconProps> = ({ size = 16, className }) => (
     <svg
         xmlns="http://www.w3.org/2000/svg"

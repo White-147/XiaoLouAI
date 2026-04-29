@@ -150,7 +150,7 @@ export function canUseXiaolouImageGenerationBridge(): boolean {
 
 export async function generateImageWithXiaolou(
   payload: XiaolouGenerateImagePayload,
-): Promise<{ resultUrl: string; model?: string; taskId?: string }> {
+): Promise<{ resultUrl: string; resultUrls?: string[]; model?: string; taskId?: string }> {
   const services = getCanvasHostServices();
   if (services) return services.generateImage(payload);
   // Function values (onTaskIdAssigned) cannot be cloned over postMessage, so

@@ -28,6 +28,13 @@ export type HostGenerateVideoPayload = {
   firstFrameUrl?: string;
   lastFrameUrl?: string;
   multiReferenceImageUrls?: string[];
+  referenceVideoUrls?: string[];
+  referenceAudioUrls?: string[];
+  editMode?: string;
+  editPresetId?: string;
+  motionReferenceVideoUrl?: string;
+  characterReferenceImageUrl?: string;
+  qualityMode?: string;
   videoMode?: string;
   generateAudio?: boolean;
   networkSearch?: boolean;

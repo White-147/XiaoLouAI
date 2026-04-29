@@ -15,7 +15,6 @@ import {
 } from '../config/canvasImageModels';
 import {
   buildFallbackVideoCapabilities,
-  DEFAULT_XIAOLOU_VIDEO_MODEL_ID,
   normalizeCanvasVideoModelId,
 } from '../config/canvasVideoModels';
 
@@ -46,6 +45,16 @@ function getCached(cache: Map<string, CacheEntry>, key: string): BridgeMediaCapa
   }
   cache.delete(key);
   return null;
+}
+
+function getStrictFallbackVideoState(): Pick<CapabilitiesState, 'capabilities' | 'defaultModel'> {
+  const capabilities = buildFallbackVideoCapabilities().filter(
+    (capability) => !capability.id.startsWith('vertex:'),
+  );
+  return {
+    capabilities,
+    defaultModel: capabilities[0]?.id || null,
+  };
 }
 
 export function useImageCapabilities(mode?: string): CapabilitiesState {
@@ -141,13 +150,13 @@ export function useVideoCapabilities(mode?: string): CapabilitiesState {
         source: 'bridge',
       };
     }
-      return {
-        capabilities: buildFallbackVideoCapabilities(),
-        defaultModel: DEFAULT_XIAOLOU_VIDEO_MODEL_ID,
-        loading: true,
-        error: null,
-        source: 'loading',
-      };
+    const fallback = getStrictFallbackVideoState();
+    return {
+      ...fallback,
+      loading: true,
+      error: null,
+      source: 'loading',
+    };
   });
 
   useEffect(() => {
@@ -166,14 +175,14 @@ export function useVideoCapabilities(mode?: string): CapabilitiesState {
         return;
       }
 
-        if (!canUseXiaolouImageGenerationBridge()) {
-          setState({
-            capabilities: buildFallbackVideoCapabilities(),
-            defaultModel: DEFAULT_XIAOLOU_VIDEO_MODEL_ID,
-            loading: false,
-            error: null,
-            source: 'fallback',
-          });
+      if (!canUseXiaolouImageGenerationBridge()) {
+        const fallback = getStrictFallbackVideoState();
+        setState({
+          ...fallback,
+          loading: false,
+          error: null,
+          source: 'fallback',
+        });
         return;
       }
 
@@ -190,14 +199,14 @@ export function useVideoCapabilities(mode?: string): CapabilitiesState {
         });
       } catch (err) {
         if (cancelled) return;
-          console.warn('[useVideoCapabilities] Bridge failed, using fallback:', err);
-          setState({
-            capabilities: buildFallbackVideoCapabilities(),
-            defaultModel: DEFAULT_XIAOLOU_VIDEO_MODEL_ID,
-            loading: false,
-            error: err instanceof Error ? err.message : 'Failed to load video capabilities',
-            source: 'fallback',
-          });
+        console.warn('[useVideoCapabilities] Bridge failed, using fallback:', err);
+        const fallback = getStrictFallbackVideoState();
+        setState({
+          ...fallback,
+          loading: false,
+          error: err instanceof Error ? err.message : 'Failed to load video capabilities',
+          source: 'fallback',
+        });
       }
     }
 

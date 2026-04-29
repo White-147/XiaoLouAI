@@ -24,6 +24,7 @@ import {
 import { useImageCapabilities } from '../../hooks/useMediaCapabilities';
 import { useFloatingPanelOffset } from '../../hooks/useFloatingPanelOffset';
 import { ReferencePromptInput, type PromptImageReference } from './ReferencePromptInput';
+import { useCreateCreditQuote } from '../../../lib/useCreateCreditQuote';
 
 interface NodeControlsProps {
     data: NodeData;
@@ -42,6 +43,7 @@ interface NodeControlsProps {
     onPickFromLibrary?: (nodeId: string) => void;
     onSelect: (id: string) => void;
     zoom: number;
+    creditQuoteProjectId?: string | null;
     canvasTheme?: 'dark' | 'light';
     allowCameraAngle?: boolean;
 }
@@ -228,6 +230,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     onPickFromLibrary,
     onSelect,
     zoom,
+    creditQuoteProjectId = null,
     canvasTheme = 'dark',
     allowCameraAngle = true
 }) => {
@@ -489,6 +492,24 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const currentAspectRatioLabel = RATIO_DISPLAY[currentSizeLabel] || currentSizeLabel;
     const currentResolutionLabel = currentResolution || '自动';
     const sizeInfo = computeRatioDimensions(currentSizeLabel, currentResolution || preferredResolution || '1K');
+    const shouldQuoteImageGeneration =
+        canGenerate &&
+        (data.type === NodeType.IMAGE || data.type === NodeType.IMAGE_EDITOR) &&
+        !isLocalModelNode;
+    const imageGenerationQuote = useCreateCreditQuote(
+        shouldQuoteImageGeneration ? 'create_image_generate' : null,
+        {
+            projectId: creditQuoteProjectId || undefined,
+            count: currentBatchCount,
+            model: normalizedImageModelId,
+            aspectRatio: currentSizeLabel,
+            resolution: currentResolution || undefined,
+        },
+        shouldQuoteImageGeneration,
+    );
+    const generateCreditLabel = imageGenerationQuote.isLoading
+        ? '...'
+        : String(imageGenerationQuote.quote?.credits ?? 0);
     const countOptions = useMemo(
         () => Array.from({ length: MAX_BATCH_COUNT }, (_, index) => index + 1),
         [],
@@ -573,13 +594,18 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
             data.aspectRatio,
             data.resolution,
             data.batchCount,
+            generateCreditLabel,
         ],
     });
 
     const isDark = canvasTheme === 'dark';
     const generationMetaLabel = `${currentResolutionLabel} · ${currentAspectRatioLabel} · ${currentBatchCount}张`;
     const isGenerateDisabled = isLoading || !canGenerate;
-    const generateButtonTitle = !canGenerate ? generateDisabledReason || '当前账号暂无创作权限' : '生成';
+    const generateButtonTitle = !canGenerate
+        ? generateDisabledReason || '当前账号暂无创作权限'
+        : imageGenerationQuote.quote
+            ? `生成，预计消耗 ${imageGenerationQuote.quote.credits} 积分`
+            : '生成';
     const shouldShowReferenceStrip = isImageNode && canAttachReferenceImages;
     const promptReferenceOptions = useMemo<PromptImageReference[]>(
         () => connectedImageNodes.map((node, index) => ({
@@ -1100,7 +1126,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                                     title={generateButtonTitle}
                                 >
                                     <Zap size={13} />
-                                    <span>14</span>
+                                    <span className="tabular-nums">{generateCreditLabel}</span>
                                 </button>
                             )}
                         </div>

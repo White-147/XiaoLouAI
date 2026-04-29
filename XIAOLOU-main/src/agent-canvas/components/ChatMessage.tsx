@@ -12,7 +12,7 @@ interface ChatMessageProps {
     role: 'user' | 'assistant';
     content: string;
     media?: {
-        type: 'image' | 'video';
+        type: 'image' | 'video' | 'audio';
         url: string;
     }[];
     timestamp?: Date;
@@ -105,6 +105,17 @@ function MessageMedia({
                                     ? 'h-16 w-16 rounded-lg object-cover'
                                     : 'max-h-[260px] w-full rounded-lg object-contain'
                             }
+                        />
+                    );
+                }
+
+                if (item.type === 'audio') {
+                    return (
+                        <audio
+                            key={`${item.url}-${index}`}
+                            src={item.url}
+                            className={compact ? 'w-44' : 'w-full'}
+                            controls
                         />
                     );
                 }

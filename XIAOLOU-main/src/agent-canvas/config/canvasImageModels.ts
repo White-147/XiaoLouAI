@@ -6,14 +6,22 @@ export type CanvasImageModel = {
    * The "+" is ONLY in the label, never in internalId or rawModelId.
    */
   name: string;
-  provider: 'google' | 'google-vertex' | 'kling' | 'openai' | 'volcengine';
+  provider: string;
   supportsImageToImage: boolean;
   supportsMultiImage: boolean;
   recommended?: boolean;
   resolutions: string[];
+  resolutionControl?: 'none' | 'fixed' | 'selectable';
+  qualities?: string[];
+  qualityControl?: 'none' | 'fixed' | 'selectable';
   aspectRatios: string[];
   defaultResolution?: string;
+  defaultQuality?: string;
   defaultAspectRatio?: string;
+  supportsNativeOutputCount?: boolean;
+  maxOutputImages?: number;
+  defaultOutputCount?: number;
+  hiddenUnlessConfigured?: boolean;
 };
 
 export const DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID = 'vertex:gemini-3-pro-image-preview';
@@ -22,10 +30,10 @@ const GEMINI_STANDARD_IMAGE_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', 
 const GEMINI_31_FLASH_IMAGE_ASPECT_RATIOS = [...GEMINI_STANDARD_IMAGE_ASPECT_RATIOS, '1:4', '1:8', '4:1', '8:1'];
 const GEMINI_3_PRO_IMAGE_RESOLUTIONS = ['1K', '2K', '4K'];
 const GEMINI_3_1_FLASH_IMAGE_RESOLUTIONS = ['512', '1K', '2K', '4K'];
-const GEMINI_2_5_FLASH_IMAGE_RESOLUTIONS = ['1K'];
 const VERTEX_GEMINI_IMAGE_RESOLUTIONS = ['1K', '2K', '4K'];
 const KLING_IMAGE_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'];
 const KLING_IMAGE_RESOLUTIONS = ['1K', '2K'];
+const NATIVE_IMAGE_COUNT_LIMIT = 4;
 
 /**
  * Vertex AI model ID convention:
@@ -44,10 +52,15 @@ export const XIAOLOU_TEXT_TO_IMAGE_MODELS: CanvasImageModel[] = [
     supportsImageToImage: true,
     supportsMultiImage: true,
     recommended: true,
+    hiddenUnlessConfigured: true,
     resolutions: ['2K', '3K'],
+    resolutionControl: 'selectable',
     aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'],
     defaultResolution: '2K',
     defaultAspectRatio: '1:1',
+    supportsNativeOutputCount: true,
+    maxOutputImages: NATIVE_IMAGE_COUNT_LIMIT,
+    defaultOutputCount: 1,
   },
   {
     id: 'gemini-3-pro-image-preview',
@@ -56,6 +69,7 @@ export const XIAOLOU_TEXT_TO_IMAGE_MODELS: CanvasImageModel[] = [
     supportsImageToImage: true,
     supportsMultiImage: true,
     resolutions: GEMINI_3_PRO_IMAGE_RESOLUTIONS,
+    resolutionControl: 'selectable',
     aspectRatios: GEMINI_STANDARD_IMAGE_ASPECT_RATIOS,
     defaultResolution: '1K',
     defaultAspectRatio: '1:1',
@@ -67,6 +81,7 @@ export const XIAOLOU_TEXT_TO_IMAGE_MODELS: CanvasImageModel[] = [
     supportsImageToImage: true,
     supportsMultiImage: true,
     resolutions: GEMINI_3_1_FLASH_IMAGE_RESOLUTIONS,
+    resolutionControl: 'selectable',
     aspectRatios: GEMINI_31_FLASH_IMAGE_ASPECT_RATIOS,
     defaultResolution: '1K',
     defaultAspectRatio: '1:1',
@@ -77,9 +92,9 @@ export const XIAOLOU_TEXT_TO_IMAGE_MODELS: CanvasImageModel[] = [
     provider: 'google',
     supportsImageToImage: true,
     supportsMultiImage: true,
-    resolutions: GEMINI_2_5_FLASH_IMAGE_RESOLUTIONS,
+    resolutions: [],
+    resolutionControl: 'none',
     aspectRatios: GEMINI_STANDARD_IMAGE_ASPECT_RATIOS,
-    defaultResolution: '1K',
     defaultAspectRatio: '1:1',
   },
   // ── Official Vertex AI image models (Preview) ────────────────────────────
@@ -92,6 +107,7 @@ export const XIAOLOU_TEXT_TO_IMAGE_MODELS: CanvasImageModel[] = [
     supportsImageToImage: true,
     supportsMultiImage: true,
     resolutions: VERTEX_GEMINI_IMAGE_RESOLUTIONS,
+    resolutionControl: 'selectable',
     aspectRatios: GEMINI_STANDARD_IMAGE_ASPECT_RATIOS,
     defaultResolution: '1K',
     defaultAspectRatio: '1:1',
@@ -103,6 +119,7 @@ export const XIAOLOU_TEXT_TO_IMAGE_MODELS: CanvasImageModel[] = [
     supportsImageToImage: true,
     supportsMultiImage: true,
     resolutions: VERTEX_GEMINI_IMAGE_RESOLUTIONS,
+    resolutionControl: 'selectable',
     aspectRatios: GEMINI_31_FLASH_IMAGE_ASPECT_RATIOS,
     defaultResolution: '1K',
     defaultAspectRatio: '1:1',
@@ -121,9 +138,13 @@ export const CANVAS_IMAGE_MODELS: CanvasImageModel[] = [
     supportsImageToImage: true,
     supportsMultiImage: false,
     resolutions: KLING_IMAGE_RESOLUTIONS,
+    resolutionControl: 'selectable',
     aspectRatios: KLING_IMAGE_ASPECT_RATIOS,
     defaultResolution: '1K',
     defaultAspectRatio: '1:1',
+    supportsNativeOutputCount: true,
+    maxOutputImages: NATIVE_IMAGE_COUNT_LIMIT,
+    defaultOutputCount: 1,
   },
   {
     id: 'kling-v2-1',
@@ -133,15 +154,88 @@ export const CANVAS_IMAGE_MODELS: CanvasImageModel[] = [
     supportsMultiImage: true,
     recommended: true,
     resolutions: KLING_IMAGE_RESOLUTIONS,
+    resolutionControl: 'selectable',
     aspectRatios: KLING_IMAGE_ASPECT_RATIOS,
     defaultResolution: '1K',
     defaultAspectRatio: '1:1',
+    supportsNativeOutputCount: true,
+    maxOutputImages: NATIVE_IMAGE_COUNT_LIMIT,
+    defaultOutputCount: 1,
   },
 ];
 
 export function getCanvasImageModel(modelId?: string | null) {
   const normalizedId = normalizeCanvasImageModelId(modelId);
-  return CANVAS_IMAGE_MODELS.find((model) => model.id === normalizedId) || CANVAS_IMAGE_MODELS[0];
+  return (
+    CANVAS_IMAGE_MODELS.find((model) => model.id === normalizedId) ||
+    CANVAS_IMAGE_MODELS.find((model) => model.id === DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID) ||
+    CANVAS_IMAGE_MODELS[0]
+  );
+}
+
+function getResolutionControl(model: CanvasImageModel) {
+  if (model.resolutionControl) {
+    return model.resolutionControl;
+  }
+  return model.resolutions.length > 0
+    ? (model.resolutions.length > 1 ? 'selectable' : 'fixed')
+    : 'none';
+}
+
+function getQualityControl(model: CanvasImageModel) {
+  if (model.qualityControl) {
+    return model.qualityControl;
+  }
+  return model.qualities && model.qualities.length > 0
+    ? (model.qualities.length > 1 ? 'selectable' : 'fixed')
+    : 'none';
+}
+
+export function getCanvasImageResolutionOptions(modelOrId?: CanvasImageModel | string | null) {
+  const model = typeof modelOrId === 'object' && modelOrId
+    ? modelOrId
+    : getCanvasImageModel(typeof modelOrId === 'string' ? modelOrId : null);
+  if (!model || getResolutionControl(model) === 'none') {
+    return [];
+  }
+  return model.resolutions || [];
+}
+
+export function shouldShowCanvasImageResolution(modelOrId?: CanvasImageModel | string | null) {
+  return getCanvasImageResolutionOptions(modelOrId).length > 0;
+}
+
+export function getCanvasImageQualityOptions(modelOrId?: CanvasImageModel | string | null) {
+  const model = typeof modelOrId === 'object' && modelOrId
+    ? modelOrId
+    : getCanvasImageModel(typeof modelOrId === 'string' ? modelOrId : null);
+  if (!model || getQualityControl(model) === 'none') {
+    return [];
+  }
+  return model.qualities || [];
+}
+
+export function shouldShowCanvasImageQuality(modelOrId?: CanvasImageModel | string | null) {
+  return getCanvasImageQualityOptions(modelOrId).length > 0;
+}
+
+export function getCanvasImageMaxOutputCount(modelOrId?: CanvasImageModel | string | null) {
+  const model = typeof modelOrId === 'object' && modelOrId
+    ? modelOrId
+    : getCanvasImageModel(typeof modelOrId === 'string' ? modelOrId : null);
+  if (!model?.supportsNativeOutputCount) {
+    return 1;
+  }
+  return Math.max(1, Math.min(Number(model.maxOutputImages) || 1, NATIVE_IMAGE_COUNT_LIMIT));
+}
+
+export function shouldShowCanvasImageOutputCount(modelOrId?: CanvasImageModel | string | null) {
+  return getCanvasImageMaxOutputCount(modelOrId) > 1;
+}
+
+export function normalizeCanvasImageOutputCount(modelOrId?: CanvasImageModel | string | null, count?: number | null) {
+  const max = getCanvasImageMaxOutputCount(modelOrId);
+  return Math.max(1, Math.min(Number(count) || 1, max));
 }
 
 export function getDefaultCanvasImageAspectRatio(modelId?: string | null) {
@@ -154,7 +248,7 @@ export function getDefaultCanvasImageAspectRatio(modelId?: string | null) {
 
 export function getDefaultCanvasImageResolution(modelId?: string | null) {
   const model = getCanvasImageModel(modelId);
-  if (!model) {
+  if (!model || getResolutionControl(model) === 'none') {
     return '';
   }
   return model.defaultResolution || model.resolutions[0] || '';
@@ -176,6 +270,9 @@ export function normalizeCanvasImageResolution(modelId?: string | null, resoluti
   const model = getCanvasImageModel(modelId);
   if (!model) {
     return requested;
+  }
+  if (getResolutionControl(model) === 'none') {
+    return '';
   }
   return model.resolutions.includes(requested)
     ? requested
@@ -202,10 +299,17 @@ function toImageCapSet(
     status: 'stable',
     supportedAspectRatios: m.aspectRatios,
     supportedResolutions: m.resolutions,
+    supportedQualities: m.qualities || [],
     aspectRatioControl: m.aspectRatios.length > 1 ? 'selectable' : 'fixed',
-    resolutionControl: m.resolutions.length > 1 ? 'selectable' : 'fixed',
+    resolutionControl: getResolutionControl(m),
+    qualityControl: getQualityControl(m),
+    outputCountControl: m.supportsNativeOutputCount ? 'selectable' : 'fixed',
     defaultAspectRatio: m.defaultAspectRatio || m.aspectRatios[0] || null,
-    defaultResolution: m.defaultResolution || m.resolutions[0] || null,
+    defaultResolution: getResolutionControl(m) === 'none' ? null : (m.defaultResolution || m.resolutions[0] || null),
+    defaultQuality: m.defaultQuality || m.qualities?.[0] || null,
+    defaultOutputCount: m.defaultOutputCount || 1,
+    maxOutputImages: getCanvasImageMaxOutputCount(m),
+    supportsNativeOutputCount: !!m.supportsNativeOutputCount,
     ...(maxRef != null ? { maxReferenceImages: maxRef } : {}),
   };
 }
@@ -213,7 +317,7 @@ function toImageCapSet(
 export function buildFallbackImageCapabilities(
   models: CanvasImageModel[] = CANVAS_IMAGE_MODELS,
 ): BridgeMediaModelCapability[] {
-  return models.map((m) => {
+  return models.filter((m) => !m.hiddenUnlessConfigured).map((m) => {
     const inputModes: BridgeMediaModelCapability['inputModes'] = {
       text_to_image: toImageCapSet(m),
     };

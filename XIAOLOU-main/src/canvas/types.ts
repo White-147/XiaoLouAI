@@ -45,13 +45,20 @@ export interface NodeData {
   linkedVideoNodeId?: string; // For Text nodes: linked video node for prompt sync
 
   // Video node specific
-  videoMode?: 'standard' | 'frame-to-frame' | 'motion-control' | 'video-edit'; // Video generation mode
+  videoMode?: 'standard' | 'frame-to-frame' | 'multi-reference' | 'motion-control' | 'video-edit' | 'video-extend'; // Video generation mode
   frameInputs?: { nodeId: string; order: 'start' | 'end' }[]; // For frame-to-frame: connected image nodes
   videoModel?: string; // Video model version (e.g., 'veo-3.1', 'kling-v2-1')
   videoDuration?: number; // Video duration in seconds (e.g., 5, 6, 8, 10)
   generateAudio?: boolean; // Whether to generate native audio (Seedance 2.0, Kling 2.6)
   networkSearch?: boolean; // Whether to enhance prompt with web search results
   inputUrl?: string; // Input URL for video generation (image-to-video)
+  referenceVideoUrls?: string[];
+  referenceAudioUrls?: string[];
+  editMode?: string;
+  editPresetId?: string;
+  motionReferenceVideoUrl?: string;
+  characterReferenceImageUrl?: string;
+  qualityMode?: string;
 
   // Video Editor specific
   trimStart?: number; // Trim start time in seconds
@@ -156,10 +163,10 @@ export interface NodeGroup {
 export type CanvasNodeUploadSource = string | File;
 
 export type BridgeMediaKind = 'image' | 'video';
-export type BridgeMediaModelProvider = 'google' | 'kling' | 'openai' | 'volcengine' | 'hailuo' | 'grok' | 'bytedance' | 'pixverse' | 'other';
-export type BridgeMediaModelStatus = 'stable' | 'experimental' | 'failing' | 'preview';
+export type BridgeMediaModelProvider = 'google' | 'google-vertex' | 'kling' | 'openai' | 'volcengine' | 'hailuo' | 'grok' | 'bytedance' | 'pixverse' | 'other';
+export type BridgeMediaModelStatus = 'stable' | 'experimental' | 'failing' | 'preview' | 'untested';
 export type BridgeImageInputMode = 'text_to_image' | 'image_to_image' | 'multi_image';
-export type BridgeVideoInputMode = 'text_to_video' | 'single_reference' | 'start_end_frame' | 'multi_param';
+export type BridgeVideoInputMode = 'text_to_video' | 'single_reference' | 'start_end_frame' | 'multi_param' | 'video_reference' | 'video_edit' | 'motion_control' | 'video_extend';
 export type BridgeMediaInputMode = BridgeImageInputMode | BridgeVideoInputMode;
 
 export interface BridgeMediaCapabilitySet {
@@ -168,13 +175,18 @@ export interface BridgeMediaCapabilitySet {
   supportedAspectRatios: string[];
   supportedResolutions: string[];
   supportedDurations?: string[];
-  durationControl?: 'fixed' | 'selectable';
-  aspectRatioControl?: 'fixed' | 'selectable';
-  resolutionControl?: 'fixed' | 'selectable';
+  durationControl?: 'none' | 'fixed' | 'selectable';
+  aspectRatioControl?: 'none' | 'fixed' | 'selectable';
+  resolutionControl?: 'none' | 'fixed' | 'selectable';
   defaultAspectRatio?: string | null;
   defaultResolution?: string | null;
   defaultDuration?: string | null;
   maxReferenceImages?: number;
+  maxReferenceVideos?: number;
+  maxReferenceAudios?: number;
+  qualityModes?: string[];
+  editModes?: string[];
+  requires?: string[];
   note?: string | null;
 }
 
@@ -186,6 +198,9 @@ export interface BridgeMediaModelCapability {
   status: BridgeMediaModelStatus;
   note?: string | null;
   recommended?: boolean;
+  maxReferenceImages?: number;
+  maxReferenceVideos?: number;
+  maxReferenceAudios?: number;
   inputModes: Partial<Record<BridgeMediaInputMode, BridgeMediaCapabilitySet>>;
 }
 

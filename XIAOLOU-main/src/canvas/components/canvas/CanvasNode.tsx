@@ -57,6 +57,7 @@ interface CanvasNodeProps {
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onConnectorDown: (e: React.PointerEvent, id: string, side: 'left' | 'right') => void;
   isHoveredForConnection?: boolean;
+  creditQuoteProjectId?: string | null;
   onOpenEditor?: (nodeId: string) => void;
   onUpload?: (nodeId: string, imageSource: CanvasNodeUploadSource) => void;
   onAttachReferenceImages?: (nodeId: string, imageSources: CanvasNodeUploadSource[]) => void;
@@ -111,6 +112,7 @@ const CanvasNodeInner: React.FC<CanvasNodeProps> = ({
   onContextMenu,
   onConnectorDown,
   isHoveredForConnection,
+  creditQuoteProjectId,
   onOpenEditor,
   onUpload,
   onAttachReferenceImages,
@@ -1232,6 +1234,7 @@ const CanvasNodeInner: React.FC<CanvasNodeProps> = ({
                 onPickFromLibrary={onPickFromLibrary}
                 onSelect={onSelect}
                 zoom={zoom}
+                creditQuoteProjectId={creditQuoteProjectId}
                 canvasTheme={canvasTheme}
                 allowCameraAngle={allowCameraAngle}
               />
@@ -1257,6 +1260,7 @@ function areCanvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps): 
   if (prev.canvasTheme !== next.canvasTheme) return false;
   if (prev.canGenerate !== next.canGenerate) return false;
   if (prev.generateDisabledReason !== next.generateDisabledReason) return false;
+  if (prev.creditQuoteProjectId !== next.creditQuoteProjectId) return false;
   if (prev.allowSocialShare !== next.allowSocialShare) return false;
   if (prev.allowChatDrag !== next.allowChatDrag) return false;
   if (prev.allowCameraAngle !== next.allowCameraAngle) return false;

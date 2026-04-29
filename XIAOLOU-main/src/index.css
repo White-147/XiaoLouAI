@@ -254,3 +254,104 @@
 .canvas-dragging [data-canvas-node] {
   contain: layout style paint;
 }
+
+/* Agent canvas runs directly inside the main app; keep its chat surfaces on the
+   same semantic palette as the host instead of the standalone fixed light skin. */
+.agent-canvas-theme {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.agent-canvas-theme #canvas-background {
+  background: var(--background);
+}
+
+.agent-chat-panel,
+.agent-chat-panel .bg-white {
+  background-color: var(--card) !important;
+  color: var(--card-foreground);
+}
+
+.agent-chat-panel .bg-neutral-50,
+.agent-chat-panel .bg-neutral-100 {
+  background-color: var(--muted) !important;
+}
+
+.agent-chat-panel .bg-neutral-200,
+.agent-chat-panel .bg-neutral-300 {
+  background-color: var(--border) !important;
+}
+
+.agent-chat-panel .text-neutral-950,
+.agent-chat-panel .text-neutral-900,
+.agent-chat-panel .text-neutral-800,
+.agent-chat-panel .text-neutral-700 {
+  color: var(--foreground) !important;
+}
+
+.agent-chat-panel .text-neutral-600,
+.agent-chat-panel .text-neutral-500,
+.agent-chat-panel .text-neutral-400,
+.agent-chat-panel .text-neutral-300 {
+  color: var(--muted-foreground) !important;
+}
+
+.agent-chat-panel .border-neutral-100,
+.agent-chat-panel .border-neutral-200,
+.agent-chat-panel .border-neutral-700,
+.agent-chat-panel .border-neutral-800 {
+  border-color: var(--border) !important;
+}
+
+.agent-chat-panel .hover\:bg-neutral-50:hover,
+.agent-chat-panel .hover\:bg-neutral-100:hover,
+.agent-chat-panel .hover\:bg-neutral-200:hover {
+  background-color: var(--accent) !important;
+}
+
+.agent-chat-panel .hover\:text-neutral-950:hover,
+.agent-chat-panel .hover\:text-neutral-900:hover,
+.agent-chat-panel .hover\:text-neutral-800:hover,
+.agent-chat-panel .hover\:text-neutral-700:hover {
+  color: var(--accent-foreground) !important;
+}
+
+.agent-chat-panel .placeholder\:text-neutral-400::placeholder {
+  color: var(--muted-foreground) !important;
+  opacity: 0.76;
+}
+
+.agent-chat-panel input,
+.agent-chat-panel textarea {
+  caret-color: var(--primary);
+}
+
+.agent-chat-composer-controls {
+  container: agent-chat-composer-controls / inline-size;
+}
+
+.agent-chat-image-settings-button {
+  max-width: 12rem;
+  max-width: clamp(8rem, 58cqw, 12rem);
+}
+
+.agent-chat-fit-label,
+.agent-chat-fit-summary {
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.agent-chat-fit-label {
+  font-size: 0.875rem;
+  font-size: clamp(0.6875rem, 4.4cqw, 0.875rem);
+}
+
+.agent-chat-fit-summary {
+  display: block;
+  min-width: 0;
+  max-width: 10.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.875rem;
+  font-size: clamp(0.625rem, 4.1cqw, 0.875rem);
+}

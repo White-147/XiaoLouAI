@@ -442,31 +442,29 @@ export const useGeneration = ({ nodes, updateNode, generationAccess }: UseGenera
                 let imageBase64: string | undefined;
                 let lastFrameBase64: string | undefined;
 
-                // Get visual parent nodes. Video parents are consumed as frame images
-                // unless the node is explicitly in motion-control mode.
-                const imageParentIds = node.parentIds?.filter(pid => {
-                    const parent = nodes.find(n => n.id === pid);
-                    return parent?.type === NodeType.IMAGE || parent?.type === NodeType.VIDEO;
-                }) || [];
+                const parentNodes = node.parentIds
+                    ?.map(pid => nodes.find(n => n.id === pid))
+                    .filter((parent): parent is NodeData => Boolean(parent)) || [];
+                const videoReferenceUrls = parentNodes
+                    .filter(parent => parent.type === NodeType.VIDEO && parent.resultUrl)
+                    .map(parent => parent.resultUrl!)
+                    .filter((url, index, list) => list.indexOf(url) === index);
+                const audioReferenceUrls = parentNodes
+                    .filter(parent => parent.type === NodeType.AUDIO && parent.resultUrl)
+                    .map(parent => parent.resultUrl!)
+                    .filter((url, index, list) => list.indexOf(url) === index);
+
+                const imageParentIds = parentNodes
+                    .filter(parent => parent.type === NodeType.IMAGE || parent.type === NodeType.VIDEO)
+                    .map(parent => parent.id);
 
                 const imageOnlyParentIds = imageParentIds.filter(pid => {
                     const p = nodes.find(n => n.id === pid);
                     return p?.type === NodeType.IMAGE;
                 });
 
-                // Motion Reference logic (Kling 2.6)
-                let motionReferenceUrl: string | undefined;
-                let isMotionControl = false;
-                if (node.videoMode === 'motion-control' && effectiveVideoModel === 'kling-v2-6') {
-                    const videoParent = node.parentIds
-                        ?.map(pid => nodes.find(n => n.id === pid))
-                        .find(n => n?.type === NodeType.VIDEO && n.resultUrl);
-
-                    if (videoParent) {
-                        motionReferenceUrl = videoParent.resultUrl;
-                        isMotionControl = true;
-                    }
-                }
+                const isMotionControl = node.videoMode === 'motion-control';
+                const motionReferenceVideoUrl = node.motionReferenceVideoUrl || videoReferenceUrls[0];
 
                 const isFrameToFrameMode = node.videoMode === 'frame-to-frame';
 
@@ -638,24 +636,44 @@ export const useGeneration = ({ nodes, updateNode, generationAccess }: UseGenera
                     }
                 }
 
+                const explicitVideoMode =
+                    node.videoMode === 'video-edit'
+                        ? 'video_edit'
+                        : node.videoMode === 'video-extend'
+                            ? 'video_extend'
+                            : node.videoMode === 'motion-control'
+                                ? 'motion_control'
+                                : node.videoMode === 'multi-reference'
+                                    ? 'multi_param'
+                                    : undefined;
+                const characterReferenceImageUrl = node.characterReferenceImageUrl || imageBase64;
+                const requestedVideoMode = explicitVideoMode ||
+                    (isMultiReference
+                        ? 'multi_param'
+                        : isFrameToFrame
+                            ? 'start_end_frame'
+                            : imageBase64
+                                ? 'image_to_video'
+                                : 'text_to_video');
+
                 // Generate video
                 const videoResult = await generateVideo({
                     prompt: combinedPrompt,
                     imageBase64,
                     lastFrameBase64,
                     multiReferenceImageUrls,
-                    videoMode: isMultiReference
-                        ? 'multi_param'
-                        : isFrameToFrame
-                            ? 'start_end_frame'
-                            : imageBase64
-                                ? 'image_to_video'
-                                : 'text_to_video',
+                    referenceVideoUrls: videoReferenceUrls.length ? videoReferenceUrls : node.referenceVideoUrls,
+                    referenceAudioUrls: audioReferenceUrls.length ? audioReferenceUrls : node.referenceAudioUrls,
+                    videoMode: requestedVideoMode,
                     aspectRatio: node.aspectRatio,
                     resolution: node.resolution,
                     duration: node.videoDuration,
                     videoModel: effectiveVideoModel,
-                    motionReferenceUrl,
+                    motionReferenceVideoUrl,
+                    characterReferenceImageUrl,
+                    editMode: node.editMode,
+                    editPresetId: node.editPresetId,
+                    qualityMode: node.qualityMode,
                     generateAudio: node.generateAudio,
                     networkSearch: node.networkSearch,
                     nodeId: id,

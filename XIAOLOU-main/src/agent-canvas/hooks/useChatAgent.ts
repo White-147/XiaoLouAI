@@ -12,7 +12,7 @@ export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
     media?: {
-        type: 'image' | 'video';
+        type: 'image' | 'video' | 'audio';
         url: string;
     }[];
     timestamp: Date;
@@ -41,7 +41,7 @@ export type AgentCanvasSnapshot = {
 };
 
 export type AgentAttachment = {
-    type: 'image' | 'video';
+    type: 'image' | 'video' | 'audio';
     url: string;
     nodeId?: string;
     base64?: string;

@@ -45,7 +45,6 @@ import { DEFAULT_XIAOLOU_IMAGE_TO_VIDEO_MODEL_ID } from './config/canvasVideoMod
 import { WorkflowPanel } from './components/WorkflowPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { ChatPanel, ChatBubble } from './components/ChatPanel';
-import type { AgentCanvasSnapshot, CanvasAgentAction } from './hooks/useChatAgent';
 import { ImageEditorModal } from './components/modals/ImageEditorModal';
 import { VideoEditorModal } from './components/modals/VideoEditorModal';
 import { ExpandedMediaModal } from './components/modals/ExpandedMediaModal';
@@ -173,63 +172,6 @@ function isCanvasEditableEventTarget(target: EventTarget | null) {
   if (element.closest('input, textarea, select, [role="textbox"]')) return true;
   const contentEditable = element.closest('[contenteditable]');
   return contentEditable instanceof HTMLElement && contentEditable.isContentEditable;
-}
-
-type AgentActionRecord = Record<string, unknown>;
-
-function asAgentRecord(value: unknown): AgentActionRecord {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as AgentActionRecord
-    : {};
-}
-
-function readAgentString(record: AgentActionRecord, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function readAgentNumber(record: AgentActionRecord, key: string): number | undefined {
-  const value = record[key];
-  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function readAgentBoolean(record: AgentActionRecord, key: string): boolean | undefined {
-  const value = record[key];
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-function readAgentStringArray(record: AgentActionRecord, key: string): string[] | undefined {
-  const value = record[key];
-  if (!Array.isArray(value)) return undefined;
-  return value.map((item) => String(item || '').trim()).filter(Boolean);
-}
-
-function normalizeAgentActionType(action: CanvasAgentAction): string {
-  const record = asAgentRecord(action);
-  return String(record.type || record.action || '').trim().toLowerCase();
-}
-
-function normalizeAgentNodeType(value?: string): NodeType {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'text') return NodeType.TEXT;
-  if (normalized === 'video') return NodeType.VIDEO;
-  if (normalized === 'audio') return NodeType.AUDIO;
-  if (normalized === 'image editor') return NodeType.IMAGE_EDITOR;
-  if (normalized === 'video editor') return NodeType.VIDEO_EDITOR;
-  if (normalized === 'storyboard manager' || normalized === 'storyboard') return NodeType.STORYBOARD;
-  if (normalized === 'camera angle') return NodeType.CAMERA_ANGLE;
-  if (normalized === 'local image model') return NodeType.LOCAL_IMAGE_MODEL;
-  if (normalized === 'local video model') return NodeType.LOCAL_VIDEO_MODEL;
-  return NodeType.IMAGE;
-}
-
-function normalizeAgentNodeStatus(value?: string): NodeStatus {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === NodeStatus.LOADING) return NodeStatus.LOADING;
-  if (normalized === NodeStatus.SUCCESS) return NodeStatus.SUCCESS;
-  if (normalized === NodeStatus.ERROR) return NodeStatus.ERROR;
-  return NodeStatus.IDLE;
 }
 
 type CanvasDraftData = {
@@ -455,7 +397,11 @@ function getReferenceChoiceLabel(node: NodeData | undefined, fallback: string) {
   return fallback;
 }
 
-export default function App() {
+type AppProps = {
+  creditQuoteProjectId?: string | null;
+};
+
+export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
   // ============================================================================
   // STATE
   // ============================================================================
@@ -1050,239 +996,6 @@ export default function App() {
   React.useEffect(() => {
     handleGenerateRef.current = handleGenerate;
   }, [handleGenerate]);
-
-  const getAgentCanvasSnapshot = React.useCallback((): AgentCanvasSnapshot => ({
-    title: canvasTitle,
-    nodes: nodes.map((node) => ({
-      id: node.id,
-      type: node.type,
-      title: node.title,
-      prompt: node.prompt,
-      x: node.x,
-      y: node.y,
-      width: node.width,
-      status: node.status,
-      resultUrl: node.resultUrl,
-      inputUrl: node.inputUrl,
-      lastFrame: node.lastFrame,
-      resultAspectRatio: node.resultAspectRatio,
-      parentIds: node.parentIds || [],
-      groupId: node.groupId,
-      model: node.model,
-      imageModel: node.imageModel,
-      videoModel: node.videoModel,
-      aspectRatio: node.aspectRatio,
-      resolution: node.resolution,
-    })),
-    groups,
-    viewport,
-    selectedNodeIds,
-  }), [canvasTitle, groups, nodes, selectedNodeIds, viewport]);
-
-  const buildAgentNode = React.useCallback((
-    action: CanvasAgentAction,
-    index: number,
-    forcedType?: NodeType,
-  ): NodeData => {
-    const actionRecord = asAgentRecord(action);
-    const nodeRecord = asAgentRecord(actionRecord.node);
-    const source = { ...actionRecord, ...nodeRecord };
-    const nodeType = forcedType || normalizeAgentNodeType(
-      readAgentString(nodeRecord, 'type') ||
-      readAgentString(actionRecord, 'nodeType') ||
-      readAgentString(actionRecord, 'node_type')
-    );
-    const isVideo = nodeType === NodeType.VIDEO || nodeType === NodeType.VIDEO_EDITOR || nodeType === NodeType.LOCAL_VIDEO_MODEL;
-    const isImage = nodeType === NodeType.IMAGE || nodeType === NodeType.IMAGE_EDITOR || nodeType === NodeType.LOCAL_IMAGE_MODEL;
-    const screenX = window.innerWidth / 2;
-    const screenY = window.innerHeight / 2;
-    const defaultX = (screenX - viewport.x) / viewport.zoom - 170 + index * 420;
-    const defaultY = (screenY - viewport.y) / viewport.zoom - 140 + index * 120;
-    const model = readAgentString(source, 'model') ||
-      (isVideo ? DEFAULT_XIAOLOU_IMAGE_TO_VIDEO_MODEL_ID : DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID);
-    const imageModel = isImage ? normalizeCanvasImageModelId(readAgentString(source, 'imageModel') || model) : undefined;
-    const resultUrl = readAgentString(source, 'resultUrl') || readAgentString(source, 'url');
-
-    return {
-      id: readAgentString(source, 'id') || readAgentString(actionRecord, 'nodeId') || generateUUID(),
-      type: nodeType,
-      title: readAgentString(source, 'title'),
-      x: readAgentNumber(source, 'x') ?? defaultX,
-      y: readAgentNumber(source, 'y') ?? defaultY,
-      width: readAgentNumber(source, 'width'),
-      prompt: readAgentString(source, 'prompt') || readAgentString(actionRecord, 'message') || '',
-      status: normalizeAgentNodeStatus(readAgentString(source, 'status') || (resultUrl ? NodeStatus.SUCCESS : NodeStatus.IDLE)),
-      resultUrl,
-      parentIds: readAgentStringArray(source, 'parentIds') || readAgentStringArray(source, 'parents') || [],
-      model,
-      imageModel,
-      videoModel: isVideo ? readAgentString(source, 'videoModel') || model : undefined,
-      aspectRatio: readAgentString(source, 'aspectRatio') || 'Auto',
-      resolution: readAgentString(source, 'resolution') || 'Auto',
-      videoDuration: readAgentNumber(source, 'videoDuration') || readAgentNumber(source, 'duration'),
-      generateAudio: readAgentBoolean(source, 'generateAudio'),
-      networkSearch: readAgentBoolean(source, 'networkSearch'),
-      videoMode: readAgentString(source, 'videoMode') as NodeData['videoMode'],
-      inputUrl: readAgentString(source, 'inputUrl'),
-    };
-  }, [viewport.x, viewport.y, viewport.zoom]);
-
-  const applyAgentCanvasActions = React.useCallback(async (actions: CanvasAgentAction[]) => {
-    const scheduleGenerate = (nodeId: string, index: number) => {
-      window.setTimeout(() => {
-        void handleGenerateRef.current(nodeId);
-      }, 250 + index * 150);
-    };
-
-    let shouldSave = false;
-
-    actions.forEach((action, index) => {
-      const actionType = normalizeAgentActionType(action);
-      const record = asAgentRecord(action);
-
-      if (actionType === 'create_node') {
-        const newNode = buildAgentNode(action, index);
-        setNodes((previous) => previous.some((node) => node.id === newNode.id)
-          ? previous.map((node) => node.id === newNode.id ? { ...node, ...newNode } : node)
-          : previous.concat(newNode));
-        setSelectedNodeIds([newNode.id]);
-        return;
-      }
-
-      if (actionType === 'update_node') {
-        const nodeId = readAgentString(record, 'nodeId') || readAgentString(record, 'id');
-        if (!nodeId) return;
-        const updateRecord = asAgentRecord(record.updates);
-        const source = Object.keys(updateRecord).length > 0 ? updateRecord : record;
-        const updates: Partial<NodeData> = {};
-        const stringFields: Array<keyof NodeData> = [
-          'title', 'prompt', 'resultUrl', 'errorMessage', 'model', 'imageModel',
-          'videoModel', 'aspectRatio', 'resolution', 'inputUrl',
-        ];
-        stringFields.forEach((field) => {
-          const value = readAgentString(source, field);
-          if (value !== undefined) (updates as Record<string, unknown>)[field] = value;
-        });
-        const numberFields: Array<keyof NodeData> = ['x', 'y', 'width', 'videoDuration', 'batchCount'];
-        numberFields.forEach((field) => {
-          const value = readAgentNumber(source, field);
-          if (value !== undefined) (updates as Record<string, unknown>)[field] = value;
-        });
-        const parentIds = readAgentStringArray(source, 'parentIds');
-        if (parentIds) updates.parentIds = parentIds;
-        const status = readAgentString(source, 'status');
-        if (status) updates.status = normalizeAgentNodeStatus(status);
-        const generateAudio = readAgentBoolean(source, 'generateAudio');
-        if (generateAudio !== undefined) updates.generateAudio = generateAudio;
-        const networkSearch = readAgentBoolean(source, 'networkSearch');
-        if (networkSearch !== undefined) updates.networkSearch = networkSearch;
-        const videoMode = readAgentString(source, 'videoMode');
-        if (videoMode) updates.videoMode = videoMode as NodeData['videoMode'];
-        updateNode(nodeId, updates);
-        setSelectedNodeIds([nodeId]);
-        return;
-      }
-
-      if (actionType === 'delete_nodes') {
-        const ids = readAgentStringArray(record, 'nodeIds') || readAgentStringArray(record, 'ids') || [];
-        if (ids.length > 0) deleteNodes(ids);
-        return;
-      }
-
-      if (actionType === 'connect_nodes') {
-        const edges = Array.isArray(record.edges) ? record.edges : [record];
-        setNodes((previous) => previous.map((node) => {
-          const incomingParents = edges
-            .map((edge) => asAgentRecord(edge))
-            .filter((edge) => (readAgentString(edge, 'childId') || readAgentString(edge, 'targetId')) === node.id)
-            .map((edge) => readAgentString(edge, 'parentId') || readAgentString(edge, 'sourceId'))
-            .filter((id): id is string => Boolean(id));
-          if (incomingParents.length === 0) return node;
-          const parentIds = node.parentIds || [];
-          return { ...node, parentIds: [...parentIds, ...incomingParents.filter((id) => !parentIds.includes(id))] };
-        }));
-        return;
-      }
-
-      if (actionType === 'move_nodes') {
-        const moves = Array.isArray(record.nodes) ? record.nodes.map(asAgentRecord) : [];
-        const ids = readAgentStringArray(record, 'nodeIds') || readAgentStringArray(record, 'ids') || [];
-        const dx = readAgentNumber(record, 'dx') || 0;
-        const dy = readAgentNumber(record, 'dy') || 0;
-        setNodes((previous) => previous.map((node) => {
-          const explicit = moves.find((move) => (readAgentString(move, 'nodeId') || readAgentString(move, 'id')) === node.id);
-          if (explicit) {
-            return {
-              ...node,
-              x: readAgentNumber(explicit, 'x') ?? node.x,
-              y: readAgentNumber(explicit, 'y') ?? node.y,
-            };
-          }
-          return ids.includes(node.id) ? { ...node, x: node.x + dx, y: node.y + dy } : node;
-        }));
-        return;
-      }
-
-      if (actionType === 'layout_nodes') {
-        const ids = readAgentStringArray(record, 'nodeIds') || readAgentStringArray(record, 'ids') || selectedNodeIds;
-        const direction = readAgentString(record, 'direction') || 'horizontal';
-        setNodes((previous) => {
-          const targets = previous.filter((node) => ids.includes(node.id));
-          if (targets.length === 0) return previous;
-          const minX = Math.min(...targets.map((node) => node.x));
-          const minY = Math.min(...targets.map((node) => node.y));
-          return previous.map((node) => {
-            const order = ids.indexOf(node.id);
-            if (order < 0) return node;
-            if (direction === 'vertical') return { ...node, x: minX, y: minY + order * 360 };
-            if (direction === 'grid') return { ...node, x: minX + (order % 3) * 460, y: minY + Math.floor(order / 3) * 360 };
-            return { ...node, x: minX + order * 460, y: minY };
-          });
-        });
-        setSelectedNodeIds(ids);
-        return;
-      }
-
-      if (actionType === 'group_nodes') {
-        const ids = readAgentStringArray(record, 'nodeIds') || readAgentStringArray(record, 'ids') || selectedNodeIds;
-        if (ids.length < 2) return;
-        const groupId = readAgentString(record, 'groupId') || generateUUID();
-        const label = readAgentString(record, 'label') || readAgentString(record, 'title') || 'Agent Group';
-        setGroups((previous) => previous.some((group) => group.id === groupId)
-          ? previous
-          : previous.concat({ id: groupId, nodeIds: ids, label }));
-        setNodes((previous) => previous.map((node) => ids.includes(node.id) ? { ...node, groupId } : node));
-        setSelectedNodeIds(ids);
-        return;
-      }
-
-      if (actionType === 'generate_image' || actionType === 'generate_video') {
-        const forcedType = actionType === 'generate_video' ? NodeType.VIDEO : NodeType.IMAGE;
-        let nodeId = readAgentString(record, 'nodeId') || readAgentString(record, 'id');
-        const prompt = readAgentString(record, 'prompt');
-        if (!nodeId || !latestNodesRef.current.some((node) => node.id === nodeId)) {
-          const newNode = buildAgentNode(action, index, forcedType);
-          nodeId = newNode.id;
-          setNodes((previous) => previous.concat({ ...newNode, prompt: prompt || newNode.prompt }));
-        } else if (prompt) {
-          updateNode(nodeId, { prompt });
-        }
-        setSelectedNodeIds([nodeId]);
-        scheduleGenerate(nodeId, index);
-        return;
-      }
-
-      if (actionType === 'save_canvas') {
-        shouldSave = true;
-      }
-    });
-
-    if (shouldSave) {
-      window.setTimeout(() => {
-        void handleSaveWithTracking();
-      }, 500);
-    }
-  }, [buildAgentNode, deleteNodes, handleSaveWithTracking, selectedNodeIds, setGroups, setNodes, setSelectedNodeIds, updateNode]);
 
   // Create new canvas
   const handleNewCanvas = () => {
@@ -2125,7 +1838,7 @@ export default function App() {
             });
           }
         } catch (error) {
-          console.error('[AgentCanvas] Failed to import dropped/pasted media:', error);
+          console.error('[Canvas] Failed to import dropped/pasted media:', error);
           setNodes((previous) => previous.map((node) => (
             node.id === nodeId
               ? {
@@ -2443,11 +2156,6 @@ export default function App() {
     url: string,
     type: 'image' | 'video' | 'audio'
   ) => {
-    if (type === 'audio') {
-      console.warn('[Canvas] Audio assets are not attachable to video generation nodes yet.');
-      return;
-    }
-
     const targetNode = nodes.find(n => n.id === targetNodeId);
     if (!targetNode) return;
 
@@ -2456,26 +2164,28 @@ export default function App() {
     const sourceX = targetNode.x - 440;
     const sourceY = targetNode.y + existingParentCount * 120;
     const isVideo = type === 'video';
+    const isAudio = type === 'audio';
     const defaultModel = isVideo ? DEFAULT_XIAOLOU_IMAGE_TO_VIDEO_MODEL_ID : DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID;
-    const normalizedImageModel = normalizeCanvasImageModelId(defaultModel);
-    const defaultImageResolution = getDefaultCanvasImageResolution(normalizedImageModel);
+    const normalizedImageModel = isAudio ? '' : normalizeCanvasImageModelId(defaultModel);
+    const defaultImageResolution = isAudio ? 'Auto' : getDefaultCanvasImageResolution(normalizedImageModel);
+    const sourceType = isVideo ? NodeType.VIDEO : isAudio ? NodeType.AUDIO : NodeType.IMAGE;
 
     const appendSourceNode = (partial: Partial<NodeData>) => {
       const sourceNode: NodeData = {
         id: sourceNodeId,
-        type: isVideo ? NodeType.VIDEO : NodeType.IMAGE,
+        type: sourceType,
         x: sourceX,
         y: sourceY,
         prompt: '上传素材',
         status: NodeStatus.SUCCESS,
         resultUrl: url,
-        model: isVideo ? defaultModel : normalizedImageModel,
+        model: isAudio ? '' : isVideo ? defaultModel : normalizedImageModel,
         videoModel: isVideo ? defaultModel : undefined,
-        imageModel: !isVideo ? normalizedImageModel : undefined,
+        imageModel: !isVideo && !isAudio ? normalizedImageModel : undefined,
         aspectRatio: '16:9',
         resolution: isVideo ? 'Auto' : defaultImageResolution,
         parentIds: [],
-        title: isVideo ? '参考视频' : '参考图',
+        title: isVideo ? '参考视频' : isAudio ? '参考音频' : '参考图',
         ...partial,
       };
 
@@ -2488,6 +2198,11 @@ export default function App() {
         })
         .concat(sourceNode));
     };
+
+    if (isAudio) {
+      appendSourceNode({ aspectRatio: 'Auto', resolution: 'Auto' });
+      return;
+    }
 
     if (isVideo) {
       const video = document.createElement('video');
@@ -2950,7 +2665,7 @@ export default function App() {
       }
       const items = node.parentIds
         .map(pid => nodes.find(n => n.id === pid))
-        .filter(p => p && (p.type === NodeType.IMAGE || p.type === NodeType.VIDEO) && p.resultUrl)
+        .filter(p => p && (p.type === NodeType.IMAGE || p.type === NodeType.VIDEO || p.type === NodeType.AUDIO) && p.resultUrl)
         .map(p => ({
           id: p!.id,
           url: (p!.type === NodeType.VIDEO ? p!.lastFrame : p!.resultUrl) || p!.resultUrl!,
@@ -2963,7 +2678,7 @@ export default function App() {
 
   const availableCanvasNodes = React.useMemo(() => {
     return nodes
-      .filter(n => (n.type === NodeType.IMAGE || n.type === NodeType.VIDEO) && n.resultUrl)
+      .filter(n => (n.type === NodeType.IMAGE || n.type === NodeType.VIDEO || n.type === NodeType.AUDIO) && n.resultUrl)
       .map(n => ({
         id: n.id,
         url: (n.type === NodeType.VIDEO ? n.lastFrame : n.resultUrl) || n.resultUrl!,
@@ -3041,6 +2756,7 @@ export default function App() {
           onWorkflowsClick={features.workflows ? handleWorkflowsClick : undefined}
           onAssetsClick={features.assets ? handleAssetsClick : undefined}
           onHistoryClick={features.history ? handleHistoryClick : undefined}
+          onImportMediaFiles={(files) => handleImportMediaFilesToCanvas(files)}
           showWorkflows={features.workflows}
           showAssets={features.assets}
           showHistory={features.history}
@@ -3152,14 +2868,7 @@ export default function App() {
       {features.chat && !shouldHideGlobalChrome && (
         <>
           <ChatBubble onClick={toggleChat} isOpen={isChatOpen} />
-          <ChatPanel
-            isOpen={isChatOpen}
-            onClose={closeChat}
-            isDraggingNode={isDraggingNodeToChat}
-            canvasTheme={canvasTheme}
-            getCanvasSnapshot={getAgentCanvasSnapshot}
-            onApplyActions={applyAgentCanvasActions}
-          />
+          <ChatPanel isOpen={isChatOpen} onClose={closeChat} isDraggingNode={isDraggingNodeToChat} canvasTheme={canvasTheme} />
         </>
       )}
 
@@ -3255,18 +2964,6 @@ export default function App() {
             pointerEvents: 'none'
           }}
         >
-          {/* Background Grid */}
-          <div
-            className="absolute -top-[10000px] -left-[10000px] w-[20000px] h-[20000px]"
-            style={{
-              backgroundImage: canvasTheme === 'dark'
-                ? 'radial-gradient(#666 1px, transparent 1px)'
-                : 'radial-gradient(#ccc 1px, transparent 1px)',
-              backgroundSize: '20px 20px',
-              opacity: canvasTheme === 'dark' ? 0.5 : 0.8
-            }}
-          />
-
           {/* SVG Layer for Connections */}
           <svg className="absolute top-0 left-0 w-full h-full overflow-visible pointer-events-none z-10">
             <ConnectionsLayer
@@ -3302,6 +2999,7 @@ export default function App() {
                 onGenerate={handleGenerate}
                 canGenerate={generationAccess.canGenerate}
                 generateDisabledReason={!generationAccess.canGenerate ? generationAccess.deniedMessage : undefined}
+                creditQuoteProjectId={creditQuoteProjectId}
                 onAttachAssetToVideoNode={handleAttachAssetToVideoNode}
                 onSetFrameSlot={handleSetFrameSlot}
                 onClearFrameSlot={handleClearFrameSlot}

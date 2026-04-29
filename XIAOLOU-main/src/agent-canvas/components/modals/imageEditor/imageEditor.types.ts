@@ -87,9 +87,17 @@ export interface ImageModel {
     supportsMultiImage: boolean;
     recommended?: boolean;
     resolutions: string[];
+    resolutionControl?: 'none' | 'fixed' | 'selectable';
+    qualities?: string[];
+    qualityControl?: 'none' | 'fixed' | 'selectable';
     aspectRatios: string[];
     defaultResolution?: string;
+    defaultQuality?: string;
     defaultAspectRatio?: string;
+    supportsNativeOutputCount?: boolean;
+    maxOutputImages?: number;
+    defaultOutputCount?: number;
+    hiddenUnlessConfigured?: boolean;
 }
 
 // ============================================================================
@@ -101,7 +109,7 @@ export interface ImageModel {
  * unavailable (standalone mode or bridge error). All primary model data
  * should come from useImageCapabilities() via the bridge.
  */
-export const FALLBACK_IMAGE_MODELS: ImageModel[] = CANVAS_IMAGE_MODELS;
+export const FALLBACK_IMAGE_MODELS: ImageModel[] = CANVAS_IMAGE_MODELS.filter((model) => !model.hiddenUnlessConfigured);
 
 export const DEFAULT_IMAGE_EDITOR_MODEL_ID = DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID;
 

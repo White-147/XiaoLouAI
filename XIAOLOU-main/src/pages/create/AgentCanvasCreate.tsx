@@ -171,6 +171,9 @@ function normalizeBridgeVideoMode(mode?: string | null) {
   if (normalized === "multi-reference") return "multi_param";
   if (normalized === "image-to-video") return "image_to_video";
   if (normalized === "text-to-video") return "text_to_video";
+  if (normalized === "motion-control") return "motion_control";
+  if (normalized === "video-edit") return "video_edit";
+  if (normalized === "video-extend") return "video_extend";
   return normalized;
 }
 
@@ -203,9 +206,10 @@ function isTerminalGenerationLookupError(err: unknown) {
   );
 }
 
-async function waitForCreateImageResult(taskId: string) {
+async function waitForCreateImageResult(taskId: string, expectedCount = 1) {
   const deadline = Date.now() + CREATE_IMAGE_TIMEOUT_MS;
   let lastStatus = "queued";
+  const targetCount = Math.max(1, Math.floor(Number(expectedCount) || 1));
   while (Date.now() < deadline) {
     let task: Awaited<ReturnType<typeof getTask>>;
     try {
@@ -222,9 +226,27 @@ async function waitForCreateImageResult(taskId: string) {
     }
     try {
       const response = await listCreateImages();
-      const matched = response.items.find((item) => item.taskId === taskId);
-      const resultUrl = resolveAbsoluteAssetUrl(matched?.imageUrl);
-      if (matched && resultUrl) return { resultUrl, model: matched.model };
+      const matched = response.items
+        .filter((item) => item.taskId === taskId)
+        .sort((a, b) => {
+          const ai = Number.isFinite(Number(a.batchIndex)) ? Number(a.batchIndex) : Number.MAX_SAFE_INTEGER;
+          const bi = Number.isFinite(Number(b.batchIndex)) ? Number(b.batchIndex) : Number.MAX_SAFE_INTEGER;
+          if (ai !== bi) return ai - bi;
+          return (Date.parse(a.createdAt || "") || 0) - (Date.parse(b.createdAt || "") || 0);
+        });
+      const resultItems = matched
+        .map((item) => ({ item, resultUrl: resolveAbsoluteAssetUrl(item.imageUrl) }))
+        .filter((entry): entry is { item: (typeof matched)[number]; resultUrl: string } => Boolean(entry.resultUrl));
+      if (resultItems.length >= targetCount) {
+        return {
+          resultUrl: resultItems[0].resultUrl,
+          resultUrls: resultItems.slice(0, targetCount).map((entry) => entry.resultUrl),
+          model: resultItems[0].item.model,
+        };
+      }
+      if (targetCount === 1 && resultItems.length > 0) {
+        return { resultUrl: resultItems[0].resultUrl, resultUrls: [resultItems[0].resultUrl], model: resultItems[0].item.model };
+      }
     } catch (err) {
       if (isTerminalGenerationLookupError(err)) throw err;
       console.warn("[AgentCanvasCreate] waitForCreateImageResult transient listCreateImages failure:", err);
@@ -522,12 +544,19 @@ function isVideoAsset(asset: Asset) {
   return asset.mediaKind === "video" || asset.assetType === "video_ref";
 }
 
+function isAudioAsset(asset: Asset) {
+  return asset.mediaKind === "audio" || asset.assetType === "audio" || asset.assetType === "sound_effect";
+}
+
 function mapXiaolouAssetTypeToCategory(assetType: string) {
   switch (assetType) {
     case "character": return "Character";
     case "scene": return "Scene";
     case "prop": return "Item";
     case "style": return "Style";
+    case "audio":
+    case "sound_effect":
+      return "Sound Effect";
     default: return "Others";
   }
 }
@@ -552,7 +581,7 @@ function normalizeAssetToBridgeItem(asset: Asset): HostAssetItem | null {
     category: mapXiaolouAssetTypeToCategory(asset.assetType),
     url: mediaUrl,
     previewUrl,
-    type: isVideoAsset(asset) ? "video" : "image",
+    type: isAudioAsset(asset) ? "audio" : isVideoAsset(asset) ? "video" : "image",
     description: asset.description || undefined,
     sourceTaskId: asset.sourceTaskId || undefined,
     generationPrompt: asset.generationPrompt || undefined,
@@ -717,7 +746,7 @@ export default function AgentCanvasCreate() {
           model: payload.model?.trim(),
           aspectRatio: payload.aspectRatio?.trim() || undefined,
           resolution: payload.resolution?.trim() || undefined,
-          count: 1,
+          count: payload.count,
           referenceImageUrls: referenceImageUrls.filter(Boolean),
           idempotencyKey: newIdempotencyKey(),
         });
@@ -725,7 +754,7 @@ export default function AgentCanvasCreate() {
         // canvas node (enables cross-session recovery even if the polling
         // promise below is orphaned by a navigation away or a tab close).
         try { payload.onTaskIdAssigned?.(accepted.taskId); } catch { /* ignore */ }
-        const result = await waitForCreateImageResult(accepted.taskId);
+        const result = await waitForCreateImageResult(accepted.taskId, payload.count);
         return { ...result, taskId: accepted.taskId };
       },
 
@@ -733,6 +762,10 @@ export default function AgentCanvasCreate() {
         const readyProjectId = await resolveReadyProjectId();
         const requestedMode = normalizeBridgeVideoMode(payload.videoMode);
         const isMultiRef = Array.isArray(payload.multiReferenceImageUrls) && payload.multiReferenceImageUrls.length > 0;
+        const isVideoReferenceMode =
+          requestedMode === "video_edit" ||
+          requestedMode === "motion_control" ||
+          requestedMode === "video_extend";
         const isStartEnd =
           requestedMode === "start_end_frame" ||
           (!isMultiRef && Boolean(payload.firstFrameUrl && payload.lastFrameUrl));
@@ -766,8 +799,14 @@ export default function AgentCanvasCreate() {
         if (requestedMode === "start_end_frame" && (!firstFrameUrl || !lastFrameUrl)) {
           throw new Error("首尾帧模式要求同时提供首帧和尾帧。");
         }
+        if (isVideoReferenceMode && !(payload.referenceVideoUrls?.length || payload.motionReferenceVideoUrl)) {
+          throw new Error("该视频模式要求提供参考视频素材。");
+        }
 
         const videoMode =
+          requestedMode === "video_edit" ? "video_edit" :
+          requestedMode === "motion_control" ? "motion_control" :
+          requestedMode === "video_extend" ? "video_extend" :
           requestedMode === "multi_param" ? "multi_param" :
           requestedMode === "start_end_frame" ? "start_end_frame" :
           requestedMode === "image_to_video" ? "image_to_video" :
@@ -788,6 +827,15 @@ export default function AgentCanvasCreate() {
           firstFrameUrl: isStartEnd ? firstFrameUrl : undefined,
           lastFrameUrl: isStartEnd ? lastFrameUrl : undefined,
           multiReferenceImages,
+          referenceVideoUrls: payload.referenceVideoUrls?.filter(Boolean),
+          referenceAudioUrls: payload.referenceAudioUrls?.filter(Boolean),
+          editMode: payload.editMode,
+          editPresetId: payload.editPresetId,
+          motionReferenceVideoUrl: payload.motionReferenceVideoUrl || payload.referenceVideoUrls?.[0],
+          characterReferenceImageUrl: payload.characterReferenceImageUrl
+            ? await inlineReferenceImageUrl(payload.characterReferenceImageUrl)
+            : referenceImageUrl,
+          qualityMode: payload.qualityMode,
           videoMode,
           generateAudio: payload.generateAudio,
           networkSearch: payload.networkSearch,
@@ -1111,13 +1159,13 @@ export default function AgentCanvasCreate() {
     // check relied on guessing a CSS class and silently passed.
     <div
       data-testid="canvas-create-root"
-      className="relative h-full w-full overflow-hidden bg-[#050505]"
+      className="relative h-full w-full overflow-hidden bg-background text-foreground transition-colors duration-300"
     >
-      <CanvasApp />
+      <CanvasApp creditQuoteProjectId={currentProjectId} />
       {Boolean(pendingLoadProjectId) && canvasProjectLoadState.status !== "idle" ? (
-        <div className="pointer-events-auto absolute inset-0 z-[120] flex items-center justify-center bg-black/48 px-6 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/12 bg-[#111111]/92 p-6 text-white shadow-2xl">
-            <div className="text-sm font-semibold tracking-[0.24em] text-white/55">
+        <div className="pointer-events-auto absolute inset-0 z-[120] flex items-center justify-center bg-background/70 px-6 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-border bg-card p-6 text-card-foreground shadow-2xl">
+            <div className="text-sm font-semibold tracking-[0.24em] text-muted-foreground">
               CANVAS
             </div>
             <div className="mt-3 text-2xl font-semibold">
@@ -1127,7 +1175,7 @@ export default function AgentCanvasCreate() {
                   ? "正在加载画布项目"
                   : "画布项目加载失败"}
             </div>
-            <p className="mt-3 text-sm leading-6 text-white/70">
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
               {canvasProjectLoadState.status === "syncing"
                 ? "正在校准当前账号可访问的项目范围，完成后会自动加载目标画布。"
                 : canvasProjectLoadState.status === "loading"
@@ -1139,21 +1187,21 @@ export default function AgentCanvasCreate() {
                 <button
                   type="button"
                   onClick={() => setCanvasProjectLoadAttempt((count) => count + 1)}
-                  className="inline-flex items-center justify-center rounded-full bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-white/90"
+                  className="inline-flex items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
                 >
                   重试加载
                 </button>
                 <button
                   type="button"
                   onClick={() => window.location.reload()}
-                  className="inline-flex items-center justify-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-white/80 transition hover:border-white/35 hover:text-white"
+                  className="inline-flex items-center justify-center rounded-full border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
                 >
                   刷新当前页
                 </button>
               </div>
             ) : (
-              <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-white/10">
-                <div className="h-full w-1/3 animate-pulse rounded-full bg-white/70" />
+              <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
               </div>
             )}
           </div>

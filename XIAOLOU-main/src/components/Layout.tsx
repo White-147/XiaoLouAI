@@ -879,6 +879,15 @@ export default function Layout() {
                         }}
                       />
 
+                      <ProfileMenuItem
+                        icon={CreditCard}
+                        label="积分统计"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          navigate("/wallet/usage");
+                        }}
+                      />
+
                       <div className="my-1.5 border-t border-border/60" />
 
                       <ProfileMenuItem

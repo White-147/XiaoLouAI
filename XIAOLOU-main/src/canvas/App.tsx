@@ -397,7 +397,11 @@ function getReferenceChoiceLabel(node: NodeData | undefined, fallback: string) {
   return fallback;
 }
 
-export default function App() {
+type AppProps = {
+  creditQuoteProjectId?: string | null;
+};
+
+export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
   // ============================================================================
   // STATE
   // ============================================================================
@@ -2992,6 +2996,7 @@ export default function App() {
                 onGenerate={handleGenerate}
                 canGenerate={generationAccess.canGenerate}
                 generateDisabledReason={!generationAccess.canGenerate ? generationAccess.deniedMessage : undefined}
+                creditQuoteProjectId={creditQuoteProjectId}
                 onAttachAssetToVideoNode={handleAttachAssetToVideoNode}
                 onSetFrameSlot={handleSetFrameSlot}
                 onClearFrameSlot={handleClearFrameSlot}
