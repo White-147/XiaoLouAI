@@ -35,9 +35,7 @@ $services = @(
     @{ Port = 4100; Label = "core-api" },
     @{ Port = 3000; Label = "Vite    " },
     @{ Port = 57988; Label = "Jaaz API" },
-    @{ Port = 5174; Label = "Jaaz UI " },
-    @{ Port = 80;   Label = "Caddy:80" },
-    @{ Port = 443;  Label = "Caddy:443" }
+    @{ Port = 5174; Label = "Jaaz UI " }
 )
 
 foreach ($svc in $services) {
@@ -54,8 +52,6 @@ foreach ($svc in $services) {
 Write-Host ""
 Write-Host "Access:" -ForegroundColor Cyan
 Write-Host "  http://127.0.0.1:3000        local"
-Write-Host "  http://218.92.180.214         public IP"
-Write-Host "  http://aitianmu.cn            public domain (PeanutHull tunnel)"
 
 # Log tails
 Write-Host ""

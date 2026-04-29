@@ -372,7 +372,7 @@ async function generateVertexGeminiImages({
     parts.push({ text: fullPrompt });
 
     // Reference images
-    for (const ref of allRefs.slice(0, 16)) {
+    for (const ref of allRefs.slice(0, 14)) {
       const normalized = String(ref || "").trim();
       if (!normalized) continue;
 
@@ -413,7 +413,7 @@ async function generateVertexGeminiImages({
         model: rawModelId,
         contents: [{ role: "user", parts }],
         config: {
-          responseModalities: ["IMAGE"],
+          responseModalities: ["TEXT", "IMAGE"],
           ...(Object.keys(imageConfig).length ? { imageConfig } : {}),
         },
       });
@@ -452,6 +452,9 @@ async function generateVertexGeminiImages({
  * @param {string} params.prompt
  * @param {string} [params.referenceImageBase64]  - base64 image for image-to-video
  * @param {string} [params.lastFrameBase64]       - base64 image for the last frame (start-end frame mode); mapped to instance.lastFrame in the Veo API
+ * @param {string} [params.referenceVideoBase64]  - base64 video for video extension
+ * @param {string} [params.referenceVideoGcsUri]  - gs:// video URI for video extension
+ * @param {string} [params.referenceVideoMimeType]
  * @param {string} [params.aspectRatio]           - "16:9" | "9:16"
  * @param {number} [params.durationSeconds]
  * @param {string} [params.resolution]            - "720p" | "1080p"
@@ -465,6 +468,9 @@ async function startVertexVeoTask({
   prompt,
   referenceImageBase64,
   lastFrameBase64,
+  referenceVideoBase64,
+  referenceVideoGcsUri,
+  referenceVideoMimeType = "video/mp4",
   aspectRatio = "16:9",
   durationSeconds = 8,
   resolution,
@@ -489,9 +495,21 @@ async function startVertexVeoTask({
 
   // Build instance
   const instance = { prompt: String(prompt || "").trim() };
+  const hasReferenceVideo = Boolean(referenceVideoGcsUri || referenceVideoBase64);
 
-  // Single-reference image (image-to-video)
-  if (referenceImageBase64) {
+  // Video extension. Per Vertex docs, video input is mutually exclusive with
+  // image, lastFrame, and referenceImages.
+  if (hasReferenceVideo) {
+    instance.video = {
+      mimeType: referenceVideoMimeType || "video/mp4",
+    };
+    if (referenceVideoGcsUri) {
+      instance.video.gcsUri = referenceVideoGcsUri;
+    } else {
+      instance.video.bytesBase64Encoded = referenceVideoBase64;
+    }
+  } else if (referenceImageBase64) {
+    // Single-reference image (image-to-video)
     instance.image = {
       bytesBase64Encoded: referenceImageBase64,
       mimeType: "image/jpeg",
@@ -503,7 +521,7 @@ async function startVertexVeoTask({
   // name causes the API to silently ignore the last frame and fall back to
   // plain image-to-video using only the first frame/reference image.
   // Reference: https://cloud.google.com/vertex-ai/generative-ai/docs/video/generate-videos-from-first-and-last-frames
-  if (lastFrameBase64) {
+  if (!hasReferenceVideo && lastFrameBase64) {
     instance.lastFrame = {
       bytesBase64Encoded: lastFrameBase64,
       mimeType: "image/jpeg",
@@ -511,7 +529,7 @@ async function startVertexVeoTask({
   }
 
   // Multi-reference images (style/subject references)
-  if (referenceImages.length > 0) {
+  if (!hasReferenceVideo && referenceImages.length > 0) {
     instance.referenceImages = referenceImages.slice(0, 3).map((b64, idx) => ({
       referenceType: "asset",
       referenceId: idx,
@@ -522,11 +540,13 @@ async function startVertexVeoTask({
   const parameters = {
     aspectRatio: normalizedAspectRatio,
     sampleCount: 1,
-    durationSeconds: Number(durationSeconds) || 8,
     enhancePrompt: true,
     generateAudio: Boolean(generateAudio),
     storageUri: outputPrefix,
   };
+  if (!hasReferenceVideo) {
+    parameters.durationSeconds = Number(durationSeconds) || 8;
+  }
   if (resolution) {
     parameters.resolution = String(resolution);
   }

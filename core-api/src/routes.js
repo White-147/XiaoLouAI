@@ -132,6 +132,24 @@ function getActorId(req, url) {
   return resolved;
 }
 
+function parseNumberParam(url, name) {
+  const value = Number(url.searchParams.get(name) || "0");
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function parseCreditQuoteInput(url) {
+  return {
+    sourceText: url.searchParams.get("sourceText") || undefined,
+    text: url.searchParams.get("text") || undefined,
+    count: parseNumberParam(url, "count"),
+    shotCount: parseNumberParam(url, "shotCount"),
+    storyboardId: url.searchParams.get("storyboardId") || undefined,
+    model: url.searchParams.get("model") || undefined,
+    aspectRatio: url.searchParams.get("aspectRatio") || undefined,
+    resolution: url.searchParams.get("resolution") || undefined,
+  };
+}
+
 function buildRoutes(store) {
   return [
     ...buildSystemRoutes(store),
@@ -386,6 +404,9 @@ function buildWalletRoutes(store) {
     route("GET", "/api/wallets", ({ req, url }) =>
       ok({ items: store.listWallets(getActorId(req, url)) })
     ),
+    route("GET", "/api/wallet/usage-stats", ({ req, url }) =>
+      ok(store.getWalletUsageStats(getActorId(req, url), url.searchParams.get("mode") || "personal"))
+    ),
     route("GET", "/api/wallets/:walletId/ledger", ({ params, req, url }) =>
       ok({ items: store.listWalletLedger(params.walletId, getActorId(req, url)) })
     ),
@@ -612,6 +633,21 @@ function buildApiCenterRoutes(store) {
 
 function buildCreateRoutes(store) {
   return [
+    route("GET", "/api/create/credit-quote", ({ req, url }) => {
+      const actionCode = url.searchParams.get("action");
+      if (!actionCode) {
+        return failure(400, "BAD_REQUEST", "action is required");
+      }
+
+      return ok(
+        store.getCreateCreditQuote(
+          url.searchParams.get("projectId") || null,
+          actionCode,
+          parseCreditQuoteInput(url),
+          getActorId(req, url),
+        ),
+      );
+    }),
     route("GET", "/api/create/images", ({ req, url }) =>
       ok({ items: store.listCreateImages(getActorId(req, url)) })
     ),
@@ -707,13 +743,7 @@ function buildProjectRoutes(store) {
         store.getProjectCreditQuote(
           params.projectId,
           actionCode,
-          {
-            sourceText: url.searchParams.get("sourceText") || undefined,
-            text: url.searchParams.get("text") || undefined,
-            count: Number(url.searchParams.get("count") || "0") || undefined,
-            shotCount: Number(url.searchParams.get("shotCount") || "0") || undefined,
-            storyboardId: url.searchParams.get("storyboardId") || undefined,
-          },
+          parseCreditQuoteInput(url),
           getActorId(req, url),
         ),
       );
@@ -1484,6 +1514,17 @@ function buildAdminRoutes(store) {
     ),
     route("GET", "/api/admin/orders", ({ req, url }) =>
       ok({ items: store.listAdminOrders(getActorId(req, url)) })
+    ),
+    route("GET", "/api/admin/credit-usage-subjects", ({ req, url }) =>
+      ok({ items: store.searchCreditUsageSubjects(getActorId(req, url), url.searchParams.get("search") || "") })
+    ),
+    route("GET", "/api/admin/credit-usage-stats", ({ req, url }) =>
+      ok(
+        store.getAdminCreditUsageStats(getActorId(req, url), {
+          subjectType: url.searchParams.get("subjectType") || "platform",
+          subjectId: url.searchParams.get("subjectId") || null,
+        })
+      )
     ),
     routeWithStatus("POST", "/api/admin/orders/:orderId/review", 200, async ({ params, req, url }) => {
       const body = await readJsonBody(req);

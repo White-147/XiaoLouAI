@@ -343,6 +343,54 @@ async function main() {
     throw new Error("alipay notify should create exactly one recharge ledger entry");
   }
 
+  const personalUsage = await request(boot.baseUrl, "/api/wallet/usage-stats?mode=personal", {
+    headers: { "X-Actor-Id": "user_personal_001" },
+  });
+  if (personalUsage.status !== 200) throw new Error(`personal usage stats failed: ${personalUsage.text}`);
+  if (!Array.isArray(personalUsage.body?.data?.series) || personalUsage.body.data.series.length !== 30) {
+    throw new Error("personal usage stats should return 30 daily buckets");
+  }
+  if (personalUsage.body?.data?.subject?.type !== "user") {
+    throw new Error("personal usage stats should be scoped to a user subject");
+  }
+
+  const organizationUsage = await request(boot.baseUrl, "/api/wallet/usage-stats?mode=organization", {
+    headers: { "X-Actor-Id": "user_demo_001" },
+  });
+  if (organizationUsage.status !== 200) {
+    throw new Error(`enterprise admin usage stats failed: ${organizationUsage.text}`);
+  }
+  if (organizationUsage.body?.data?.subject?.type !== "organization") {
+    throw new Error("enterprise admin usage stats should be scoped to organization subject");
+  }
+
+  const memberOrganizationUsage = await request(boot.baseUrl, "/api/wallet/usage-stats?mode=organization", {
+    headers: { "X-Actor-Id": "user_member_001" },
+  });
+  if (memberOrganizationUsage.status !== 403) {
+    throw new Error("enterprise member should not access organization usage stats");
+  }
+
+  const usageSubjects = await request(boot.baseUrl, "/api/admin/credit-usage-subjects?search=demo", {
+    headers: { "X-Actor-Id": "ops_demo_001" },
+  });
+  if (usageSubjects.status !== 200) throw new Error(`admin usage subject search failed: ${usageSubjects.text}`);
+  if (!Array.isArray(usageSubjects.body?.data?.items) || !usageSubjects.body.data.items.length) {
+    throw new Error("admin usage subject search should return subjects");
+  }
+
+  const platformUsage = await request(
+    boot.baseUrl,
+    "/api/admin/credit-usage-stats?subjectType=platform",
+    {
+      headers: { "X-Actor-Id": "ops_demo_001" },
+    },
+  );
+  if (platformUsage.status !== 200) throw new Error(`admin platform usage stats failed: ${platformUsage.text}`);
+  if (platformUsage.body?.data?.subject?.type !== "platform") {
+    throw new Error("admin platform usage stats should be scoped to platform subject");
+  }
+
   await new Promise((resolve) => setTimeout(resolve, 2600));
   const generatedStoryboards = await request(boot.baseUrl, "/api/projects/proj_demo_001/storyboards");
   if (generatedStoryboards.status !== 200) throw new Error("storyboard list failed");

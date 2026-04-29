@@ -90,7 +90,7 @@ https://www.xiaolouai.cn/admin/login
 
 The backend creates or updates this `super_admin` account on startup. The admin login endpoint rejects non-super-admin accounts.
 
-When using Caddy single-origin mode, `/api/*` and `/uploads/*` must reverse proxy to core-api port 4100 before the catch-all frontend proxy. This is required so Alipay can reach the async notify endpoint.
+When using any single-origin reverse proxy, `/api/*` and `/uploads/*` must proxy to core-api port 4100 before the catch-all frontend proxy. This is required so Alipay can reach the async notify endpoint.
 
 The backend auto-loads env files from these locations (first match wins per key):
 

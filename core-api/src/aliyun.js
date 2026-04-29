@@ -997,10 +997,15 @@ async function createSeedanceVideoTask({
   referenceImageUrls,
   firstFrameUrl,
   lastFrameUrl,
+  referenceVideoUrls,
+  referenceAudioUrls,
+  motionReferenceVideoUrl,
+  characterReferenceImageUrl,
   aspectRatio,
   resolution,
   duration,
   videoMode,
+  editMode,
   generateAudio,
 }) {
   const normalizedModel = normalizeModelId(model) || "doubao-seedance-2-0-260128";
@@ -1037,6 +1042,30 @@ async function createSeedanceVideoTask({
     }
   }
 
+  const characterImage = characterReferenceImageUrl && characterReferenceImageUrl !== referenceImageUrl
+    ? await prepareSeedanceImageUrl(characterReferenceImageUrl)
+    : null;
+  if (characterImage) {
+    content.push({ type: "image_url", image_url: { url: characterImage }, role: "character_reference" });
+  }
+
+  const videoRefs = Array.from(new Set([
+    motionReferenceVideoUrl,
+    ...(Array.isArray(referenceVideoUrls) ? referenceVideoUrls : []),
+  ].map((url) => String(url || "").trim()).filter(Boolean))).slice(0, 3);
+  for (const url of videoRefs) {
+    content.push({ type: "video_url", video_url: { url }, role: videoMode === "motion_control" ? "motion_reference" : "reference_video" });
+  }
+
+  const audioRefs = Array.from(new Set(
+    (Array.isArray(referenceAudioUrls) ? referenceAudioUrls : [])
+      .map((url) => String(url || "").trim())
+      .filter(Boolean)
+  )).slice(0, 3);
+  for (const url of audioRefs) {
+    content.push({ type: "audio_url", audio_url: { url }, role: "reference_audio" });
+  }
+
   const hasImageInput = content.some((c) => c.type === "image_url");
 
   const payload = {
@@ -1046,6 +1075,7 @@ async function createSeedanceVideoTask({
     duration: mapSeedanceDuration(duration),
     watermark: false,
     resolution: mapSeedanceResolution(resolution),
+    ...(editMode ? { edit_mode: editMode } : {}),
     ...(typeof generateAudio === 'boolean' ? { generate_audio: generateAudio } : {}),
   };
 
@@ -1463,6 +1493,45 @@ async function uploadImageToPixverse(value) {
   };
 }
 
+async function uploadVideoToPixverse(value) {
+  const source = readLocalReferenceSource(value) || (await fetchRemoteReferenceSource(value));
+  if (!source?.buffer) {
+    throw providerError("PixVerse video upload requires a readable local or remote video source", 400, "MISSING_REFERENCE_VIDEO");
+  }
+
+  const form = new FormData();
+  const blob = new Blob([source.buffer], {
+    type: source.contentType || "application/octet-stream",
+  });
+  form.append(
+    "video",
+    blob,
+    source.fileName || `reference${guessExtensionFromContentType(source.contentType)}`
+  );
+
+  const payload = await requestPixverse("/video/upload", {
+    method: "POST",
+    body: form,
+    maxAttempts: 1,
+  });
+
+  const resp = payload?.Resp || payload?.resp || payload?.data || payload || {};
+  const videoId =
+    resp?.video_id ??
+    resp?.videoId ??
+    resp?.media_id ??
+    resp?.mediaId ??
+    resp?.id ??
+    null;
+  if (!videoId) {
+    throw providerError("PixVerse video upload did not return video_id", 502, "PIXVERSE_VIDEO_UPLOAD_EMPTY");
+  }
+  return {
+    videoId,
+    videoUrl: resp?.video_url || resp?.videoUrl || resp?.url || null,
+  };
+}
+
 function buildPixverseFusionReferences(multiReferenceImages, maxReferenceImages = 3) {
   const refs = [];
   const roleCounts = {};
@@ -1514,6 +1583,13 @@ async function createPixverseVideoTask({
   videoMode,
   multiReferenceImages,
   generateAudio,
+  referenceVideoUrl,
+  referenceVideoUrls,
+  motionReferenceVideoUrl,
+  characterReferenceImageUrl,
+  editMode,
+  editPresetId,
+  qualityMode,
 }) {
   const normalizedModel = mapPixverseVideoModelName(model);
   const normalizedVideoMode = String(videoMode || "").trim().toLowerCase();
@@ -1613,6 +1689,80 @@ async function createPixverseVideoTask({
     const videoId = payload?.Resp?.video_id ?? payload?.resp?.video_id ?? null;
     if (!videoId) throw providerError("PixVerse fusion did not return video_id", 502, "PIXVERSE_VIDEO_EMPTY");
     return `pixverse:${videoId}`;
+  }
+
+  if (normalizedVideoMode === "motion_control") {
+    const sourceVideoUrl = motionReferenceVideoUrl || referenceVideoUrl || (Array.isArray(referenceVideoUrls) ? referenceVideoUrls[0] : null);
+    if (!sourceVideoUrl) {
+      throw providerError("PixVerse mimic requires a motion reference video", 400, "MISSING_REFERENCE_VIDEO");
+    }
+    if (!characterReferenceImageUrl) {
+      throw providerError("PixVerse mimic requires a character reference image", 400, "MISSING_REFERENCE_IMAGE");
+    }
+    const [{ videoId }, { imgId }] = await Promise.all([
+      uploadVideoToPixverse(sourceVideoUrl),
+      uploadImageToPixverse(characterReferenceImageUrl),
+    ]);
+    const payload = await requestPixverse("/video/mimic/generate", {
+      method: "POST",
+      body: {
+        ...payloadBase,
+        video_id: videoId,
+        img_id: imgId,
+        mode: String(qualityMode || "std").trim().toLowerCase() === "pro" ? "pro" : "std",
+      },
+      maxAttempts: 1,
+    });
+    const outputVideoId = payload?.Resp?.video_id ?? payload?.resp?.video_id ?? null;
+    if (!outputVideoId) throw providerError("PixVerse mimic did not return video_id", 502, "PIXVERSE_VIDEO_EMPTY");
+    return `pixverse:${outputVideoId}`;
+  }
+
+  if (normalizedVideoMode === "video_edit") {
+    const sourceVideoUrl = referenceVideoUrl || (Array.isArray(referenceVideoUrls) ? referenceVideoUrls[0] : null);
+    if (!sourceVideoUrl) {
+      throw providerError("PixVerse video edit requires a reference video", 400, "MISSING_REFERENCE_VIDEO");
+    }
+    const { videoId } = await uploadVideoToPixverse(sourceVideoUrl);
+    const normalizedEditMode = String(editMode || (editPresetId ? "restyle" : "modify")).trim().toLowerCase();
+    const path = normalizedEditMode === "restyle" ? "/video/restyle/generate" : "/video/modify/generate";
+    const body = normalizedEditMode === "restyle"
+      ? {
+          ...payloadBase,
+          video_id: videoId,
+          ...(editPresetId ? { effect_id: editPresetId, style_id: editPresetId } : {}),
+        }
+      : {
+          ...payloadBase,
+          video_id: videoId,
+        };
+    const payload = await requestPixverse(path, {
+      method: "POST",
+      body,
+      maxAttempts: 1,
+    });
+    const outputVideoId = payload?.Resp?.video_id ?? payload?.resp?.video_id ?? null;
+    if (!outputVideoId) throw providerError("PixVerse video edit did not return video_id", 502, "PIXVERSE_VIDEO_EMPTY");
+    return `pixverse:${outputVideoId}`;
+  }
+
+  if (normalizedVideoMode === "video_extend") {
+    const sourceVideoUrl = referenceVideoUrl || (Array.isArray(referenceVideoUrls) ? referenceVideoUrls[0] : null);
+    if (!sourceVideoUrl) {
+      throw providerError("PixVerse extend requires a reference video", 400, "MISSING_REFERENCE_VIDEO");
+    }
+    const { videoId } = await uploadVideoToPixverse(sourceVideoUrl);
+    const payload = await requestPixverse("/video/extend/generate", {
+      method: "POST",
+      body: {
+        ...payloadBase,
+        video_id: videoId,
+      },
+      maxAttempts: 1,
+    });
+    const outputVideoId = payload?.Resp?.video_id ?? payload?.resp?.video_id ?? null;
+    if (!outputVideoId) throw providerError("PixVerse extend did not return video_id", 502, "PIXVERSE_VIDEO_EMPTY");
+    return `pixverse:${outputVideoId}`;
   }
 
   throw providerError(`Unsupported PixVerse video mode: ${normalizedVideoMode}`, 400, "PIXVERSE_UNSUPPORTED_MODE");
@@ -3209,6 +3359,14 @@ async function createAliyunVideoTask({
   maxReferenceImages: inputMaxReferenceImages = null,
   generateAudio,
   multiReferenceImages,
+  referenceVideoUrl,
+  referenceVideoUrls,
+  referenceAudioUrls,
+  motionReferenceVideoUrl,
+  characterReferenceImageUrl,
+  editMode,
+  editPresetId,
+  qualityMode,
 }) {
   const normalizedModel = normalizeModelId(model);
 
@@ -3225,6 +3383,13 @@ async function createAliyunVideoTask({
       videoMode,
       multiReferenceImages,
       generateAudio,
+      referenceVideoUrl,
+      referenceVideoUrls,
+      motionReferenceVideoUrl,
+      characterReferenceImageUrl,
+      editMode,
+      editPresetId,
+      qualityMode,
     });
   }
 
@@ -3236,10 +3401,15 @@ async function createAliyunVideoTask({
       referenceImageUrls,
       firstFrameUrl,
       lastFrameUrl,
+      referenceVideoUrls,
+      referenceAudioUrls,
+      motionReferenceVideoUrl,
+      characterReferenceImageUrl,
       aspectRatio,
       resolution,
       duration,
       videoMode,
+      editMode,
       generateAudio,
     });
   }
@@ -3426,6 +3596,39 @@ async function createAliyunVideoTask({
         ? "multi-elements"
         : "multi-image2video";
       return klingTaskId ? `yunwu-kling:${klingTaskType}:${klingTaskId}` : null;
+    }
+
+    if (isKlingMultiElementsModel(normalizedModel) && normalizedVideoMode === "motion_control") {
+      const preparedKlingReferenceImageUrls = [];
+      const candidateImages = [
+        characterReferenceImageUrl,
+        ...(Array.isArray(referenceImageUrls) ? referenceImageUrls : []),
+      ];
+      for (const url of candidateImages) {
+        const preparedUrl = await prepareYunwuVideoImageUrl(url);
+        if (preparedUrl) {
+          preparedKlingReferenceImageUrls.push(preparedUrl);
+        }
+      }
+      const uniqueKlingReferenceImageUrls = Array.from(new Set(preparedKlingReferenceImageUrls)).slice(0, 7);
+      if (!uniqueKlingReferenceImageUrls.length) {
+        throw providerError("Kling motion-control requires at least one character or element reference image", 400, "MISSING_REFERENCE_IMAGE");
+      }
+      const klingPayload = await requestYunwu("/kling/v1/videos/multi-elements", {
+        method: "POST",
+        body: buildKlingMultiElementsPayload({
+          model: normalizedModel,
+          prompt,
+          referenceImageUrls: uniqueKlingReferenceImageUrls,
+          duration,
+        }),
+      });
+      const klingTaskId =
+        klingPayload?.data?.task_id ||
+        klingPayload?.task_id ||
+        klingPayload?.id ||
+        null;
+      return klingTaskId ? `yunwu-kling:multi-elements:${klingTaskId}` : null;
     }
 
     const normalizedResolution = mapVideoResolution(resolution, normalizedModel);

@@ -85,9 +85,9 @@ function isLocalLoopbackClientHint(req) {
   if (!req || !req.headers) return false;
 
   // If the browser sent an Origin or Referer header, trust it as the primary
-  // signal. When traffic flows through Caddy → Vite (changeOrigin:true) →
-  // core-api, Vite rewrites the Host header to "127.0.0.1:4100" but keeps
-  // the browser's original Origin/Referer (e.g. "https://www.xiaolouai.cn").
+  // signal. When traffic flows through a reverse proxy and Vite
+  // (changeOrigin:true) to core-api, Vite rewrites the Host header to
+  // "127.0.0.1:4100" but keeps the browser's original Origin/Referer.
   // Relying on Host alone would falsely grant super-admin to external users.
   const origin  = req.headers.origin;
   const referer = req.headers.referer;

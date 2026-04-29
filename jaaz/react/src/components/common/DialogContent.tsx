@@ -15,6 +15,9 @@ const CommonDialogContent: React.FC<CommonDialogProps> = ({
   className,
   transformPerspective = 500,
 }) => {
+  const enterEase: [number, number, number, number] = [0.17, 0.67, 0.51, 1]
+  const exitEase: [number, number, number, number] = [0.67, 0.17, 0.62, 0.64]
+
   const openState = {
     opacity: 1,
     filter: 'blur(0px)',
@@ -23,7 +26,7 @@ const CommonDialogContent: React.FC<CommonDialogProps> = ({
     z: 0,
     transition: {
       duration: 0.5,
-      ease: [0.17, 0.67, 0.51, 1],
+      ease: enterEase,
       opacity: {
         delay: 0.2,
         duration: 0.4,
@@ -40,7 +43,7 @@ const CommonDialogContent: React.FC<CommonDialogProps> = ({
     rotateX: 25,
     transition: {
       duration: 0.3,
-      ease: [0.67, 0.17, 0.62, 0.64],
+      ease: exitEase,
     },
   }
 

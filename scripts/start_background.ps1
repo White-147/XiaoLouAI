@@ -6,10 +6,7 @@
 
 $ErrorActionPreference = "Continue"
 
-$ROOT      = (Split-Path $PSScriptRoot -Parent)
-$CADDY     = "$ROOT\caddy\caddy.exe"
-$CADDYF    = "$ROOT\caddy\Caddyfile"
-$CADDY_PID = "$ROOT\caddy\caddy.pid"
+$ROOT = (Split-Path $PSScriptRoot -Parent)
 
 function Test-Port($port) {
     $out = netstat -ano 2>$null | Select-String ":$port\s+\S+\s+LISTENING"
@@ -113,29 +110,6 @@ if (Test-Port 5174) {
 }
 
 # ===========================================================
-# 5. Caddy  (port 80 / 443)
-# ===========================================================
-if (-not (Test-Path $CADDY)) {
-    Write-Host "[caddy]    caddy.exe not found, skipping." -ForegroundColor Red
-} elseif (Test-Port 80) {
-    Write-Host "[caddy]    Already running on :80, skipping." -ForegroundColor Yellow
-} else {
-    # Use Start-Process (no -Wait) so first-run TLS provisioning doesn't block the script.
-    # Caddy daemon will be running independently; we verify via port check below.
-    Start-Process -FilePath $CADDY `
-        -ArgumentList "start", "--config", $CADDYF, "--pidfile", $CADDY_PID `
-        -WindowStyle Hidden
-    Start-Sleep -Seconds 2
-    if (Test-Port 80) {
-        Write-Host "[caddy]    Started (daemon mode)" -ForegroundColor Green
-        Write-Host "           Log: caddy\logs\access.log" -ForegroundColor DarkGray
-    } else {
-        Write-Host "[caddy]    Started (TLS provisioning in progress, :80 not yet bound)" -ForegroundColor Yellow
-        Write-Host "           Log: caddy\logs\access.log" -ForegroundColor DarkGray
-    }
-}
-
-# ===========================================================
 # Wait for core-api to be ready (up to 20s)
 # ===========================================================
 Write-Host ""
@@ -166,21 +140,9 @@ else                 { Write-Host "  Jaaz API  :57988 not listening (check jaaz-
 if (Test-Port 5174) { Write-Host "  Jaaz UI   :5174  OK" -ForegroundColor Green } `
 else                { Write-Host "  Jaaz UI   :5174  starting... (check jaaz\react\vite-dev.log)" -ForegroundColor Yellow }
 
-if (Test-Port 80)   { Write-Host "  Caddy     :80    OK" -ForegroundColor Green } `
-else                 { Write-Host "  Caddy     :80    not listening (port blocked or not started)" -ForegroundColor Yellow }
-
-if (Test-Port 443)  { Write-Host "  Caddy     :443   OK" -ForegroundColor Green } `
-else                 { Write-Host "  Caddy     :443   pending (cert issue or port blocked)" -ForegroundColor Yellow }
-
-if (Test-Port 8080) { Write-Host "  Caddy     :8080  OK (fallback)" -ForegroundColor Green } `
-else                 { Write-Host "  Caddy     :8080  not listening" -ForegroundColor Yellow }
-
 Write-Host ""
 Write-Host "Access:" -ForegroundColor Cyan
 Write-Host "  http://127.0.0.1:3000             local"
-Write-Host "  http://218.92.180.214             public IP :80"
-Write-Host "  http://218.92.180.214:8080        public IP :8080 (ISP fallback)"
-Write-Host "  http://aitianmu.cn                public domain (PeanutHull tunnel)"
 Write-Host ""
 Write-Host "Commands:" -ForegroundColor DarkGray
 Write-Host "  Status:  powershell -ExecutionPolicy Bypass -File scripts\status.ps1"

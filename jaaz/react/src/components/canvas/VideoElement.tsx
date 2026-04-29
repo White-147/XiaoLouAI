@@ -330,7 +330,7 @@ export const CanvasVideoElement: React.FC<{
                     isPreview={false}
                     muted={true}
                     autoPlay={false}
-                    onClick={(e) => {
+                    onClick={() => {
                         console.log('🎬 VideoElement clicked')
                         // Don't call onSelect again - already handled by parent div
                     }}

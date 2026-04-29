@@ -3,7 +3,7 @@ const { randomUUID } = require("node:crypto");
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Request-Id, X-Upload-Filename, X-Actor-Id"
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Request-Id, X-Upload-Filename, X-Actor-Id, Idempotency-Key"
 };
 
 function corsHeaders(extra = {}) {

@@ -1,5 +1,8 @@
 fastapi
 uvicorn[standard]
+pydantic
+starlette
+websockets
 anthropic
 mcp
 toml
@@ -26,6 +29,7 @@ langgraph-sdk==0.1.70
 langgraph-swarm==0.0.11
 langchain-ollama==0.3.3
 langchain-openai==0.3.21
+langchain-core
 python-socketio==5.13.0
 pymediainfo
 openai-agents

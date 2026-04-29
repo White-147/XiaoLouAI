@@ -285,6 +285,34 @@ function sameCalendarMonth(left, right) {
   return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth();
 }
 
+function startOfLocalDay(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addLocalDays(value, days) {
+  const date = startOfLocalDay(value);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function formatLocalDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeCreditUsageSearch(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function creditUsageMatchesSearch(query, ...values) {
+  if (!query) return true;
+  return values.some((value) => String(value || "").toLowerCase().includes(query));
+}
+
 function hashPassword(password) {
   const salt = randomUUID().slice(0, 16);
   const hash = createHash("sha256").update(salt + password).digest("hex");
@@ -499,6 +527,7 @@ const VIDEO_MODE_ALIASES = {
   "text-to-video": "text_to_video",
   "motion-control": "motion_control",
   "video-edit": "video_edit",
+  "video-extend": "video_extend",
 };
 
 function normalizeVideoMode(mode) {
@@ -579,6 +608,25 @@ function createVideoCapabilitySet(overrides = {}) {
     defaultDuration: overrides.defaultDuration || supportedDurations[0] || null,
     defaultAspectRatio: overrides.defaultAspectRatio || supportedAspectRatios[0] || null,
     defaultResolution: overrides.defaultResolution || supportedResolutions[0] || null,
+    maxReferenceImages: Number.isFinite(Number(overrides.maxReferenceImages))
+      ? Number(overrides.maxReferenceImages)
+      : undefined,
+    maxReferenceVideos: Number.isFinite(Number(overrides.maxReferenceVideos))
+      ? Number(overrides.maxReferenceVideos)
+      : undefined,
+    maxReferenceAudios: Number.isFinite(Number(overrides.maxReferenceAudios))
+      ? Number(overrides.maxReferenceAudios)
+      : undefined,
+    supportsGenerateAudio: overrides.supportsGenerateAudio === true ? true : undefined,
+    qualityModes: Array.isArray(overrides.qualityModes)
+      ? overrides.qualityModes.map((value) => String(value)).filter(Boolean)
+      : undefined,
+    editModes: Array.isArray(overrides.editModes)
+      ? overrides.editModes.map((value) => String(value)).filter(Boolean)
+      : undefined,
+    requires: Array.isArray(overrides.requires)
+      ? overrides.requires.map((value) => String(value)).filter(Boolean)
+      : undefined,
     note: overrides.note || null,
   };
 }
@@ -696,6 +744,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
     note: "Yunwu Kling Omni Video. Uses /kling/v1/videos/omni-video with model_name kling-v3-omni for image-to-video.",
     supportsTextToVideo: false,
     supportsSingleReference: true,
+    supportsGenerateAudio: true,
     inputModes: {
       single_reference: createVideoCapabilitySet({
         supported: true,
@@ -709,6 +758,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "5s",
         defaultAspectRatio: "16:9",
         defaultResolution: "Auto",
+        supportsGenerateAudio: true,
         note: "Routes to Yunwu /kling/v1/videos/omni-video. The API controls output resolution automatically.",
       }),
     },
@@ -800,6 +850,9 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
     note: "字节跳动 Seedance 2.0，通过火山引擎 Ark 平台调用，需配置 VOLCENGINE_ARK_API_KEY。支持文生视频、图生视频，分辨率 720p/480p，时长 4-15s。",
     supportsTextToVideo: true,
     supportsSingleReference: true,
+    supportsGenerateAudio: true,
+    maxReferenceVideos: 3,
+    maxReferenceAudios: 3,
     inputModes: {
       text_to_video: createVideoCapabilitySet({
         supported: true,
@@ -813,6 +866,9 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "5s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        maxReferenceVideos: 3,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
         note: "Seedance 2.0 文生视频，通过火山引擎 Ark 接口调用。仅支持 720p/480p，不支持 1080p。时长范围 4-15 秒连续可选。",
       }),
       single_reference: createVideoCapabilitySet({
@@ -827,6 +883,9 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "5s",
         defaultAspectRatio: "adaptive",
         defaultResolution: "720p",
+        maxReferenceVideos: 3,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
         note: "Seedance 2.0 图生视频，参考图作为首帧，比例设为 adaptive 可自动适配原图尺寸。仅支持 720p/480p。",
       }),
     },
@@ -838,6 +897,9 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
     note: "字节跳动 Seedance 2.0 快速版，生成速度更快但质量略低于标准版，适合快速预览，需配置 VOLCENGINE_ARK_API_KEY。",
     supportsTextToVideo: true,
     supportsSingleReference: true,
+    supportsGenerateAudio: true,
+    maxReferenceVideos: 3,
+    maxReferenceAudios: 3,
     inputModes: {
       text_to_video: createVideoCapabilitySet({
         supported: true,
@@ -851,6 +913,9 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "5s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        maxReferenceVideos: 3,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
         note: "Seedance 2.0 Fast 文生视频，速度优先版本。仅支持 720p/480p。",
       }),
       single_reference: createVideoCapabilitySet({
@@ -865,6 +930,9 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "5s",
         defaultAspectRatio: "adaptive",
         defaultResolution: "720p",
+        maxReferenceVideos: 3,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
         note: "Seedance 2.0 Fast 图生视频，速度优先版本。仅支持 720p/480p。",
       }),
     },
@@ -885,6 +953,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
     supportsSingleReference: true,
     supportsStartEndFrame: true,
     supportsMultiImage: false,
+    supportsGenerateAudio: true,
     inputModes: {
       text_to_video: createVideoCapabilitySet({
         supported: true,
@@ -898,6 +967,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
       single_reference: createVideoCapabilitySet({
         supported: true,
@@ -911,6 +981,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
     },
   },
@@ -924,6 +995,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
     supportsSingleReference: true,
     supportsStartEndFrame: true,
     supportsMultiImage: false,
+    supportsGenerateAudio: true,
     inputModes: {
       text_to_video: createVideoCapabilitySet({
         supported: true,
@@ -937,6 +1009,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
       single_reference: createVideoCapabilitySet({
         supported: true,
@@ -950,6 +1023,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
     },
   },
@@ -963,6 +1037,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
     supportsSingleReference: true,
     supportsStartEndFrame: true,
     supportsMultiImage: false,
+    supportsGenerateAudio: true,
     inputModes: {
       text_to_video: createVideoCapabilitySet({
         supported: true,
@@ -976,6 +1051,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
       single_reference: createVideoCapabilitySet({
         supported: true,
@@ -989,6 +1065,7 @@ const CREATE_VIDEO_IMAGE_TO_VIDEO_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
     },
   },
@@ -1155,6 +1232,9 @@ const CREATE_VIDEO_START_END_MODELS = [
     supportsTextToVideo: false,
     supportsSingleReference: false,
     supportsStartEndFrame: true,
+    supportsGenerateAudio: true,
+    maxReferenceVideos: 3,
+    maxReferenceAudios: 3,
     inputModes: {
       start_end_frame: createVideoCapabilitySet({
         supported: true,
@@ -1168,6 +1248,9 @@ const CREATE_VIDEO_START_END_MODELS = [
         defaultDuration: "5s",
         defaultAspectRatio: "adaptive",
         defaultResolution: "720p",
+        maxReferenceVideos: 3,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
         note: "Seedance 2.0 首尾帧模式，首帧+尾帧图片，adaptive 比例自动适配。仅支持 720p/480p，时长 4-15 秒。",
       }),
     },
@@ -1179,6 +1262,7 @@ const CREATE_VIDEO_START_END_MODELS = [
     provider: "google-vertex",
     status: "stable",
     supportsStartEndFrame: true,
+    supportsGenerateAudio: true,
     inputModes: {
       start_end_frame: createVideoCapabilitySet({
         supported: true,
@@ -1192,6 +1276,7 @@ const CREATE_VIDEO_START_END_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
     },
   },
@@ -1201,6 +1286,7 @@ const CREATE_VIDEO_START_END_MODELS = [
     provider: "google-vertex",
     status: "stable",
     supportsStartEndFrame: true,
+    supportsGenerateAudio: true,
     inputModes: {
       start_end_frame: createVideoCapabilitySet({
         supported: true,
@@ -1214,6 +1300,7 @@ const CREATE_VIDEO_START_END_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
     },
   },
@@ -1224,6 +1311,7 @@ const CREATE_VIDEO_START_END_MODELS = [
     status: "preview",
     note: "Veo 3.1 Lite，Preview 阶段。支持首尾帧视频；多参考图暂不开放。",
     supportsStartEndFrame: true,
+    supportsGenerateAudio: true,
     inputModes: {
       start_end_frame: createVideoCapabilitySet({
         supported: true,
@@ -1237,6 +1325,7 @@ const CREATE_VIDEO_START_END_MODELS = [
         defaultDuration: "8s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        supportsGenerateAudio: true,
       }),
     },
   },
@@ -1391,6 +1480,9 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
     supportsSingleReference: false,
     supportsMultiReference: true,
     maxReferenceImages: 9,
+    maxReferenceVideos: 3,
+    maxReferenceAudios: 3,
+    supportsGenerateAudio: true,
     maxReferenceImagesSource: "integrated",
     inputModes: {
       multi_param: createVideoCapabilitySet({
@@ -1405,6 +1497,9 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
         defaultDuration: "5s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        maxReferenceVideos: 3,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
         note: "Seedance 2.0 多参考图模式，最多 9 张参考图。仅支持 720p/480p，时长 4-15 秒。",
       }),
     },
@@ -1418,6 +1513,9 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
     supportsSingleReference: false,
     supportsMultiReference: true,
     maxReferenceImages: 9,
+    maxReferenceVideos: 3,
+    maxReferenceAudios: 3,
+    supportsGenerateAudio: true,
     maxReferenceImagesSource: "integrated",
     inputModes: {
       multi_param: createVideoCapabilitySet({
@@ -1432,6 +1530,9 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
         defaultDuration: "5s",
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
+        maxReferenceVideos: 3,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
         note: "Seedance 2.0 Fast 多参考图模式，速度更快。仅支持 720p/480p，时长 4-15 秒。",
       }),
     },
@@ -1446,6 +1547,7 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
     supportsSingleReference: false,
     supportsMultiReference: true,
     maxReferenceImages: 3,
+    supportsGenerateAudio: true,
     maxReferenceImagesSource: "official",
     inputModes: {
       multi_param: createVideoCapabilitySet({
@@ -1460,6 +1562,7 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
         maxReferenceImages: 3,
+        supportsGenerateAudio: true,
         note: "按 Google Vertex AI 官方多参考图视频能力接入：最多 3 张参考图。当前保守开放 16:9 / 9:16 与 720p / 1080p。",
       }),
     },
@@ -1474,6 +1577,7 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
     supportsSingleReference: false,
     supportsMultiReference: true,
     maxReferenceImages: 3,
+    supportsGenerateAudio: true,
     maxReferenceImagesSource: "official",
     inputModes: {
       multi_param: createVideoCapabilitySet({
@@ -1488,7 +1592,320 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
         defaultAspectRatio: "16:9",
         defaultResolution: "720p",
         maxReferenceImages: 3,
+        supportsGenerateAudio: true,
         note: "按 Google Vertex AI 官方多参考图视频能力接入：最多 3 张参考图。当前保守开放 16:9 / 9:16 与 720p / 1080p。",
+      }),
+    },
+  },
+];
+
+const DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY = createVideoCapabilitySet({
+  status: "untested",
+  supportedDurations: ["4s", "5s", "6s", "7s", "8s", "9s", "10s", "11s", "12s", "13s", "14s", "15s"],
+  supportedAspectRatios: ["Auto", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+  supportedResolutions: ["720p", "1080p"],
+  durationControl: "selectable",
+  aspectRatioControl: "selectable",
+  resolutionControl: "selectable",
+  defaultDuration: "5s",
+  defaultAspectRatio: "16:9",
+  defaultResolution: "720p",
+  maxReferenceVideos: 1,
+  maxReferenceImages: 1,
+  note: "Officially documented by the upstream provider, wired through this integration path, and pending real-task validation.",
+});
+
+const CREATE_VIDEO_EDIT_MODELS = [
+  {
+    id: "pixverse-c1",
+    label: "PixVerse C1 Edit",
+    provider: "pixverse",
+    status: "untested",
+    note: "PixVerse official Restyle / Modify video edit APIs. Requires a source video; optional edit preset is used for Restyle.",
+    supportsVideoEdit: true,
+    maxReferenceVideos: 1,
+    maxReferenceImages: 4,
+    inputModes: {
+      video_edit: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        supportedAspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "Auto"],
+        supportedResolutions: ["360p", "540p", "720p", "1080p"],
+        editModes: ["modify", "restyle"],
+        requires: ["reference_video"],
+      }),
+    },
+  },
+  {
+    id: "pixverse-v6",
+    label: "PixVerse V6 Edit",
+    provider: "pixverse",
+    status: "untested",
+    note: "PixVerse official Restyle / Modify video edit APIs. Requires a source video; optional edit preset is used for Restyle.",
+    supportsVideoEdit: true,
+    maxReferenceVideos: 1,
+    maxReferenceImages: 4,
+    inputModes: {
+      video_edit: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        supportedAspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "Auto"],
+        supportedResolutions: ["360p", "540p", "720p", "1080p"],
+        editModes: ["modify", "restyle"],
+        requires: ["reference_video"],
+      }),
+    },
+  },
+  {
+    id: "doubao-seedance-2-0-260128",
+    label: "Seedance 2.0 Edit",
+    provider: "bytedance",
+    status: "untested",
+    note: "Seedance 2.0 official multimodal reference/edit capability. Routed through Ark content generation payload and pending real-task validation.",
+    supportsVideoEdit: true,
+    maxReferenceVideos: 3,
+    maxReferenceImages: 9,
+    maxReferenceAudios: 3,
+    supportsGenerateAudio: true,
+    inputModes: {
+      video_edit: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        supportedResolutions: ["720p", "480p"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+        editModes: ["modify", "restyle"],
+        maxReferenceVideos: 3,
+        maxReferenceImages: 9,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
+        requires: ["reference_video"],
+      }),
+    },
+  },
+  {
+    id: "doubao-seedance-2-0-fast-260128",
+    label: "Seedance 2.0 Fast Edit",
+    provider: "bytedance",
+    status: "untested",
+    note: "Seedance 2.0 Fast multimodal reference/edit capability. Routed through Ark content generation payload and pending real-task validation.",
+    supportsVideoEdit: true,
+    maxReferenceVideos: 3,
+    maxReferenceImages: 9,
+    maxReferenceAudios: 3,
+    supportsGenerateAudio: true,
+    inputModes: {
+      video_edit: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        supportedResolutions: ["720p", "480p"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+        editModes: ["modify", "restyle"],
+        maxReferenceVideos: 3,
+        maxReferenceImages: 9,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
+        requires: ["reference_video"],
+      }),
+    },
+  },
+];
+
+const CREATE_VIDEO_MOTION_CONTROL_MODELS = [
+  {
+    id: "pixverse-c1",
+    label: "PixVerse C1 Mimic",
+    provider: "pixverse",
+    status: "untested",
+    note: "PixVerse official Mimic API. Requires a motion reference video and a character reference image.",
+    supportsMotionControl: true,
+    maxReferenceVideos: 1,
+    maxReferenceImages: 1,
+    inputModes: {
+      motion_control: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        supportedAspectRatios: ["16:9", "9:16", "1:1", "Auto"],
+        supportedResolutions: ["720p", "1080p"],
+        qualityModes: ["std", "pro"],
+        requires: ["motion_reference_video", "character_reference_image"],
+      }),
+    },
+  },
+  {
+    id: "pixverse-v6",
+    label: "PixVerse V6 Mimic",
+    provider: "pixverse",
+    status: "untested",
+    note: "PixVerse official Mimic API. Requires a motion reference video and a character reference image.",
+    supportsMotionControl: true,
+    maxReferenceVideos: 1,
+    maxReferenceImages: 1,
+    inputModes: {
+      motion_control: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        supportedAspectRatios: ["16:9", "9:16", "1:1", "Auto"],
+        supportedResolutions: ["720p", "1080p"],
+        qualityModes: ["std", "pro"],
+        requires: ["motion_reference_video", "character_reference_image"],
+      }),
+    },
+  },
+  {
+    id: "kling-multi-elements",
+    label: "Kling Multi Elements Motion",
+    provider: "kling",
+    status: "experimental",
+    note: "Kling multi-elements / reference capability is exposed as motion-control when the model is configured. It uses image references through the existing Yunwu adapter.",
+    supportsMotionControl: true,
+    maxReferenceImages: 7,
+    inputModes: {
+      motion_control: createVideoCapabilitySet({
+        ...DEFAULT_MULTI_PARAM_CAPABILITY,
+        status: "experimental",
+        supportedDurations: ["5s", "10s"],
+        durationControl: "selectable",
+        defaultDuration: "5s",
+        maxReferenceImages: 7,
+        requires: ["character_reference_image"],
+      }),
+    },
+  },
+  {
+    id: "doubao-seedance-2-0-260128",
+    label: "Seedance 2.0 Motion",
+    provider: "bytedance",
+    status: "untested",
+    note: "Seedance 2.0 official multimodal video reference capability exposed as motion control, pending real-task validation.",
+    supportsMotionControl: true,
+    maxReferenceVideos: 3,
+    maxReferenceImages: 9,
+    maxReferenceAudios: 3,
+    supportsGenerateAudio: true,
+    inputModes: {
+      motion_control: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        supportedResolutions: ["720p", "480p"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+        maxReferenceVideos: 3,
+        maxReferenceImages: 9,
+        maxReferenceAudios: 3,
+        supportsGenerateAudio: true,
+        qualityModes: ["std", "pro"],
+        requires: ["motion_reference_video"],
+      }),
+    },
+  },
+];
+
+const CREATE_VIDEO_EXTEND_MODELS = [
+  {
+    id: "vertex:veo-3.1-generate-001",
+    label: "Veo 3.1+ Extend",
+    provider: "google-vertex",
+    status: "untested",
+    note: "Vertex AI Veo 3.1 official video extension. Requires one MP4 reference video; this project routes it directly through Vertex and marks the path untested until real tasks pass.",
+    supportsVideoExtend: true,
+    maxReferenceVideos: 1,
+    inputModes: {
+      video_extend: createVideoCapabilitySet({
+        supported: true,
+        status: "untested",
+        supportedDurations: ["7s"],
+        supportedAspectRatios: ["16:9", "9:16"],
+        supportedResolutions: ["720p", "1080p"],
+        durationControl: "fixed",
+        aspectRatioControl: "selectable",
+        resolutionControl: "selectable",
+        defaultDuration: "7s",
+        defaultAspectRatio: "16:9",
+        defaultResolution: "720p",
+        maxReferenceVideos: 1,
+        editModes: ["extend"],
+        requires: ["reference_video"],
+        note: "Official Vertex Veo extend support. Input video must be MP4, 1-30s, 24fps, 16:9 or 9:16.",
+      }),
+    },
+  },
+  {
+    id: "vertex:veo-3.1-fast-generate-001",
+    label: "Veo 3.1 Fast+ Extend",
+    provider: "google-vertex",
+    status: "untested",
+    note: "Vertex AI Veo 3.1 Fast official video extension. Requires one MP4 reference video; marked untested until real tasks pass.",
+    supportsVideoExtend: true,
+    maxReferenceVideos: 1,
+    inputModes: {
+      video_extend: createVideoCapabilitySet({
+        supported: true,
+        status: "untested",
+        supportedDurations: ["7s"],
+        supportedAspectRatios: ["16:9", "9:16"],
+        supportedResolutions: ["720p", "1080p"],
+        durationControl: "fixed",
+        aspectRatioControl: "selectable",
+        resolutionControl: "selectable",
+        defaultDuration: "7s",
+        defaultAspectRatio: "16:9",
+        defaultResolution: "720p",
+        maxReferenceVideos: 1,
+        editModes: ["extend"],
+        requires: ["reference_video"],
+        note: "Official Vertex Veo extend support. Input video must be MP4, 1-30s, 24fps, 16:9 or 9:16.",
+      }),
+    },
+  },
+  {
+    id: "vertex:veo-3.1-lite-generate-001",
+    label: "Veo 3.1 Lite+ Extend",
+    provider: "google-vertex",
+    status: "untested",
+    note: "Vertex AI Veo 3.1 Lite official video extension. Preview model; marked untested until real tasks pass.",
+    supportsVideoExtend: true,
+    maxReferenceVideos: 1,
+    inputModes: {
+      video_extend: createVideoCapabilitySet({
+        supported: true,
+        status: "untested",
+        supportedDurations: ["7s"],
+        supportedAspectRatios: ["16:9", "9:16"],
+        supportedResolutions: ["720p", "1080p"],
+        durationControl: "fixed",
+        aspectRatioControl: "selectable",
+        resolutionControl: "selectable",
+        defaultDuration: "7s",
+        defaultAspectRatio: "16:9",
+        defaultResolution: "720p",
+        maxReferenceVideos: 1,
+        editModes: ["extend"],
+        requires: ["reference_video"],
+        note: "Official Vertex Veo extend support. Input video must be MP4, 1-30s, 24fps, 16:9 or 9:16.",
+      }),
+    },
+  },
+  {
+    id: "pixverse-c1",
+    label: "PixVerse C1 Extend",
+    provider: "pixverse",
+    status: "untested",
+    note: "PixVerse official Extend API. Requires a source video and prompt.",
+    supportsVideoExtend: true,
+    maxReferenceVideos: 1,
+    inputModes: {
+      video_extend: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        editModes: ["extend"],
+        requires: ["reference_video"],
+      }),
+    },
+  },
+  {
+    id: "pixverse-v6",
+    label: "PixVerse V6 Extend",
+    provider: "pixverse",
+    status: "untested",
+    note: "PixVerse official Extend API. Requires a source video and prompt.",
+    supportsVideoExtend: true,
+    maxReferenceVideos: 1,
+    inputModes: {
+      video_extend: createVideoCapabilitySet({
+        ...DEFAULT_VIDEO_REFERENCE_EDIT_CAPABILITY,
+        editModes: ["extend"],
+        requires: ["reference_video"],
       }),
     },
   },
@@ -1766,16 +2183,36 @@ function createImageCapabilitySet(overrides = {}) {
   const supportedResolutions = Array.isArray(overrides.supportedResolutions)
     ? overrides.supportedResolutions.map((v) => String(v)).filter(Boolean)
     : ["2K"];
+  const supportedQualities = Array.isArray(overrides.supportedQualities)
+    ? overrides.supportedQualities.map((v) => String(v)).filter(Boolean)
+    : [];
+  const resolutionControl =
+    overrides.resolutionControl ||
+    (supportedResolutions.length > 0 ? (supportedResolutions.length > 1 ? "selectable" : "fixed") : "none");
+  const qualityControl =
+    overrides.qualityControl ||
+    (supportedQualities.length > 0 ? (supportedQualities.length > 1 ? "selectable" : "fixed") : "none");
+  const supportsNativeOutputCount = overrides.supportsNativeOutputCount === true;
+  const maxOutputImages = supportsNativeOutputCount
+    ? Math.max(1, Math.min(Number(overrides.maxOutputImages) || 1, 4))
+    : 1;
 
   return {
     supported: overrides.supported !== false,
     status: overrides.status || "stable",
     supportedAspectRatios,
     supportedResolutions,
+    supportedQualities,
     aspectRatioControl: overrides.aspectRatioControl || (supportedAspectRatios.length > 1 ? "selectable" : "fixed"),
-    resolutionControl: overrides.resolutionControl || (supportedResolutions.length > 1 ? "selectable" : "fixed"),
+    resolutionControl,
+    qualityControl,
+    outputCountControl: supportsNativeOutputCount ? "selectable" : "fixed",
     defaultAspectRatio: overrides.defaultAspectRatio || supportedAspectRatios[0] || null,
-    defaultResolution: overrides.defaultResolution || supportedResolutions[0] || null,
+    defaultResolution: resolutionControl === "none" ? null : (overrides.defaultResolution || supportedResolutions[0] || null),
+    defaultQuality: overrides.defaultQuality || supportedQualities[0] || null,
+    defaultOutputCount: Math.max(1, Math.min(Number(overrides.defaultOutputCount) || 1, maxOutputImages)),
+    maxOutputImages,
+    supportsNativeOutputCount,
     maxReferenceImages: overrides.maxReferenceImages || null,
     note: overrides.note || null,
   };
@@ -1791,7 +2228,6 @@ const GEMINI_31_FLASH_IMAGE_ASPECT_RATIOS = [
 ];
 const GEMINI_3_PRO_IMAGE_RESOLUTIONS = ["1K", "2K", "4K"];
 const GEMINI_3_1_FLASH_IMAGE_RESOLUTIONS = ["512", "1K", "2K", "4K"];
-const GEMINI_2_5_FLASH_IMAGE_RESOLUTIONS = ["1K"];
 const VERTEX_GEMINI_IMAGE_RESOLUTIONS = ["1K", "2K", "4K"];
 const KLING_IMAGE_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"];
 const KLING_IMAGE_RESOLUTIONS = ["1K", "2K"];
@@ -1809,15 +2245,21 @@ const CREATE_IMAGE_MODELS = [
       text_to_image: createImageCapabilitySet({
         supportedAspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         supportedResolutions: ["2K", "3K"],
+        supportsNativeOutputCount: true,
+        maxOutputImages: 4,
       }),
       image_to_image: createImageCapabilitySet({
         supportedAspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         supportedResolutions: ["2K", "3K"],
+        supportsNativeOutputCount: true,
+        maxOutputImages: 4,
         maxReferenceImages: 1,
       }),
       multi_image: createImageCapabilitySet({
         supportedAspectRatios: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
         supportedResolutions: ["2K", "3K"],
+        supportsNativeOutputCount: true,
+        maxOutputImages: 4,
         maxReferenceImages: 4,
       }),
     },
@@ -1895,22 +2337,22 @@ const CREATE_IMAGE_MODELS = [
     inputModes: {
       text_to_image: createImageCapabilitySet({
         supportedAspectRatios: GEMINI_STANDARD_IMAGE_ASPECT_RATIOS,
-        supportedResolutions: GEMINI_2_5_FLASH_IMAGE_RESOLUTIONS,
+        supportedResolutions: [],
+        resolutionControl: "none",
         defaultAspectRatio: "1:1",
-        defaultResolution: "1K",
       }),
       image_to_image: createImageCapabilitySet({
         supportedAspectRatios: GEMINI_STANDARD_IMAGE_ASPECT_RATIOS,
-        supportedResolutions: GEMINI_2_5_FLASH_IMAGE_RESOLUTIONS,
+        supportedResolutions: [],
+        resolutionControl: "none",
         defaultAspectRatio: "1:1",
-        defaultResolution: "1K",
         maxReferenceImages: 14,
       }),
       multi_image: createImageCapabilitySet({
         supportedAspectRatios: GEMINI_STANDARD_IMAGE_ASPECT_RATIOS,
-        supportedResolutions: GEMINI_2_5_FLASH_IMAGE_RESOLUTIONS,
+        supportedResolutions: [],
+        resolutionControl: "none",
         defaultAspectRatio: "1:1",
-        defaultResolution: "1K",
         maxReferenceImages: 14,
       }),
     },
@@ -1941,14 +2383,14 @@ const CREATE_IMAGE_MODELS = [
         supportedResolutions: VERTEX_GEMINI_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
-        maxReferenceImages: 8,
+        maxReferenceImages: 14,
       }),
       multi_image: createImageCapabilitySet({
         supportedAspectRatios: GEMINI_STANDARD_IMAGE_ASPECT_RATIOS,
         supportedResolutions: VERTEX_GEMINI_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
-        maxReferenceImages: 8,
+        maxReferenceImages: 14,
       }),
     },
   },
@@ -1972,14 +2414,14 @@ const CREATE_IMAGE_MODELS = [
         supportedResolutions: VERTEX_GEMINI_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
-        maxReferenceImages: 8,
+        maxReferenceImages: 14,
       }),
       multi_image: createImageCapabilitySet({
         supportedAspectRatios: GEMINI_31_FLASH_IMAGE_ASPECT_RATIOS,
         supportedResolutions: VERTEX_GEMINI_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
-        maxReferenceImages: 8,
+        maxReferenceImages: 14,
       }),
     },
   },
@@ -1997,12 +2439,16 @@ const CREATE_IMAGE_MODELS = [
         supportedResolutions: KLING_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
+        supportsNativeOutputCount: true,
+        maxOutputImages: 4,
       }),
       image_to_image: createImageCapabilitySet({
         supportedAspectRatios: KLING_IMAGE_ASPECT_RATIOS,
         supportedResolutions: KLING_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
+        supportsNativeOutputCount: true,
+        maxOutputImages: 4,
         maxReferenceImages: 1,
       }),
     },
@@ -2021,12 +2467,16 @@ const CREATE_IMAGE_MODELS = [
         supportedResolutions: KLING_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
+        supportsNativeOutputCount: true,
+        maxOutputImages: 4,
       }),
       image_to_image: createImageCapabilitySet({
         supportedAspectRatios: KLING_IMAGE_ASPECT_RATIOS,
         supportedResolutions: KLING_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
+        supportsNativeOutputCount: true,
+        maxOutputImages: 4,
         maxReferenceImages: 1,
       }),
       multi_image: createImageCapabilitySet({
@@ -2034,6 +2484,8 @@ const CREATE_IMAGE_MODELS = [
         supportedResolutions: KLING_IMAGE_RESOLUTIONS,
         defaultAspectRatio: "1:1",
         defaultResolution: "1K",
+        supportsNativeOutputCount: true,
+        maxOutputImages: 4,
         maxReferenceImages: 4,
       }),
     },
@@ -2108,6 +2560,14 @@ function resolveCreateImageResolution(model, resolution, referenceCount) {
   const requestedResolution = String(resolution || "").trim().toUpperCase();
   const inputModeCapability = getCreateImageCapabilitySetForMode(model, referenceCount);
   if (inputModeCapability?.supported) {
+    if (inputModeCapability.resolutionControl === "none") {
+      return {
+        requestedResolution,
+        normalizedResolution: "",
+        resolutionControl: "none",
+        supportedResolutions: [],
+      };
+    }
     return {
       requestedResolution,
       normalizedResolution: resolveSelectableCapabilityValue(
@@ -2124,6 +2584,26 @@ function resolveCreateImageResolution(model, resolution, referenceCount) {
     normalizedResolution: requestedResolution,
     resolutionControl: "selectable",
     supportedResolutions: [],
+  };
+}
+
+function resolveCreateImageOutputCount(model, count, referenceCount) {
+  const requestedCount = Math.max(1, Math.floor(Number(count) || 1));
+  const inputModeCapability = getCreateImageCapabilitySetForMode(model, referenceCount);
+  if (!inputModeCapability?.supportsNativeOutputCount) {
+    return {
+      requestedCount,
+      normalizedCount: 1,
+      maxOutputImages: 1,
+      outputCountControl: "fixed",
+    };
+  }
+  const maxOutputImages = Math.max(1, Math.min(Number(inputModeCapability.maxOutputImages) || 1, 4));
+  return {
+    requestedCount,
+    normalizedCount: Math.max(1, Math.min(requestedCount, maxOutputImages)),
+    maxOutputImages,
+    outputCountControl: maxOutputImages > 1 ? "selectable" : "fixed",
   };
 }
 
@@ -2205,6 +2685,50 @@ function listCreateVideoMultiParamCapabilities() {
   ).map(enrichVideoModel);
 }
 
+function listCreateVideoEditCapabilities() {
+  return CREATE_VIDEO_EDIT_MODELS.filter((item) =>
+    isMediaGenerationModelConfigured("video", item.id)
+  ).map(enrichVideoModel);
+}
+
+function listCreateVideoMotionControlCapabilities() {
+  return CREATE_VIDEO_MOTION_CONTROL_MODELS.filter((item) =>
+    isMediaGenerationModelConfigured("video", item.id)
+  ).map(enrichVideoModel);
+}
+
+function listCreateVideoExtendCapabilities() {
+  return CREATE_VIDEO_EXTEND_MODELS.filter((item) =>
+    isMediaGenerationModelConfigured("video", item.id)
+  ).map(enrichVideoModel);
+}
+
+function resolveCreateVideoDefaultModelFromItems(
+  items,
+  preferredModel = DEFAULT_CREATE_VIDEO_MODEL_ID
+) {
+  const availableItems = Array.isArray(items) ? items : [];
+  if (availableItems.some((item) => item?.id === preferredModel)) {
+    return preferredModel;
+  }
+  return availableItems[0]?.id || null;
+}
+
+function listCreateVideoCapabilitiesForMode(videoMode) {
+  if (videoMode === "start_end_frame") return listCreateVideoStartEndCapabilities();
+  if (videoMode === "multi_param") return listCreateVideoMultiParamCapabilities();
+  if (videoMode === "video_edit") return listCreateVideoEditCapabilities();
+  if (videoMode === "motion_control") return listCreateVideoMotionControlCapabilities();
+  if (videoMode === "video_extend") return listCreateVideoExtendCapabilities();
+  return listCreateVideoImageToVideoCapabilities();
+}
+
+function resolveCreateVideoDefaultModelForMode(videoMode) {
+  return resolveCreateVideoDefaultModelFromItems(
+    listCreateVideoCapabilitiesForMode(videoMode)
+  );
+}
+
 function getCreateVideoMultiParamModel(model) {
   const normalizedModel = normalizeModelId(model || "");
   return CREATE_VIDEO_MULTI_PARAM_MODELS.find((item) => item.id === normalizedModel) || null;
@@ -2213,6 +2737,26 @@ function getCreateVideoMultiParamModel(model) {
 function getCreateVideoMultiParamCapabilitySet(model) {
   const capability = getCreateVideoMultiParamModel(model);
   return capability?.inputModes?.multi_param || null;
+}
+
+function getCreateVideoModeModel(model, items) {
+  const normalizedModel = normalizeModelId(model || "");
+  return items.find((item) => item.id === normalizedModel) || null;
+}
+
+function getCreateVideoEditCapabilitySet(model) {
+  const capability = getCreateVideoModeModel(model, CREATE_VIDEO_EDIT_MODELS);
+  return capability?.inputModes?.video_edit || null;
+}
+
+function getCreateVideoMotionControlCapabilitySet(model) {
+  const capability = getCreateVideoModeModel(model, CREATE_VIDEO_MOTION_CONTROL_MODELS);
+  return capability?.inputModes?.motion_control || null;
+}
+
+function getCreateVideoExtendCapabilitySet(model) {
+  const capability = getCreateVideoModeModel(model, CREATE_VIDEO_EXTEND_MODELS);
+  return capability?.inputModes?.video_extend || null;
 }
 
 function getCreateVideoCapabilitySetForMode(model, videoMode, inputMode) {
@@ -2232,6 +2776,15 @@ function getCreateVideoCapabilitySetForMode(model, videoMode, inputMode) {
   }
   if (videoMode === "multi_param") {
     return getCreateVideoMultiParamCapabilitySet(model);
+  }
+  if (videoMode === "video_edit") {
+    return getCreateVideoEditCapabilitySet(model);
+  }
+  if (videoMode === "motion_control") {
+    return getCreateVideoMotionControlCapabilitySet(model);
+  }
+  if (videoMode === "video_extend") {
+    return getCreateVideoExtendCapabilitySet(model);
   }
   return null;
 }
@@ -2266,6 +2819,27 @@ function assertCreateVideoInputModeSupported(model, videoMode, inputMode) {
         "UNSUPPORTED_VIDEO_INPUT_MODE",
         `${normalizeModelId(model || "")} does not support multi-reference video in this page.`
       );
+    }
+    return;
+  }
+  if (videoMode === "video_edit") {
+    const capability = getCreateVideoEditCapabilitySet(model);
+    if (!capability?.supported) {
+      throw apiError(400, "UNSUPPORTED_VIDEO_INPUT_MODE", `${normalizeModelId(model || "")} does not support video edit mode in this page.`);
+    }
+    return;
+  }
+  if (videoMode === "motion_control") {
+    const capability = getCreateVideoMotionControlCapabilitySet(model);
+    if (!capability?.supported) {
+      throw apiError(400, "UNSUPPORTED_VIDEO_INPUT_MODE", `${normalizeModelId(model || "")} does not support motion-control video in this page.`);
+    }
+    return;
+  }
+  if (videoMode === "video_extend") {
+    const capability = getCreateVideoExtendCapabilitySet(model);
+    if (!capability?.supported) {
+      throw apiError(400, "UNSUPPORTED_VIDEO_INPUT_MODE", `${normalizeModelId(model || "")} does not support video extension in this page.`);
     }
   }
 }
@@ -2304,7 +2878,7 @@ function resolveSelectableCapabilityValue(requestedValue, supportedValues, defau
 
 function normalizeStoredVideoAspectRatio(aspectRatio) {
   const normalizedAspectRatio = String(aspectRatio || "").trim();
-  return ["16:9", "4:3", "1:1", "3:4", "9:16", "2:3", "3:2", "21:9", "adaptive"].includes(normalizedAspectRatio)
+  return ["16:9", "4:3", "1:1", "3:4", "9:16", "2:3", "3:2", "21:9", "adaptive", "Auto"].includes(normalizedAspectRatio)
     ? normalizedAspectRatio
     : "16:9";
 }
@@ -2444,12 +3018,21 @@ function isCreateVideoTextModel(model) {
   ].includes(normalized);
 }
 
-function sanitizeReferenceImageUrls(raw) {
+function sanitizeReferenceImageUrls(raw, maxItems = 14) {
+  if (!Array.isArray(raw)) return [];
+  const limit = Math.max(0, Math.floor(Number(maxItems) || 14));
+  return raw
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function sanitizeReferenceMediaUrls(raw, maxItems = 3) {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((value) => String(value || "").trim())
     .filter(Boolean)
-    .slice(0, 4);
+    .slice(0, Math.max(1, Number(maxItems) || 3));
 }
 
 const MULTI_VIDEO_REF_ORDER = [
@@ -2602,14 +3185,15 @@ function resolveCreateVideoModel(
   videoMode,
   hasMultiReferenceImages
 ) {
-  const defaultVideoModel = DEFAULT_CREATE_VIDEO_MODEL_ID;
+  const defaultVideoModel =
+    resolveCreateVideoDefaultModelForMode(videoMode) || DEFAULT_CREATE_VIDEO_MODEL_ID;
   const multiParamFallbackModel = fallbackModel || defaultVideoModel;
   const preferredModel =
     requestedModel ||
     fallbackModel ||
     defaultVideoModel;
   if (requestedModel) return requestedModel;
-  if (videoMode === "multi_param") {
+  if (["multi_param", "video_edit", "motion_control", "video_extend"].includes(videoMode)) {
     return multiParamFallbackModel;
   }
   if (hasFirstFrameUrl) return fallbackModel || defaultVideoModel;
@@ -2623,16 +3207,19 @@ function formatCreateVideoModelLabel(model) {
 }
 
 function resolveStableCreateVideoModeModel(requestedModel, videoMode) {
+  const defaultVideoModel =
+    resolveCreateVideoDefaultModelForMode(videoMode) || DEFAULT_CREATE_VIDEO_MODEL_ID;
+
   if (videoMode === "start_end_frame") {
     const normalizedRequestedModel = normalizeModelId(requestedModel || "");
     if (!normalizedRequestedModel) {
-      return DEFAULT_CREATE_VIDEO_MODEL_ID;
+      return defaultVideoModel;
     }
     return requestedModel;
   }
 
-  if (videoMode === "multi_param") {
-    return requestedModel || DEFAULT_CREATE_VIDEO_MODEL_ID;
+  if (["multi_param", "video_edit", "motion_control", "video_extend"].includes(videoMode)) {
+    return requestedModel || defaultVideoModel;
   }
 
   return requestedModel;
@@ -2954,6 +3541,17 @@ function _fingerprintCreateVideoInput(input) {
     ff: String(input?.firstFrameUrl || "").trim(),
     lf: String(input?.lastFrameUrl || "").trim(),
     mr: input?.multiReferenceImages || null,
+    rv: Array.isArray(input?.referenceVideoUrls)
+      ? input.referenceVideoUrls.map((u) => String(u || "").trim()).filter(Boolean).sort()
+      : [],
+    ra: Array.isArray(input?.referenceAudioUrls)
+      ? input.referenceAudioUrls.map((u) => String(u || "").trim()).filter(Boolean).sort()
+      : [],
+    em: String(input?.editMode || "").trim(),
+    ep: String(input?.editPresetId || "").trim(),
+    mv: String(input?.motionReferenceVideoUrl || "").trim(),
+    ci: String(input?.characterReferenceImageUrl || "").trim(),
+    qm: String(input?.qualityMode || "").trim(),
     ga: Boolean(input?.generateAudio),
     ns: Boolean(input?.networkSearch),
   });
@@ -4688,6 +5286,89 @@ class MockStore {
     return null;
   }
 
+  inferVideoMimeType(value, fallback = null) {
+    const normalized = String(value || "").split(";")[0].trim().toLowerCase();
+    if (normalized === "video/mp4" || normalized === "video/mpeg" || normalized === "video/mpg") return normalized;
+    if (normalized === "video/quicktime" || normalized === "video/mov") return "video/mov";
+    if (normalized === "video/avi" || normalized === "video/wmv" || normalized === "video/flv") return normalized;
+    if (/\.mp4(?:[?#].*)?$/i.test(String(value || ""))) return "video/mp4";
+    if (/\.mov(?:[?#].*)?$/i.test(String(value || ""))) return "video/mov";
+    if (/\.mpe?g(?:[?#].*)?$/i.test(String(value || ""))) return "video/mpeg";
+    return fallback;
+  }
+
+  assertVertexExtendVideoMimeType(mimeType) {
+    const normalized = this.inferVideoMimeType(mimeType);
+    if (normalized !== "video/mp4") {
+      throw apiError(
+        400,
+        "UNSUPPORTED_VERTEX_VIDEO_REFERENCE",
+        "Vertex Veo video extension currently requires an MP4 reference video."
+      );
+    }
+    return normalized;
+  }
+
+  async resolveVertexVideoInput(url) {
+    if (!url) return null;
+    const normalized = String(url).trim();
+    if (!normalized) return null;
+
+    if (/^gs:\/\//i.test(normalized)) {
+      return {
+        gcsUri: normalized,
+        mimeType: "video/mp4",
+      };
+    }
+
+    const dataUrlMatch = /^data:([^;,]+)(?:;charset=[^;,]+)?;base64,(.+)$/is.exec(normalized);
+    if (dataUrlMatch) {
+      const mimeType = this.assertVertexExtendVideoMimeType(dataUrlMatch[1]);
+      return {
+        bytesBase64Encoded: dataUrlMatch[2],
+        mimeType,
+      };
+    }
+
+    const uploadPath = this.toUploadPath(normalized);
+    if (uploadPath) {
+      const upload = readUploadByUrlPath(uploadPath);
+      if (!upload) {
+        throw apiError(400, "REFERENCE_VIDEO_NOT_FOUND", "Reference video upload could not be found.");
+      }
+      const mimeType = this.assertVertexExtendVideoMimeType(upload.contentType || upload.safeName || uploadPath);
+      const buffer = readFileSync(upload.absolutePath);
+      return {
+        bytesBase64Encoded: buffer.toString("base64"),
+        mimeType,
+      };
+    }
+
+    if (/^https?:\/\//i.test(normalized)) {
+      const response = await fetch(normalized);
+      if (!response.ok) {
+        throw apiError(502, "REFERENCE_VIDEO_FETCH_FAILED", `Reference video fetch failed: ${response.status}`);
+      }
+      const responseContentType = response.headers.get("content-type");
+      const contentType =
+        responseContentType && responseContentType.split(";")[0].trim().toLowerCase() !== "application/octet-stream"
+          ? responseContentType
+          : this.inferVideoMimeType(normalized);
+      const mimeType = this.assertVertexExtendVideoMimeType(contentType || normalized);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      return {
+        bytesBase64Encoded: buffer.toString("base64"),
+        mimeType,
+      };
+    }
+
+    throw apiError(
+      400,
+      "PROVIDER_VIDEO_NOT_ACCESSIBLE",
+      "Reference video must be an MP4 upload, data URL, public URL, or gs:// Cloud Storage URI."
+    );
+  }
+
   touchProject(projectId, patch = {}) {
     const project = this.state.projects.find((item) => item.id === projectId);
     if (!project) return null;
@@ -5347,27 +6028,57 @@ class MockStore {
   getCreateVideoCapabilities(mode) {
     const normalizedMode = normalizeVideoMode(mode);
     if (normalizedMode === "image_to_video" || normalizedMode === "text_to_video") {
+      const items = listCreateVideoImageToVideoCapabilities();
       return {
         kind: "video",
         mode: normalizedMode,
-        defaultModel: DEFAULT_CREATE_VIDEO_MODEL_ID,
-        items: listCreateVideoImageToVideoCapabilities(),
+        defaultModel: resolveCreateVideoDefaultModelFromItems(items),
+        items,
       };
     }
     if (normalizedMode === "start_end_frame") {
+      const items = listCreateVideoStartEndCapabilities();
       return {
         kind: "video",
         mode: "start_end_frame",
-        defaultModel: DEFAULT_CREATE_VIDEO_MODEL_ID,
-        items: listCreateVideoStartEndCapabilities(),
+        defaultModel: resolveCreateVideoDefaultModelFromItems(items),
+        items,
       };
     }
     if (normalizedMode === "multi_param") {
+      const items = listCreateVideoMultiParamCapabilities();
       return {
         kind: "video",
         mode: "multi_param",
-        defaultModel: DEFAULT_CREATE_VIDEO_MODEL_ID,
-        items: listCreateVideoMultiParamCapabilities(),
+        defaultModel: resolveCreateVideoDefaultModelFromItems(items),
+        items,
+      };
+    }
+    if (normalizedMode === "video_edit") {
+      const items = listCreateVideoEditCapabilities();
+      return {
+        kind: "video",
+        mode: "video_edit",
+        defaultModel: resolveCreateVideoDefaultModelFromItems(items, "pixverse-c1"),
+        items,
+      };
+    }
+    if (normalizedMode === "motion_control") {
+      const items = listCreateVideoMotionControlCapabilities();
+      return {
+        kind: "video",
+        mode: "motion_control",
+        defaultModel: resolveCreateVideoDefaultModelFromItems(items, "pixverse-c1"),
+        items,
+      };
+    }
+    if (normalizedMode === "video_extend") {
+      const items = listCreateVideoExtendCapabilities();
+      return {
+        kind: "video",
+        mode: "video_extend",
+        defaultModel: resolveCreateVideoDefaultModelFromItems(items, DEFAULT_CREATE_VIDEO_MODEL_ID),
+        items,
       };
     }
 
@@ -6387,7 +7098,8 @@ class MockStore {
           this.updateTask(taskId, { metadata: input });
         }
 
-        const count = Math.max(1, Math.min(Number(input?.count) || 1, 4));
+        const requestedOutputCount = Math.max(1, Math.floor(Number(input?.count) || 1));
+        let count = 1;
         const referenceImageUrls = sanitizeReferenceImageUrls(
           input?.referenceImageUrls || (input?.referenceImageUrl ? [input.referenceImageUrl] : []),
         );
@@ -6456,15 +7168,27 @@ class MockStore {
               resolvedReferenceImageUrls.push(providerUrl);
             }
           }
-          const primaryResolved = resolvedReferenceImageUrls[0] || null;
-          const multiRefResolvedCount = resolvedReferenceImageUrls.length;
-
           resolvedModel = resolveCreateImageModel(
             input?.model,
-            multiRefResolvedCount,
+            resolvedReferenceImageUrls.length,
             defaultImageModel,
           );
           assertMediaGenerationModelConfigured("image", resolvedModel);
+          const referenceCapability = getCreateImageCapabilitySetForMode(
+            resolvedModel,
+            resolvedReferenceImageUrls.length,
+          );
+          const maxReferenceImages = Math.max(
+            0,
+            Math.floor(Number(referenceCapability?.maxReferenceImages) || 0),
+          );
+          const providerReferenceUrlsForModel = resolvedReferenceImageUrls.length
+            ? maxReferenceImages > 0
+              ? resolvedReferenceImageUrls.slice(0, maxReferenceImages)
+              : []
+            : [];
+          const primaryResolved = providerReferenceUrlsForModel[0] || null;
+          const multiRefResolvedCount = providerReferenceUrlsForModel.length;
           const resolvedAspectRatioInput = resolveCreateImageAspectRatio(
             resolvedModel,
             input?.aspectRatio,
@@ -6480,6 +7204,12 @@ class MockStore {
           requestedResolution = resolvedResolutionInput.requestedResolution;
           const normalizedResolution = resolvedResolutionInput.normalizedResolution;
           activeReferenceCount = multiRefResolvedCount;
+          const resolvedOutputCountInput = resolveCreateImageOutputCount(
+            resolvedModel,
+            requestedOutputCount,
+            activeReferenceCount,
+          );
+          count = resolvedOutputCountInput.normalizedCount;
           resolveImageOptionsForModel = (modelId, referenceCountForModel = activeReferenceCount) => ({
             aspectRatio: resolveCreateImageAspectRatio(
               modelId,
@@ -6500,6 +7230,9 @@ class MockStore {
                 model: resolvedModel,
                 aspectRatio: currentProviderOptions.aspectRatio,
                 resolution: currentProviderOptions.resolution,
+                count,
+                requestedCount: requestedOutputCount,
+                maxOutputImages: resolvedOutputCountInput.maxOutputImages,
                 requestedAspectRatio,
                 requestedResolution,
               },
@@ -6513,7 +7246,7 @@ class MockStore {
 
           const isReferenceDriven = multiRefResolvedCount >= 1;
           const providerReferenceImageUrl = isReferenceDriven ? primaryResolved : null;
-          const providerReferenceImageUrls = isReferenceDriven ? resolvedReferenceImageUrls : [];
+          const providerReferenceImageUrls = isReferenceDriven ? providerReferenceUrlsForModel : [];
           const userAskedMultiRef = referenceImageUrls.length >= 2;
           const multiRefNegativeExtra =
             "禁止只绘制或只保留第一张参考图中的人物，禁止忽略其他参考图中需要出现的人物；禁止不做场景融合就原样输出任意一张输入参考图。";
@@ -6594,6 +7327,7 @@ class MockStore {
               try {
                 console.log("[makeCreateImageTask] fallback → single-reference gemini-3.1-flash-image-preview");
                 const fallbackOptions = resolveImageOptionsForModel("gemini-3.1-flash-image-preview", 1);
+                count = resolveCreateImageOutputCount("gemini-3.1-flash-image-preview", requestedOutputCount, 1).normalizedCount;
                 imageUrls = await generateImagesWithAliyun({
                   prompt: resolvedPrompt,
                   model: "gemini-3.1-flash-image-preview",
@@ -6610,6 +7344,7 @@ class MockStore {
                 console.error("[makeCreateImageTask] single-ref fallback failed:", singleRefError?.message || singleRefError);
                 console.log("[makeCreateImageTask] fallback → pure text-to-image gemini-3.1-flash-image-preview");
                 const fallbackOptions = resolveImageOptionsForModel("gemini-3.1-flash-image-preview", 0);
+                count = resolveCreateImageOutputCount("gemini-3.1-flash-image-preview", requestedOutputCount, 0).normalizedCount;
                 imageUrls = await generateImagesWithAliyun({
                   prompt: resolvedPrompt,
                   model: "gemini-3.1-flash-image-preview",
@@ -6626,6 +7361,7 @@ class MockStore {
             } else if (resolvedReferenceImageUrls.length) {
               console.log("[makeCreateImageTask] fallback → pure text-to-image gemini-3.1-flash-image-preview");
               const fallbackOptions = resolveImageOptionsForModel("gemini-3.1-flash-image-preview", 0);
+              count = resolveCreateImageOutputCount("gemini-3.1-flash-image-preview", requestedOutputCount, 0).normalizedCount;
               imageUrls = await generateImagesWithAliyun({
                 prompt: resolvedPrompt,
                 model: "gemini-3.1-flash-image-preview",
@@ -6641,6 +7377,7 @@ class MockStore {
             } else if (shouldRetryPureTextWithGemini(primaryError)) {
               console.log("[makeCreateImageTask] fallback -> pure text-to-image gemini-3-pro-image-preview after Seedream policy rejection");
               const fallbackOptions = resolveImageOptionsForModel("gemini-3-pro-image-preview", 0);
+              count = resolveCreateImageOutputCount("gemini-3-pro-image-preview", requestedOutputCount, 0).normalizedCount;
               imageUrls = await generateImagesWithAliyun({
                 prompt: resolvedPrompt,
                 model: "gemini-3-pro-image-preview",
@@ -6669,6 +7406,8 @@ class MockStore {
               model: resolvedModel,
               aspectRatio: finalImageOptions.aspectRatio,
               resolution: finalImageOptions.resolution,
+              count,
+              requestedCount: requestedOutputCount,
               requestedAspectRatio,
               requestedResolution,
             },
@@ -6723,6 +7462,7 @@ class MockStore {
             resolution: finalImageOptions.resolution,
             referenceImageUrl: primaryReference || null,
             referenceImageUrls,
+            batchIndex: index,
             imageUrl: mirroredImageUrls[index] || imageUrls?.[index] || `https://mock.assets.local/create/images/${Date.now()}_${index}.jpg`,
             createdAt: timestamp
           };
@@ -6775,13 +7515,32 @@ class MockStore {
     const preflightMultiRefCount = Object.keys(preflightMultiRef).length;
     const preflightDirectReferenceSource =
       typeof input?.referenceImageUrl === "string" ? String(input.referenceImageUrl).trim() || null : null;
-    const preflightReferenceSource = pickPrimaryMultiReferenceUrl(preflightMultiRef) || preflightDirectReferenceSource;
+    const preflightReferenceVideoUrls = sanitizeReferenceMediaUrls(input?.referenceVideoUrls, 3);
+    const preflightMotionReferenceVideoUrl =
+      String(input?.motionReferenceVideoUrl || preflightReferenceVideoUrls[0] || "").trim() || null;
+    const preflightCharacterReferenceImageUrl =
+      String(input?.characterReferenceImageUrl || "").trim() || null;
+    const preflightReferenceSource =
+      pickPrimaryMultiReferenceUrl(preflightMultiRef) ||
+      preflightCharacterReferenceImageUrl ||
+      preflightDirectReferenceSource ||
+      preflightMotionReferenceVideoUrl;
     const preflightInputMode =
       input?.videoMode === "image_to_video"
         ? preflightDirectReferenceSource
           ? "single_reference"
           : "text_to_video"
         : input?.videoMode || null;
+    if (input?.videoMode === "video_edit" || input?.videoMode === "video_extend") {
+      if (!preflightMotionReferenceVideoUrl) {
+        throw apiError(400, "MISSING_REFERENCE_VIDEO", "This video mode requires a reference video.");
+      }
+    }
+    if (input?.videoMode === "motion_control") {
+      if (!preflightCharacterReferenceImageUrl && !preflightDirectReferenceSource && !pickPrimaryMultiReferenceUrl(preflightMultiRef)) {
+        throw apiError(400, "MISSING_CHARACTER_REFERENCE_IMAGE", "Motion-control mode requires a character reference image.");
+      }
+    }
     if (input?.videoMode === "start_end_frame") {
       if (!String(input?.firstFrameUrl || "").trim()) {
         throw apiError(400, "MISSING_FIRST_FRAME", "首尾帧模式缺少首帧。");
@@ -6790,7 +7549,9 @@ class MockStore {
         throw apiError(400, "MISSING_LAST_FRAME", "首尾帧模式缺少尾帧。");
       }
     }
-    const defaultVideoModel = DEFAULT_CREATE_VIDEO_MODEL_ID;
+    const defaultVideoModel =
+      resolveCreateVideoDefaultModelForMode(input?.videoMode || null) ||
+      DEFAULT_CREATE_VIDEO_MODEL_ID;
     let preflightVideoModelChoice = input?.model || defaultVideoModel;
     preflightVideoModelChoice = resolveStableCreateVideoModeModel(preflightVideoModelChoice, input?.videoMode || null);
     const preflightResolvedModel = resolveCreateVideoModel(
@@ -6845,12 +7606,26 @@ class MockStore {
         let resolvedMultiReferenceImageUrls = [];
         const directReferenceSource =
           typeof input?.referenceImageUrl === "string" ? String(input.referenceImageUrl).trim() || null : null;
+        const referenceVideoUrls = sanitizeReferenceMediaUrls(input?.referenceVideoUrls, 3);
+        const referenceAudioUrls = sanitizeReferenceMediaUrls(input?.referenceAudioUrls, 3);
+        const motionReferenceVideoUrl =
+          String(input?.motionReferenceVideoUrl || referenceVideoUrls[0] || "").trim() || null;
+        const characterReferenceImageUrl =
+          String(input?.characterReferenceImageUrl || directReferenceSource || primaryMultiUrl || "").trim() || null;
         const currentCreateVideoInputMode =
           input?.videoMode === "image_to_video"
             ? directReferenceSource
               ? "single_reference"
               : "text_to_video"
             : input?.videoMode || null;
+        if ((input?.videoMode === "video_edit" || input?.videoMode === "video_extend") && !motionReferenceVideoUrl) {
+          throw apiError(400, "MISSING_REFERENCE_VIDEO", "This video mode requires a reference video.");
+        }
+        if (input?.videoMode === "motion_control") {
+          if (!characterReferenceImageUrl) {
+            throw apiError(400, "MISSING_CHARACTER_REFERENCE_IMAGE", "Motion-control mode requires a character reference image.");
+          }
+        }
         if (input?.videoMode === "start_end_frame") {
           if (!firstFrameResolved) {
             throw apiError(400, "MISSING_FIRST_FRAME", "首尾帧模式缺少首帧。");
@@ -6859,7 +7634,9 @@ class MockStore {
             throw apiError(400, "MISSING_LAST_FRAME", "首尾帧模式缺少尾帧。");
           }
         }
-        const defaultVideoModel = DEFAULT_CREATE_VIDEO_MODEL_ID;
+        const defaultVideoModel =
+          resolveCreateVideoDefaultModelForMode(input?.videoMode || null) ||
+          DEFAULT_CREATE_VIDEO_MODEL_ID;
         let videoModelChoice =
           input?.model || defaultVideoModel;
         videoModelChoice = resolveStableCreateVideoModeModel(videoModelChoice, input?.videoMode || null);
@@ -6871,6 +7648,9 @@ class MockStore {
         let displayReferenceImageUrl = referenceSource || input?.firstFrameUrl || null;
         let resolvedReferenceImageUrl = referenceSource
           ? this.resolveProviderImageSource(referenceSource)
+          : null;
+        const resolvedCharacterReferenceImageUrl = characterReferenceImageUrl
+          ? this.resolveProviderImageSource(characterReferenceImageUrl)
           : null;
 
         if (isMultiParam && multiRefCount) {
@@ -7004,13 +7784,14 @@ class MockStore {
           // ── Vertex Veo path ────────────────────────────────────────────────
           if (vertex.isVertexVideoModel(resolvedModel)) {
             const VEO_SUPPORTED_SECONDS = [4, 6, 8];
+            const isVertexVideoExtend = input?.videoMode === "video_extend";
             const rawDurationSeconds = parseInt(String(normalizedDuration || "8s")) || 8;
             const durationSeconds = VEO_SUPPORTED_SECONDS.includes(rawDurationSeconds)
               ? rawDurationSeconds
               : VEO_SUPPORTED_SECONDS.reduce((best, s) =>
                   Math.abs(s - rawDurationSeconds) < Math.abs(best - rawDurationSeconds) ? s : best
                 );
-            const vertexReferenceImages = isMultiParam
+            const vertexReferenceImages = !isVertexVideoExtend && isMultiParam
               ? await Promise.all(
                   resolvedMultiReferenceImageUrls
                     .filter(Boolean)
@@ -7018,18 +7799,24 @@ class MockStore {
                     .map((url) => this.resolveImageToBase64(url))
                 )
               : [];
-            if (isMultiParam && !vertexReferenceImages.length) {
+            if (!isVertexVideoExtend && isMultiParam && !vertexReferenceImages.length) {
               throw apiError(400, "MISSING_REFERENCE_IMAGE", "Vertex 多参考图视频至少需要 1 张有效参考图。");
             }
-            const referenceBase64 = resolvedReferenceImageUrl
+            const referenceBase64 = !isVertexVideoExtend && resolvedReferenceImageUrl
               ? await this.resolveImageToBase64(resolvedReferenceImageUrl)
               : null;
-            const lastFrameBase64 = lastFrameResolved
+            const lastFrameBase64 = !isVertexVideoExtend && lastFrameResolved
               ? await this.resolveImageToBase64(lastFrameResolved)
               : null;
-            const firstFrameBase64 = firstFrameResolved
+            const firstFrameBase64 = !isVertexVideoExtend && firstFrameResolved
               ? await this.resolveImageToBase64(firstFrameResolved)
               : null;
+            const vertexReferenceVideo = isVertexVideoExtend
+              ? await this.resolveVertexVideoInput(motionReferenceVideoUrl || referenceVideoUrls[0])
+              : null;
+            if (isVertexVideoExtend && !vertexReferenceVideo) {
+              throw apiError(400, "MISSING_REFERENCE_VIDEO", "Vertex video extension requires one MP4 reference video.");
+            }
 
             const opName = await vertex.startVertexVeoTask({
               internalModelId: resolvedModel,
@@ -7037,8 +7824,11 @@ class MockStore {
               referenceImageBase64: referenceBase64 || firstFrameBase64,
               referenceImages: vertexReferenceImages,
               lastFrameBase64,
+              referenceVideoBase64: vertexReferenceVideo?.bytesBase64Encoded,
+              referenceVideoGcsUri: vertexReferenceVideo?.gcsUri,
+              referenceVideoMimeType: vertexReferenceVideo?.mimeType,
               aspectRatio: normalizedAspectRatio || "16:9",
-              durationSeconds,
+              durationSeconds: isVertexVideoExtend ? undefined : durationSeconds,
               resolution: normalizedResolution || "720p",
               generateAudio: input?.generateAudio || false,
               seed: input?.seed || undefined,
@@ -7074,6 +7864,13 @@ class MockStore {
               videoMode: input?.videoMode || null,
               inputMode: currentCreateVideoInputMode,
               multiReferenceImages: multiRefCount ? multiRef : null,
+              referenceVideoUrls,
+              referenceAudioUrls,
+              motionReferenceVideoUrl,
+              characterReferenceImageUrl: this.sanitizeDisplayUrlForPersist(characterReferenceImageUrl),
+              editMode: input?.editMode || null,
+              editPresetId: input?.editPresetId || null,
+              qualityMode: input?.qualityMode || null,
               thumbnailUrl: null,
               videoUrl: publicVideoUrl,
               createdAt: timestamp,
@@ -7105,6 +7902,15 @@ class MockStore {
             referenceImageUrls: resolvedMultiReferenceImageUrls,
             firstFrameUrl: firstFrameResolved,
             lastFrameUrl: lastFrameResolved,
+            multiReferenceImages: multiRef,
+            referenceVideoUrl: motionReferenceVideoUrl || referenceVideoUrls[0] || null,
+            referenceVideoUrls,
+            referenceAudioUrls,
+            motionReferenceVideoUrl,
+            characterReferenceImageUrl: resolvedCharacterReferenceImageUrl,
+            editMode: input?.editMode,
+            editPresetId: input?.editPresetId,
+            qualityMode: input?.qualityMode,
             aspectRatio: normalizedAspectRatio,
             resolution: normalizedResolution,
             duration: normalizedDuration,
@@ -7268,6 +8074,13 @@ class MockStore {
             videoMode: input?.videoMode || null,
             inputMode: currentCreateVideoInputMode,
             multiReferenceImages: multiRefCount ? multiRef : null,
+            referenceVideoUrls,
+            referenceAudioUrls,
+            motionReferenceVideoUrl,
+            characterReferenceImageUrl: this.sanitizeDisplayUrlForPersist(characterReferenceImageUrl),
+            editMode: input?.editMode || null,
+            editPresetId: input?.editPresetId || null,
+            qualityMode: input?.qualityMode || null,
             thumbnailUrl: this.sanitizeDisplayUrlForPersist(thumbnailUrl),
             videoUrl,
             createdAt: timestamp
@@ -7301,6 +8114,13 @@ class MockStore {
           videoMode: input?.videoMode || null,
           inputMode: currentCreateVideoInputMode,
           multiReferenceImages: multiRefCount ? multiRef : null,
+          referenceVideoUrls,
+          referenceAudioUrls,
+          motionReferenceVideoUrl,
+          characterReferenceImageUrl: this.sanitizeDisplayUrlForPersist(characterReferenceImageUrl),
+          editMode: input?.editMode || null,
+          editPresetId: input?.editPresetId || null,
+          qualityMode: input?.qualityMode || null,
           thumbnailUrl: this.sanitizeDisplayUrlForPersist(thumbnailUrl),
           videoUrl,
           createdAt: timestamp
@@ -8894,7 +9714,15 @@ MockStore.prototype.estimateActionCredits = function estimateActionCredits(actio
     actionCode === "storyboard_image_generate" ||
     actionCode === "create_image_generate"
   ) {
-    quantity = Math.max(1, Number(input.count || 1));
+    if (actionCode === "create_image_generate") {
+      const referenceCount = Array.isArray(input.referenceImageUrls)
+        ? input.referenceImageUrls.filter(Boolean).length
+        : (input.referenceImageUrl ? 1 : 0);
+      const model = input.model || input.imageModel || "gemini-3-pro-image-preview";
+      quantity = resolveCreateImageOutputCount(model, input.count || 1, referenceCount).normalizedCount;
+    } else {
+      quantity = Math.max(1, Number(input.count || 1));
+    }
     credits = Number(rule.baseCredits || 0) * quantity;
   } else if (actionCode === "video_generate") {
     quantity = Math.max(1, Number(input.shotCount || 1));
@@ -9032,6 +9860,43 @@ MockStore.prototype.getProjectCreditQuote = function getProjectCreditQuote(
   actorId
 ) {
   return this.buildCreditQuote({ projectId, actionCode, input, actorId });
+};
+
+MockStore.prototype.getCreateCreditQuote = function getCreateCreditQuote(
+  projectId,
+  actionCode,
+  input = {},
+  actorId
+) {
+  const actor = this.resolveActor(actorId);
+  const project = projectId ? this.assertProjectAccess(projectId, actor.id) : null;
+
+  if (actor.platformRole === "customer") {
+    return this.buildCreditQuote({ projectId, actionCode, input, actorId: actor.id });
+  }
+
+  const { quantity, rule } = this.estimateActionCredits(actionCode, input);
+  return clone({
+    actionCode,
+    label: rule?.label || actionCode,
+    description: rule?.description || "",
+    credits: 0,
+    quantity,
+    currency: "credits",
+    walletId: null,
+    walletName: null,
+    walletOwnerType: null,
+    availableCredits: 0,
+    frozenCredits: 0,
+    billingPolicy: project?.billingPolicy || "personal_only",
+    projectId: projectId || null,
+    projectOwnerType: project?.ownerType || null,
+    budgetLimitCredits: null,
+    budgetUsedCredits: 0,
+    budgetRemainingCredits: null,
+    canAfford: true,
+    reason: null,
+  });
 };
 
 MockStore.prototype.calculateSettledCredits = function calculateSettledCredits(task) {
@@ -9460,6 +10325,302 @@ MockStore.prototype.listAdminOrders = function listAdminOrders(actorId) {
       wallet: this.toPublicWallet(this.getWalletById(order.walletId)),
     }))
   );
+};
+
+MockStore.prototype.getCurrentOrganizationMembershipForActor = function getCurrentOrganizationMembershipForActor(actor) {
+  if (!actor || actor.platformRole !== "customer") return null;
+  const memberships = this.listMembershipsForUser(actor.id);
+  if (!memberships.length) return null;
+  return (
+    (actor.defaultOrganizationId &&
+      memberships.find((item) => item.organizationId === actor.defaultOrganizationId)) ||
+    memberships[0] ||
+    null
+  );
+};
+
+MockStore.prototype.buildCreditUsageStats = function buildCreditUsageStats({
+  subject,
+  mode = null,
+  wallets = [],
+  actorFilter = null,
+  includeAllWallets = false,
+} = {}) {
+  const now = new Date();
+  const windowDays = 30;
+  const firstDay = addLocalDays(now, -(windowDays - 1));
+  const bucketMap = new Map();
+  const publicWallets = wallets.filter(Boolean).map((wallet) => this.toPublicWallet(wallet)).filter(Boolean);
+  const walletIds = new Set(publicWallets.map((wallet) => wallet.id).filter(Boolean));
+
+  for (let index = 0; index < windowDays; index += 1) {
+    const date = addLocalDays(firstDay, index);
+    const key = formatLocalDateKey(date);
+    bucketMap.set(key, {
+      bucketStart: date.toISOString(),
+      bucketLabel: key.slice(5),
+      consumedCredits: 0,
+      refundedCredits: 0,
+    });
+  }
+
+  const inWalletScope = (walletId) => includeAllWallets || walletIds.has(walletId);
+  const inActorScope = (createdBy) => !actorFilter || createdBy === actorFilter;
+  const inScopeEntry = (entry) => inWalletScope(entry.walletId) && inActorScope(entry.createdBy || null);
+  const nowKey = formatLocalDateKey(now);
+  let consumedCredits = 0;
+  let todayConsumedCredits = 0;
+  let refundedCredits = 0;
+  let recentTaskCount = 0;
+  let lastActivityAt = null;
+  const taskIds = new Set();
+  const recentEntryTypes = new Set(["settle", "refund", "freeze", "recharge", "grant"]);
+
+  for (const entry of this.state.walletLedgerEntries || []) {
+    if (!inScopeEntry(entry)) continue;
+
+    const createdAt = new Date(entry.createdAt || now.toISOString());
+    if (Number.isNaN(createdAt.getTime())) continue;
+
+    if (!lastActivityAt || createdAt.getTime() > new Date(lastActivityAt).getTime()) {
+      lastActivityAt = entry.createdAt || createdAt.toISOString();
+    }
+
+    const key = formatLocalDateKey(createdAt);
+    const bucket = bucketMap.get(key);
+
+    if (entry.entryType === "settle") {
+      const amount = Math.abs(Number(entry.amount || 0));
+      consumedCredits += amount;
+      if (key === nowKey) {
+        todayConsumedCredits += amount;
+      }
+      if (bucket) {
+        bucket.consumedCredits += amount;
+      }
+      if (entry.sourceType === "task" && entry.sourceId) {
+        taskIds.add(entry.sourceId);
+      }
+    }
+
+    if (entry.entryType === "refund") {
+      const amount = Math.abs(Number(entry.amount || 0));
+      refundedCredits += amount;
+      if (bucket) {
+        bucket.refundedCredits += amount;
+      }
+    }
+  }
+
+  recentTaskCount = taskIds.size;
+
+  const pendingFrozenCredits = (this.state.tasks || [])
+    .filter((task) => {
+      if (!inWalletScope(task.walletId)) return false;
+      if (actorFilter && task.actorId !== actorFilter) return false;
+      return Number(task.frozenCredits || 0) > 0 && task.status !== "failed";
+    })
+    .reduce((sum, task) => sum + Number(task.frozenCredits || 0), 0);
+
+  const recentEntries = (this.state.walletLedgerEntries || [])
+    .filter((entry) => inScopeEntry(entry) && recentEntryTypes.has(entry.entryType))
+    .slice(0, 20)
+    .map((entry) => this.toPublicLedgerEntry(entry));
+
+  const availableCredits = publicWallets.reduce(
+    (sum, wallet) => sum + Number(wallet.availableCredits ?? wallet.creditsAvailable ?? 0),
+    0
+  );
+  const frozenCredits = publicWallets.reduce(
+    (sum, wallet) => sum + Number(wallet.frozenCredits ?? wallet.creditsFrozen ?? 0),
+    0
+  );
+
+  return clone({
+    subject: subject || {
+      type: "unknown",
+      id: null,
+      label: "Unknown",
+      detail: null,
+    },
+    mode,
+    windowDays,
+    bucket: "day",
+    wallets: publicWallets,
+    summary: {
+      consumedCredits,
+      todayConsumedCredits,
+      refundedCredits,
+      pendingFrozenCredits,
+      availableCredits,
+      frozenCredits,
+      recentTaskCount,
+      lastActivityAt,
+    },
+    series: Array.from(bucketMap.values()),
+    recentEntries,
+  });
+};
+
+MockStore.prototype.getWalletUsageStats = function getWalletUsageStats(actorId, mode = "personal") {
+  const actor = this.resolveActor(actorId);
+  if (actor.platformRole !== "customer") {
+    throw apiError(403, "FORBIDDEN", "Only customer accounts can view wallet usage stats here.");
+  }
+
+  const normalizedMode = mode === "organization" ? "organization" : "personal";
+  const membership = this.getCurrentOrganizationMembershipForActor(actor);
+
+  if (normalizedMode === "organization") {
+    if (!membership || membership.role !== "admin") {
+      throw apiError(403, "FORBIDDEN", "Organization usage stats require enterprise admin permission.");
+    }
+    const organization = this.getOrganizationById(membership.organizationId);
+    const organizationWallet = this.getWalletByOwner("organization", membership.organizationId);
+    return this.buildCreditUsageStats({
+      mode: "organization",
+      subject: {
+        type: "organization",
+        id: organization?.id || membership.organizationId,
+        label: organization?.name || "Enterprise",
+        detail: "企业总消耗",
+      },
+      wallets: organizationWallet ? [organizationWallet] : [],
+      actorFilter: null,
+    });
+  }
+
+  const wallets = this.getVisibleWalletsForActor(actor.id);
+  return this.buildCreditUsageStats({
+    mode: "personal",
+    subject: {
+      type: "user",
+      id: actor.id,
+      label: actor.displayName || actor.id,
+      detail: actor.email || actor.phone || null,
+    },
+    wallets,
+    actorFilter: actor.id,
+  });
+};
+
+MockStore.prototype.toCreditUsageSubjectForUser = function toCreditUsageSubjectForUser(user) {
+  return {
+    type: "user",
+    id: user.id,
+    label: user.displayName || user.id,
+    detail: user.email || user.phone || user.platformRole || null,
+    role: user.platformRole || "customer",
+  };
+};
+
+MockStore.prototype.toCreditUsageSubjectForOrganization = function toCreditUsageSubjectForOrganization(organization) {
+  return {
+    type: "organization",
+    id: organization.id,
+    label: organization.name || organization.id,
+    detail: organization.industry || organization.status || null,
+    role: "organization",
+  };
+};
+
+MockStore.prototype.searchCreditUsageSubjects = function searchCreditUsageSubjects(actorId, search = "") {
+  this.assertPlatformAdmin(actorId);
+  const query = normalizeCreditUsageSearch(search);
+  const subjects = [];
+
+  if (!query || creditUsageMatchesSearch(query, "platform", "全平台", "平台总消耗")) {
+    subjects.push({
+      type: "platform",
+      id: "platform",
+      label: "全平台",
+      detail: "所有钱包总消耗",
+      role: "platform",
+    });
+  }
+
+  const matchedUsers = (this.state.users || [])
+    .filter((user) =>
+      creditUsageMatchesSearch(
+        query,
+        user.id,
+        user.displayName,
+        user.email,
+        user.phone,
+        user.platformRole
+      )
+    )
+    .slice(0, query ? 20 : 10)
+    .map((user) => this.toCreditUsageSubjectForUser(user));
+
+  const matchedOrganizations = (this.state.organizations || [])
+    .filter((organization) =>
+      creditUsageMatchesSearch(
+        query,
+        organization.id,
+        organization.name,
+        organization.industry,
+        organization.status
+      )
+    )
+    .slice(0, query ? 20 : 10)
+    .map((organization) => this.toCreditUsageSubjectForOrganization(organization));
+
+  return clone([...subjects, ...matchedUsers, ...matchedOrganizations].slice(0, 40));
+};
+
+MockStore.prototype.getAdminCreditUsageStats = function getAdminCreditUsageStats(
+  actorId,
+  { subjectType = "platform", subjectId = null } = {}
+) {
+  this.assertPlatformAdmin(actorId);
+  const normalizedType =
+    subjectType === "user" || subjectType === "organization" || subjectType === "platform"
+      ? subjectType
+      : "platform";
+
+  if (normalizedType === "user") {
+    const user = this.getUser(subjectId);
+    if (!user) {
+      throw apiError(404, "NOT_FOUND", "usage subject user not found");
+    }
+    const wallets =
+      user.platformRole === "customer" ? this.getVisibleWalletsForActor(user.id) : [];
+    return this.buildCreditUsageStats({
+      mode: "admin",
+      subject: this.toCreditUsageSubjectForUser(user),
+      wallets,
+      actorFilter: user.id,
+    });
+  }
+
+  if (normalizedType === "organization") {
+    const organization = this.getOrganizationById(subjectId);
+    if (!organization) {
+      throw apiError(404, "NOT_FOUND", "usage subject organization not found");
+    }
+    const wallet = this.getWalletByOwner("organization", organization.id);
+    return this.buildCreditUsageStats({
+      mode: "admin",
+      subject: this.toCreditUsageSubjectForOrganization(organization),
+      wallets: wallet ? [wallet] : [],
+      actorFilter: null,
+    });
+  }
+
+  return this.buildCreditUsageStats({
+    mode: "admin",
+    subject: {
+      type: "platform",
+      id: "platform",
+      label: "全平台",
+      detail: "所有钱包总消耗",
+      role: "platform",
+    },
+    wallets: this.state.wallets || [],
+    actorFilter: null,
+    includeAllWallets: true,
+  });
 };
 
 MockStore.prototype.listOrganizationMembers = function listOrganizationMembers(organizationId, actorId) {

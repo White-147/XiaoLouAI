@@ -1,5 +1,7 @@
 .DS_Store
 Thumbs.db
+.cache
+.cache-*
 
 # Dependencies
 **/node_modules/
@@ -19,6 +21,7 @@ XIAOLOU-main/temp-build/
 **/.env.local
 **/.env.*.local
 !**/.env.example
+core-api/vertex-sa.json
 
 # Logs
 *.log
@@ -54,10 +57,6 @@ jaaz/server/user_data/
 # Downloaded binaries and local tooling payloads
 tools/cuda/
 tools/flash-attn-src/
-caddy/caddy.exe
-caddy/caddy.zip
-caddy/logs/
-caddy/*.pid
 
 # Legacy canvas iframe runtime artifacts (canvas now compiled into src/canvas/)
 XIAOLOU-main/internal/
@@ -76,7 +75,6 @@ video-replace-service/scripts/_tmp/
 local_canvas*.png
 lovart_canvas*.png
 yunwu-*.js
-({t
 
 # Local-only docs and reference exports
 /docs/

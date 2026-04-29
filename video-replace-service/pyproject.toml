@@ -27,6 +27,8 @@ dependencies = [
   "decord>=0.6.0",
   # HTTP (for asset URL imports)
   "httpx>=0.27",
+  # Process tree cleanup / liveness checks
+  "psutil>=5.9",
   # Detection
   "ultralytics>=8.4",
   # VACE / Wan2.1 runtime (imported by their generate.py)

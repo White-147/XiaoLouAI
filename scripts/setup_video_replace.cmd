@@ -4,10 +4,16 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI"
 
-set "SERVICE_DIR=%ROOT%\core-api\video-replace-service"
+set "SERVICE_DIR=%ROOT%\video-replace-service"
+if not exist "%SERVICE_DIR%\pyproject.toml" if exist "%ROOT%\core-api\video-replace-service\pyproject.toml" set "SERVICE_DIR=%ROOT%\core-api\video-replace-service"
 set "VENV_DIR=%SERVICE_DIR%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "ENV_FILE=%SERVICE_DIR%\.env.local"
+if not defined SKIP_MODEL_DOWNLOAD set "SKIP_MODEL_DOWNLOAD=1"
+if not defined PIP_CACHE_DIR set "PIP_CACHE_DIR=%ROOT%\.cache\pip"
+if not defined HF_HOME set "HF_HOME=%ROOT%\.cache\huggingface"
+if not defined HUGGINGFACE_HUB_CACHE set "HUGGINGFACE_HUB_CACHE=%ROOT%\.cache\huggingface\hub"
+if not defined TORCH_HOME set "TORCH_HOME=%ROOT%\.cache\torch"
 
 set "SMALL_LOG=%SERVICE_DIR%\.install-small.log"
 set "TORCH_LOG=%SERVICE_DIR%\.install-torch.log"
@@ -74,25 +80,29 @@ if errorlevel 1 (
     exit /b 1
 )
 echo [ok] Install video-replace-service
-call :ensure_cuda_torch || exit /b 1
-echo.
-echo [step] Install Wan runtime extras
->> "%ML_LOG%" echo ============================================================
->> "%ML_LOG%" echo [%DATE% %TIME%] Install Wan runtime extras
->> "%ML_LOG%" echo CMD: "%VENV_PYTHON%" -m pip install --upgrade ninja tokenizers dashscope "gradio>=5.0.0" "huggingface_hub[cli]"
-"%VENV_PYTHON%" -m pip install --upgrade ninja tokenizers dashscope "gradio>=5.0.0" "huggingface_hub[cli]" >> "%ML_LOG%" 2>&1
-if errorlevel 1 (
-    echo [error] Install Wan runtime extras failed. See %ML_LOG%
-    exit /b 1
-)
-echo [ok] Install Wan runtime extras
-call :ensure_windows_flash_attn || exit /b 1
-call :ensure_sam2 || exit /b 1
-call :ensure_sam2_weight tiny sam2.1_hiera_tiny.pt || exit /b 1
-call :ensure_sam2_weight base_plus sam2.1_hiera_base_plus.pt || exit /b 1
-call :ensure_wan2_repo || exit /b 1
 call :ensure_env_file || exit /b 1
-call :ensure_vace_weights_background || exit /b 1
+if "%SKIP_MODEL_DOWNLOAD%"=="1" (
+    echo [skip] SKIP_MODEL_DOWNLOAD=1, skipping CUDA torch, flash-attn, SAM2, Wan2.1, and VACE weights.
+) else (
+    call :ensure_cuda_torch || exit /b 1
+    echo.
+    echo [step] Install Wan runtime extras
+    >> "%ML_LOG%" echo ============================================================
+    >> "%ML_LOG%" echo [%DATE% %TIME%] Install Wan runtime extras
+    >> "%ML_LOG%" echo CMD: "%VENV_PYTHON%" -m pip install --upgrade ninja tokenizers dashscope "gradio>=5.0.0" "huggingface_hub[cli]"
+    "%VENV_PYTHON%" -m pip install --upgrade ninja tokenizers dashscope "gradio>=5.0.0" "huggingface_hub[cli]" >> "%ML_LOG%" 2>&1
+    if errorlevel 1 (
+        echo [error] Install Wan runtime extras failed. See %ML_LOG%
+        exit /b 1
+    )
+    echo [ok] Install Wan runtime extras
+    call :ensure_windows_flash_attn || exit /b 1
+    call :ensure_sam2 || exit /b 1
+    call :ensure_sam2_weight tiny sam2.1_hiera_tiny.pt || exit /b 1
+    call :ensure_sam2_weight base_plus sam2.1_hiera_base_plus.pt || exit /b 1
+    call :ensure_wan2_repo || exit /b 1
+    call :ensure_vace_weights_background || exit /b 1
+)
 
 echo.
 echo [done] Video Replace setup finished.
@@ -263,8 +273,8 @@ call :ensure_env_line "%ENV_FILE%" "VR_SAM2_CHECKPOINT_BASE_PLUS" "./weights/sam
 call :ensure_env_line "%ENV_FILE%" "VR_SAM2_SIZE_DEFAULT" "base_plus" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_WAN2_REPO_DIR" "./weights/wan2/Wan2.1" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_VACE_MODEL_DIR" "./weights/vace-1.3B" || exit /b 1
-call :ensure_env_line "%ENV_FILE%" "VR_REPLACE_MODE" "full" || exit /b 1
-call :ensure_env_line "%ENV_FILE%" "VR_YOLO_DEVICE" "cuda" || exit /b 1
+call :ensure_env_line "%ENV_FILE%" "VR_REPLACE_MODE" "lite" || exit /b 1
+call :ensure_env_line "%ENV_FILE%" "VR_YOLO_DEVICE" "cpu" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_VACE_SUBPROCESS_TIMEOUT_S" "10800" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_VACE_SUBPROCESS_IDLE_TIMEOUT_S" "1800" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_VACE_OFFLOAD_MODEL" "auto" || exit /b 1
@@ -475,11 +485,11 @@ exit /b 0
 if defined ASCII_VENV_PYTHON if exist "%ASCII_VENV_PYTHON%" exit /b 0
 for %%L in (X Y Z W V U T S R Q P O) do (
     if not defined ASCII_ROOT (
-        if exist "%%L:\core-api\video-replace-service\.venv\Scripts\python.exe" (
+        if exist "%%L:\video-replace-service\.venv\Scripts\python.exe" (
             set "ASCII_ROOT=%%L:\"
         ) else (
             subst %%L: "%ROOT%" >nul 2>&1
-            if exist "%%L:\core-api\video-replace-service\.venv\Scripts\python.exe" set "ASCII_ROOT=%%L:\"
+            if exist "%%L:\video-replace-service\.venv\Scripts\python.exe" set "ASCII_ROOT=%%L:\"
         )
     )
 )
@@ -487,7 +497,7 @@ if not defined ASCII_ROOT (
     echo [error] Could not create an ASCII alias for %ROOT%
     exit /b 1
 )
-set "ASCII_SERVICE_DIR=%ASCII_ROOT%core-api\video-replace-service"
+set "ASCII_SERVICE_DIR=%ASCII_ROOT%video-replace-service"
 set "ASCII_VENV_PYTHON=%ASCII_SERVICE_DIR%\.venv\Scripts\python.exe"
 set "ASCII_SITE_PACKAGES=%ASCII_SERVICE_DIR%\.venv\Lib\site-packages"
 if not exist "%ASCII_VENV_PYTHON%" (
