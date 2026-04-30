@@ -1,5 +1,6 @@
 import { CanvasData, Message, Session } from '@/types/types'
 import { ToolInfo } from '@/api/model'
+import { readXiaolouPrefetchCache } from '@/lib/xiaolou-prefetch-cache'
 
 export type ListCanvasesResponse = {
   id: string
@@ -39,6 +40,13 @@ export async function createCanvas(data: {
 export async function getCanvas(
   id: string
 ): Promise<{ data: CanvasData; name: string; sessions: Session[] }> {
+  const prefetched = readXiaolouPrefetchCache<{
+    data: CanvasData
+    name: string
+    sessions: Session[]
+  }>(`xiaolou:jaaz-prefetch:canvas:${id}`)
+  if (prefetched) return prefetched
+
   const response = await fetch(`/api/canvas/${id}`)
   return await response.json()
 }

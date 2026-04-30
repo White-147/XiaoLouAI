@@ -139,6 +139,84 @@ function getAgentCanvasProjectEditPath(asset: Asset) {
   return `/create/agent-studio?${params.toString()}`;
 }
 
+const agentCanvasProjectPrefetchInFlight = new Set<string>();
+const AGENT_CANVAS_PREFETCH_TTL_MS = 2 * 60 * 1000;
+const AGENT_CANVAS_PREFETCH_INDEX_KEY = "xiaolou:jaaz-prefetch:index";
+
+function rememberJaazPrefetchCacheKey(key: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const now = Date.now();
+    const previous = JSON.parse(
+      window.sessionStorage.getItem(AGENT_CANVAS_PREFETCH_INDEX_KEY) || "[]",
+    ) as Array<{ key: string; cachedAt: number }>;
+    const next = [
+      { key, cachedAt: now },
+      ...previous.filter((item) => item.key !== key),
+    ].slice(0, 6);
+    for (const item of previous) {
+      if (!next.some((entry) => entry.key === item.key)) {
+        window.sessionStorage.removeItem(item.key);
+      }
+    }
+    window.sessionStorage.setItem(AGENT_CANVAS_PREFETCH_INDEX_KEY, JSON.stringify(next));
+  } catch {
+    // Prefetch cache is best-effort only.
+  }
+}
+
+function writeJaazPrefetchCache(key: string, payload: unknown) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      key,
+      JSON.stringify({
+        cachedAt: Date.now(),
+        ttlMs: AGENT_CANVAS_PREFETCH_TTL_MS,
+        payload,
+      }),
+    );
+    rememberJaazPrefetchCacheKey(key);
+  } catch {
+    // Large canvases can exceed sessionStorage quota; opening still works without cache.
+  }
+}
+
+function prefetchAgentCanvasProject(asset: Asset) {
+  const meta = getAgentCanvasProjectMeta(asset);
+  const canvasId = typeof meta.canvasId === "string" ? meta.canvasId.trim() : "";
+  const sessionId = typeof meta.sessionId === "string" ? meta.sessionId.trim() : "";
+  if (!canvasId || agentCanvasProjectPrefetchInFlight.has(canvasId)) return;
+
+  agentCanvasProjectPrefetchInFlight.add(canvasId);
+  const canvasKey = `xiaolou:jaaz-prefetch:canvas:${canvasId}`;
+  void fetch(`/jaaz-api/api/canvas/${encodeURIComponent(canvasId)}`, {
+    credentials: "same-origin",
+  })
+    .then(async (response) => {
+      if (response.ok) {
+        writeJaazPrefetchCache(canvasKey, await response.json());
+      }
+      if (!sessionId) return;
+      const chatResponse = await fetch(
+        `/jaaz-api/api/chat_session/${encodeURIComponent(sessionId)}?limit=80`,
+        { credentials: "same-origin" },
+      );
+      if (chatResponse.ok) {
+        writeJaazPrefetchCache(
+          `xiaolou:jaaz-prefetch:chat:${sessionId}:latest`,
+          await chatResponse.json(),
+        );
+      }
+    })
+    .catch(() => {
+      // Silent warmup failure; normal click path can still load from Jaaz.
+    })
+    .finally(() => {
+      window.setTimeout(() => agentCanvasProjectPrefetchInFlight.delete(canvasId), 5000);
+    });
+}
+
 function assetMatchesQuery(asset: Asset, rawQuery: string) {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return true;
@@ -465,8 +543,10 @@ export default function Assets() {
       }
 
       try {
-        const response = await listVideoReplaceJobs(30);
-        const jobs = response.items.filter((item) => Boolean(item.source_video_url));
+        const response = await listVideoReplaceJobs(30, currentProjectId);
+        const jobs = response.items.filter(
+          (item) => Boolean(item.source_video_url) && item.project_id === currentProjectId,
+        );
         await Promise.allSettled(
           jobs.map((item) => syncVideoReplaceJobAsset(currentProjectId, item.job_id)),
         );
@@ -1441,6 +1521,8 @@ export default function Assets() {
                             <article
                               key={asset.id}
                               className="glass-panel group flex cursor-pointer flex-col overflow-hidden rounded-xl"
+                              onMouseEnter={() => prefetchAgentCanvasProject(asset)}
+                              onFocus={() => prefetchAgentCanvasProject(asset)}
                               onClick={() => navigate(editPath)}
                             >
                               <div className="relative aspect-video bg-muted">

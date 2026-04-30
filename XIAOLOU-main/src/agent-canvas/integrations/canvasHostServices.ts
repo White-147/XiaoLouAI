@@ -108,6 +108,23 @@ export type HostProjectLoadData = {
   viewport?: { x: number; y: number; zoom: number };
 };
 
+export type HostCanvasProjectVersion = {
+  id: string | null;
+  title: string | null;
+  updatedAt: string | null;
+  canvasData: HostProjectFull['canvasData'];
+};
+
+export type HostCanvasProjectVersionInput = {
+  id?: string | null;
+  title?: string | null;
+  updatedAt?: string | null;
+  canvasData?: HostProjectFull['canvasData'];
+  nodes?: unknown[];
+  groups?: unknown[];
+  viewport?: { x: number; y: number; zoom: number };
+};
+
 export type CanvasHostServices = {
   readonly actorId: string | null;
   readonly projectId: string | null;
@@ -135,6 +152,8 @@ export type CanvasHostServices = {
   loadProject(id: string): Promise<HostProjectFull>;
   deleteProject(id: string): Promise<{ deleted: boolean }>;
   saveCanvas(workflow: HostSaveWorkflow, thumbnailImageUrls: string[]): Promise<void>;
+  getCanvasProjectVersion?(): HostCanvasProjectVersion | null;
+  adoptCanvasProjectVersion?(project: HostCanvasProjectVersionInput): void;
   resetProject(): void;
 };
 

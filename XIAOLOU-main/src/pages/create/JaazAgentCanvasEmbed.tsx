@@ -61,25 +61,48 @@ function appendEmbedParam(url: string) {
   return `${withoutHash}${separator}embed=xiaolou${hash ? `#${hash}` : ""}`;
 }
 
-function resolveJaazCanvasUrl(rootUrl: string, canvasId: string, sessionId: string | null) {
-  if (typeof window === "undefined") return appendEmbedParam(rootUrl);
-  const base = rootUrl.endsWith("/") ? rootUrl : `${rootUrl}/`;
-  const parsed = new URL(base, window.location.href);
-  parsed.pathname = `${parsed.pathname.replace(/\/$/, "")}/canvas/${encodeURIComponent(canvasId)}`;
-  parsed.search = "";
-  if (sessionId) parsed.searchParams.set("sessionId", sessionId);
-  parsed.searchParams.set("embed", "xiaolou");
-  return parsed.toString();
+function resolveJaazRootUrl() {
+  const configured = String(import.meta.env.VITE_JAAZ_AGENT_CANVAS_URL || "").trim();
+  return appendEmbedParam(configured || DEFAULT_JAAZ_AGENT_CANVAS_URL);
 }
 
-function resolveJaazAgentCanvasUrl(locationSearch = "") {
-  const configured = String(import.meta.env.VITE_JAAZ_AGENT_CANVAS_URL || "").trim();
-  const url = configured || DEFAULT_JAAZ_AGENT_CANVAS_URL;
+function readRequestedCanvasProject(locationSearch = ""): AgentStudioCanvasProjectSyncInput | null {
   const params = new URLSearchParams(locationSearch);
   const canvasId = params.get("canvasId") || params.get("jaazCanvasId");
   const sessionId = params.get("sessionId") || params.get("jaazSessionId");
-  if (canvasId) return resolveJaazCanvasUrl(url, canvasId, sessionId);
-  return appendEmbedParam(url);
+  if (!canvasId) return null;
+  return {
+    canvasId,
+    sessionId: sessionId || undefined,
+    canvasUrl:
+      `/canvas/${encodeURIComponent(canvasId)}` +
+      (sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""),
+    source: "xiaolou_route",
+    savedAt: new Date().toISOString(),
+  };
+}
+
+function resolveJaazCanvasUrl(rootUrl: string, canvasId: string, sessionId?: string | null) {
+  if (typeof window === "undefined") return rootUrl;
+  try {
+    const parsed = new URL(rootUrl, window.location.href);
+    const basePath = parsed.pathname.replace(/\/$/, "");
+    parsed.pathname = `${basePath}/canvas/${encodeURIComponent(canvasId)}`;
+    parsed.search = "";
+    if (sessionId) parsed.searchParams.set("sessionId", sessionId);
+    parsed.searchParams.set("embed", "xiaolou");
+    return parsed.toString();
+  } catch {
+    return rootUrl;
+  }
+}
+
+function resolveInitialJaazIframeUrl(locationPathname: string, locationSearch = "") {
+  const rootUrl = resolveJaazRootUrl();
+  if (locationPathname !== "/create/agent-studio") return rootUrl;
+  const requestedProject = readRequestedCanvasProject(locationSearch);
+  if (!requestedProject?.canvasId) return rootUrl;
+  return resolveJaazCanvasUrl(rootUrl, requestedProject.canvasId, requestedProject.sessionId || null);
 }
 
 function resolveTargetOrigin(url: string) {
@@ -111,8 +134,19 @@ function readCanvasProjectFromUrl(url: string): AgentStudioCanvasProjectSyncInpu
 
 export default function JaazAgentCanvasEmbed() {
   const location = useLocation();
-  const baseUrl = useMemo(() => resolveJaazAgentCanvasUrl(location.search), [location.search]);
-  const targetOrigin = useMemo(() => resolveTargetOrigin(baseUrl), [baseUrl]);
+  const iframeUrlRef = useRef<string | null>(null);
+  if (iframeUrlRef.current === null) {
+    iframeUrlRef.current = resolveInitialJaazIframeUrl(location.pathname, location.search);
+  }
+  const iframeUrl = iframeUrlRef.current;
+  const requestedCanvasProject = useMemo(
+    () =>
+      location.pathname === "/create/agent-studio"
+        ? readRequestedCanvasProject(location.search)
+        : null,
+    [location.pathname, location.search],
+  );
+  const targetOrigin = useMemo(() => resolveTargetOrigin(iframeUrl), [iframeUrl]);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const actorId = useActorId();
   const [theme, setTheme] = useTheme();
@@ -145,7 +179,22 @@ export default function JaazAgentCanvasEmbed() {
     [targetOrigin, theme],
   );
 
-  const hasCurrentCanvas = Boolean(currentCanvasProject?.canvasId || /\/canvas\//i.test(baseUrl));
+  const hasCurrentCanvas = Boolean(currentCanvasProject?.canvasId || requestedCanvasProject?.canvasId);
+
+  const postCanvasNavigationMessage = useCallback(
+    (project: AgentStudioCanvasProjectSyncInput | null = requestedCanvasProject) => {
+      if (!project?.canvasId) return;
+      iframeRef.current?.contentWindow?.postMessage(
+        {
+          type: "xiaolou:agent-canvas:navigate",
+          canvasId: project.canvasId,
+          sessionId: project.sessionId || null,
+        },
+        targetOrigin,
+      );
+    },
+    [requestedCanvasProject, targetOrigin],
+  );
 
   const readCurrentCanvasProject = useCallback((): AgentStudioCanvasProjectSyncInput | null => {
     if (currentCanvasProject?.canvasId) {
@@ -164,8 +213,16 @@ export default function JaazAgentCanvasEmbed() {
       // Cross-origin iframe access is intentionally ignored; the postMessage path remains primary.
     }
 
-    return readCanvasProjectFromUrl(baseUrl);
-  }, [baseUrl, currentCanvasProject]);
+    if (requestedCanvasProject?.canvasId) {
+      return {
+        ...requestedCanvasProject,
+        source: "xiaolou_manual_button",
+        savedAt: new Date().toISOString(),
+      };
+    }
+
+    return readCanvasProjectFromUrl(iframeUrl);
+  }, [currentCanvasProject, iframeUrl, requestedCanvasProject]);
 
   const syncCurrentProjectDirectly = useCallback(
     async (requestId: string) => {
@@ -309,8 +366,16 @@ export default function JaazAgentCanvasEmbed() {
   }, []);
 
   useEffect(() => {
-    setIsLoading(true);
-  }, [baseUrl]);
+    if (!requestedCanvasProject?.canvasId) return;
+    setCurrentCanvasProject((current) => ({
+      ...current,
+      ...requestedCanvasProject,
+      canvasId: requestedCanvasProject.canvasId,
+    }));
+    if (!isLoading) {
+      postCanvasNavigationMessage(requestedCanvasProject);
+    }
+  }, [isLoading, postCanvasNavigationMessage, requestedCanvasProject]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -457,12 +522,13 @@ export default function JaazAgentCanvasEmbed() {
           key={iframeRevision}
           ref={iframeRef}
           title="Jaaz"
-          src={baseUrl}
+          src={iframeUrl}
           onLoad={() => {
             setIsLoading(false);
             window.setTimeout(() => {
               postAuthMessage();
               postThemeMessage();
+              postCanvasNavigationMessage();
             }, 0);
           }}
           className="h-full w-full border-0"

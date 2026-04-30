@@ -10,7 +10,7 @@ import os
 from fastapi import APIRouter, HTTPException, UploadFile, File
 import httpx
 import aiofiles
-from mimetypes import guess_type
+from mimetypes import guess_extension, guess_type
 from utils.http_client import HttpClient
 
 router = APIRouter(prefix="/api")
@@ -94,6 +94,57 @@ async def upload_image(file: UploadFile = File(...), max_size_mb: float = 3.0):
         'url': f'http://localhost:{DEFAULT_PORT}/api/file/{file_id}.{extension}',
         'width': width,
         'height': height,
+    }
+
+
+@router.post("/upload_video")
+async def upload_video(file: UploadFile = File(...), max_size_mb: float = 500.0):
+    filename = file.filename or ''
+    content_type = file.content_type or guess_type(filename)[0] or ''
+    if not content_type.startswith('video/'):
+        raise HTTPException(status_code=400, detail="Only video files are supported")
+
+    file_id = generate_file_id()
+    extension = os.path.splitext(filename)[1].lower().lstrip('.')
+    if not extension:
+        extension = (guess_extension(content_type) or '.mp4').lstrip('.')
+    if extension == 'quicktime':
+        extension = 'mov'
+
+    allowed_extensions = {'mp4', 'webm', 'mov', 'm4v', 'ogg', 'ogv'}
+    if extension not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Unsupported video format")
+
+    saved_name = f'{file_id}.{extension}'
+    file_path = os.path.join(FILES_DIR, saved_name)
+    max_bytes = int(max_size_mb * 1024 * 1024)
+    size = 0
+
+    try:
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    await out_file.close()
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    raise HTTPException(status_code=413, detail="Video file is too large")
+                await out_file.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=400, detail=f"Error saving video: {e}")
+
+    return {
+        'file_id': saved_name,
+        'url': f'http://localhost:{DEFAULT_PORT}/api/file/{saved_name}',
+        'mimeType': content_type,
+        'size': size,
     }
 
 

@@ -22,6 +22,12 @@ interface UseContextMenuHandlersOptions {
     ) => void;
 }
 
+type ConnectorMenuOptions = {
+    x?: number;
+    y?: number;
+    placeNodeAtMenuPosition?: boolean;
+};
+
 export const useContextMenuHandlers = ({
     nodes,
     viewport,
@@ -61,17 +67,22 @@ export const useContextMenuHandlers = ({
     // NODE OPERATIONS
     // ============================================================================
 
-    const handleAddNext = useCallback((nodeId: string, _direction: 'left' | 'right') => {
+    const handleAddNext = useCallback((
+        nodeId: string,
+        _direction: 'left' | 'right',
+        options?: ConnectorMenuOptions
+    ) => {
         const sourceNode = nodes.find(n => n.id === nodeId);
         if (!sourceNode) return;
 
         setContextMenu({
             isOpen: true,
-            x: window.innerWidth / 2,
-            y: window.innerHeight / 2,
+            x: options?.x ?? (typeof window !== 'undefined' ? window.innerWidth / 2 : 0),
+            y: options?.y ?? (typeof window !== 'undefined' ? window.innerHeight / 2 : 0),
             type: 'node-connector',
             sourceNodeId: nodeId,
-            connectorSide: _direction
+            connectorSide: _direction,
+            placeNodeAtMenuPosition: options?.placeNodeAtMenuPosition === true,
         });
     }, [nodes, setContextMenu]);
 

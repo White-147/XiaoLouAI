@@ -47,6 +47,7 @@ import {
   notifyCanvasProjectLoad,
   type CanvasHostServices,
   type HostAssetItem,
+  type HostCanvasProjectVersionInput,
   type HostFindStrayGenerationRequest,
   type HostRecoverGenerationRequest,
   type HostRecoverGenerationResult,
@@ -59,6 +60,10 @@ import {
   sanitizeCanvasNodesForPersistence,
   sanitizePersistedCanvasString,
 } from "../../canvas/utils/canvasPersistence";
+import {
+  buildCanvasProjectSnapshot,
+  mergeCanvasProjectSnapshots,
+} from "../../canvas/utils/canvasProjectMerge";
 import CanvasApp from "../../canvas/App";
 
 // ─── Polling constants ────────────────────────────────────────────────────────
@@ -647,6 +652,22 @@ function describeRequestError(error: unknown, fallback: string) {
   return fallback;
 }
 
+function isCanvasSaveConflictError(error: unknown) {
+  return error instanceof Error && /409|CONFLICT|updated elsewhere/i.test(error.message);
+}
+
+function normalizeCanvasDataForVersion(canvasData: unknown) {
+  const raw = canvasData as
+    | { nodes?: unknown[]; groups?: unknown[]; viewport?: { x: number; y: number; zoom: number } }
+    | null
+    | undefined;
+  return {
+    nodes: sanitizeCanvasNodesForPersistence((raw?.nodes as any) || []),
+    groups: sanitizeCanvasGroupsForPersistence((raw?.groups as any) || []),
+    viewport: raw?.viewport || { x: 0, y: 0, zoom: 1 },
+  };
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function CanvasCreate() {
@@ -709,6 +730,38 @@ export default function CanvasCreate() {
   const canvasProjectLoadPendingRef = useRef(Boolean(pendingLoadProjectId));
   const pendingCanvasProjectLoadIdRef = useRef<string | null>(pendingLoadProjectId);
   const lastLoadedProjectRequestKeyRef = useRef<string | null>(null);
+
+  const adoptCanvasProjectVersion = (project: HostCanvasProjectVersionInput) => {
+    const canvasData = project.canvasData
+      ? normalizeCanvasDataForVersion(project.canvasData)
+      : (
+          Array.isArray(project.nodes) ||
+          Array.isArray(project.groups) ||
+          project.viewport
+        )
+        ? normalizeCanvasDataForVersion({
+            nodes: project.nodes,
+            groups: project.groups,
+            viewport: project.viewport,
+          })
+        : null;
+
+    if (project.id) {
+      canvasProjectIdRef.current = project.id;
+      writeCanvasSessionProjectId(actorIdRef.current, project.id);
+    }
+    if (typeof project.updatedAt === "string") {
+      canvasProjectUpdatedAtRef.current = project.updatedAt || null;
+    }
+    if (typeof project.title === "string") {
+      canvasProjectBaseTitleRef.current = project.title || null;
+    }
+    if (canvasData) {
+      canvasProjectBaseDataRef.current = canvasData;
+    }
+    canvasSaveBlockedRef.current = false;
+    canvasSaveConflictAlertedRef.current = false;
+  };
 
   const waitForProjectContextReady = async () => {
     if (projectContextReadyRef.current) {
@@ -988,6 +1041,19 @@ export default function CanvasCreate() {
         return { deleted: true };
       },
 
+      getCanvasProjectVersion() {
+        return {
+          id: canvasProjectIdRef.current,
+          title: canvasProjectBaseTitleRef.current,
+          updatedAt: canvasProjectUpdatedAtRef.current,
+          canvasData: (canvasProjectBaseDataRef.current as any) || null,
+        };
+      },
+
+      adoptCanvasProjectVersion(project) {
+        adoptCanvasProjectVersion(project);
+      },
+
       // ── Reset (new canvas) ─────────────────────────────────────────────────
       resetProject() {
         canvasProjectIdRef.current = null;
@@ -1005,7 +1071,7 @@ export default function CanvasCreate() {
 
       // ── Save ────────────────────────────────────────────────────────────────
       saveCanvas(workflow: HostSaveWorkflow, thumbnailImageUrls: string[]) {
-        canvasSaveQueueRef.current = canvasSaveQueueRef.current.then(async () => {
+        canvasSaveQueueRef.current = canvasSaveQueueRef.current.catch(() => undefined).then(async () => {
           if (canvasSaveBlockedRef.current) return;
           const targetCanvasProjectId =
             pendingCanvasProjectLoadIdRef.current || canvasProjectIdRef.current;
@@ -1047,19 +1113,67 @@ export default function CanvasCreate() {
             const persistNodes = sanitizeCanvasNodesForPersistence(asyncCleaned.nodes);
             const persistGroups = sanitizeCanvasGroupsForPersistence(asyncCleaned.groups);
             const persistThumbnailUrl = sanitizePersistedCanvasString(thumbnailUrl) ?? undefined;
-            const saved = await saveCanvasProject({
-              id: targetCanvasProjectId || undefined,
-              expectedUpdatedAt: canvasProjectUpdatedAtRef.current || undefined,
-              baseTitle: canvasProjectBaseTitleRef.current || undefined,
-              baseCanvasData: canvasProjectBaseDataRef.current ?? undefined,
-              title: workflow.title || "未命名画布项目",
-              thumbnailUrl: persistThumbnailUrl,
-              canvasData: {
-                nodes: persistNodes,
-                groups: persistGroups,
-                viewport: workflow.viewport,
-              },
-            });
+            const localCanvasData = {
+              nodes: persistNodes,
+              groups: persistGroups,
+              viewport: workflow.viewport,
+            };
+            let saved;
+            let shouldNotifyMergedCanvas = false;
+            try {
+              saved = await saveCanvasProject({
+                id: targetCanvasProjectId || undefined,
+                expectedUpdatedAt: canvasProjectUpdatedAtRef.current || undefined,
+                baseTitle: canvasProjectBaseTitleRef.current || undefined,
+                baseCanvasData: canvasProjectBaseDataRef.current ?? undefined,
+                title: workflow.title || "未命名画布项目",
+                thumbnailUrl: persistThumbnailUrl,
+                canvasData: localCanvasData,
+              });
+            } catch (saveErr) {
+              if (!targetCanvasProjectId || !isCanvasSaveConflictError(saveErr)) {
+                throw saveErr;
+              }
+
+              const remoteProject = await getCanvasProject(targetCanvasProjectId);
+              const remoteCanvasData = normalizeCanvasDataForVersion(remoteProject.canvasData);
+              const baseCanvasData = normalizeCanvasDataForVersion(canvasProjectBaseDataRef.current);
+              const mergedSnapshot = mergeCanvasProjectSnapshots(
+                buildCanvasProjectSnapshot({
+                  title: canvasProjectBaseTitleRef.current || remoteProject.title,
+                  nodes: baseCanvasData.nodes,
+                  groups: baseCanvasData.groups,
+                  viewport: baseCanvasData.viewport,
+                }),
+                buildCanvasProjectSnapshot({
+                  title: workflow.title || "Untitled",
+                  nodes: persistNodes,
+                  groups: persistGroups,
+                  viewport: workflow.viewport,
+                }),
+                buildCanvasProjectSnapshot({
+                  title: remoteProject.title,
+                  nodes: remoteCanvasData.nodes,
+                  groups: remoteCanvasData.groups,
+                  viewport: remoteCanvasData.viewport,
+                }),
+              );
+
+              localCanvasData.nodes = mergedSnapshot.nodes;
+              localCanvasData.groups = mergedSnapshot.groups;
+              localCanvasData.viewport = mergedSnapshot.viewport;
+              shouldNotifyMergedCanvas = true;
+
+              saved = await saveCanvasProject({
+                id: targetCanvasProjectId,
+                expectedUpdatedAt: remoteProject.updatedAt || undefined,
+                baseTitle: remoteProject.title || undefined,
+                baseCanvasData: remoteCanvasData,
+                title: mergedSnapshot.title || "Untitled",
+                thumbnailUrl: persistThumbnailUrl,
+                canvasData: localCanvasData,
+              });
+            }
             canvasProjectIdRef.current = saved.id;
             canvasProjectUpdatedAtRef.current = saved.updatedAt || null;
             canvasProjectBaseTitleRef.current = saved.title || null;
@@ -1068,9 +1182,20 @@ export default function CanvasCreate() {
             canvasSaveConflictAlertedRef.current = false;
             // Persist so next mount re-uses the same project (no duplicate creation)
             writeCanvasSessionProjectId(actorIdRef.current, saved.id);
+            if (shouldNotifyMergedCanvas) {
+              const savedCanvasData = normalizeCanvasDataForVersion(saved.canvasData || localCanvasData);
+              notifyCanvasProjectLoad({
+                id: saved.id,
+                title: saved.title,
+                updatedAt: saved.updatedAt || undefined,
+                nodes: savedCanvasData.nodes,
+                groups: savedCanvasData.groups,
+                viewport: savedCanvasData.viewport,
+              });
+            }
             console.log("[CanvasCreate] Canvas project saved:", saved.id);
           } catch (err) {
-            if (err instanceof Error && /409|CONFLICT|updated elsewhere/i.test(err.message)) {
+            if (isCanvasSaveConflictError(err)) {
               canvasSaveBlockedRef.current = true;
               if (!canvasSaveConflictAlertedRef.current) {
                 canvasSaveConflictAlertedRef.current = true;
@@ -1078,9 +1203,10 @@ export default function CanvasCreate() {
                   "当前画布项目已在其他页面更新，且本地修改无法安全自动合并。为避免覆盖最新内容，已暂停自动保存。请刷新后再继续操作。",
                 );
               }
-              return;
+              throw err;
             }
             console.warn("[CanvasCreate] Failed to save canvas project:", err);
+            throw err;
           }
         });
         return canvasSaveQueueRef.current;

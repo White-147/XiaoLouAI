@@ -26,14 +26,14 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
   const { t } = useTranslation()
 
   return (
-    <div className="flex items-center gap-2 w-full">
+    <div className="flex w-full items-center gap-2">
       <Select
         value={session?.id}
         onValueChange={(value) => {
           onSelectSession(value)
         }}
       >
-        <SelectTrigger className="flex-1 min-w-0 bg-background">
+        <SelectTrigger className="h-9 flex-1 min-w-0 rounded-xl border-slate-200/80 bg-white/[0.85] text-sm shadow-sm hover:bg-white dark:border-white/10 dark:bg-slate-900/[0.80]">
           <SelectValue placeholder="Theme" />
         </SelectTrigger>
         <SelectContent>
@@ -50,7 +50,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
       <Button
         variant={'outline'}
         onClick={onClickNewChat}
-        className="shrink-0 gap-1"
+        className="h-9 shrink-0 gap-1 rounded-xl border-slate-200/80 bg-white/[0.85] px-3 text-sm shadow-sm hover:bg-white dark:border-white/10 dark:bg-slate-900/[0.80]"
       >
         <PlusIcon />
         <span className="text-sm">{t('chat:newChat')}</span>

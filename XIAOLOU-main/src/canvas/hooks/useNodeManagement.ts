@@ -154,11 +154,38 @@ export const useNodeManagement = () => {
                 const newNodeId = generateUUID();
                 const GAP = 100;
                 const NODE_WIDTH = 340;
+                const NODE_HEIGHT = 200;
                 const titleZh = getDefaultNodeTitleZh(type);
 
                 let newNode: NodeData;
 
-                if (direction === 'right') {
+                if (contextMenu.placeNodeAtMenuPosition) {
+                    const canvasX = (contextMenu.x - viewport.x) / viewport.zoom;
+                    const canvasY = (contextMenu.y - viewport.y) / viewport.zoom;
+                    newNode = {
+                        id: newNodeId,
+                        type,
+                        x: canvasX - NODE_WIDTH / 2,
+                        y: canvasY - NODE_HEIGHT / 2,
+                        prompt: '',
+                        status: NodeStatus.IDLE,
+                        model: type === NodeType.IMAGE || type === NodeType.IMAGE_EDITOR
+                            ? DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID
+                            : 'Banana Pro',
+                        imageModel: type === NodeType.IMAGE || type === NodeType.IMAGE_EDITOR
+                            ? DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID
+                            : undefined,
+                        aspectRatio: 'Auto',
+                        resolution: 'Auto',
+                        parentIds: direction === 'right' && contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : [],
+                        ...(titleZh ? { title: titleZh } : {}),
+                    };
+
+                    if (direction === 'left') {
+                        const existingParentIds = sourceNode.parentIds || [];
+                        updateNode(contextMenu.sourceNodeId, { parentIds: [...existingParentIds, newNodeId] });
+                    }
+                } else if (direction === 'right') {
                     // Append: Source -> New
                     newNode = {
                         id: newNodeId,

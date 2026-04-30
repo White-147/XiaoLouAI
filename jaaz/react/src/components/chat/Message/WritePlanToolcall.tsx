@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, CheckCircle2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 export default function WritePlanToolCall({ args }: { args: string }) {
   const [isExpanded, setIsExpanded] = useState(true)
@@ -14,57 +14,59 @@ export default function WritePlanToolCall({ args }: { args: string }) {
 
   try {
     parsedArgs = JSON.parse(args)
-  } catch (error) {}
+  } catch (error) {
+    void error
+  }
 
   return (
-    <div className="bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 rounded-md shadow-sm overflow-hidden">
+    <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/[0.92] shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/[0.86]">
       {/* Header */}
       <div
-        className="flex items-center justify-between p-3 cursor-pointer hover:bg-purple-100/50 dark:hover:bg-purple-900/30 transition-colors"
+        className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3.5 py-3 transition-colors hover:bg-slate-50/80 dark:border-white/10 dark:hover:bg-white/5"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center gap-2">
-          <div className="bg-purple-200/70 dark:bg-purple-800 p-1 rounded">
-            <FileText className="h-4 w-4 text-purple-700 dark:text-purple-300" />
+          <div className="rounded-lg border border-violet-200/80 bg-violet-50 p-1.5 dark:border-violet-400/20 dark:bg-violet-400/10">
+            <FileText className="h-4 w-4 text-violet-600 dark:text-violet-300" />
           </div>
 
-          <p className="font-bold text-purple-900 dark:text-purple-100">
+          <p className="text-[15px] font-semibold tracking-tight text-slate-950 dark:text-slate-100">
             {t('chat:plan.title')}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {parsedArgs && (
-            <div className="bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 text-xs px-2 py-0.5 rounded-full">
+            <div className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700 dark:bg-violet-400/15 dark:text-violet-200">
               {parsedArgs.steps.length}
             </div>
           )}
           {isExpanded ? (
-            <ChevronDown className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            <ChevronDown className="h-4 w-4 text-slate-500 dark:text-slate-400" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            <ChevronRight className="h-4 w-4 text-slate-500 dark:text-slate-400" />
           )}
         </div>
       </div>
 
       {/* Collapsible Content */}
       {isExpanded && (
-        <div className="border-t border-purple-200 dark:border-purple-950">
-          <div className="p-3 space-y-2">
+        <div>
+          <div className="space-y-2.5 p-3">
             {parsedArgs?.steps.map((step, index) => (
               <div
                 key={`${step.title}-${index}`}
-                className="bg-white dark:bg-gray-950 border border-purple-200 dark:border-purple-950 rounded-md p-3 hover:shadow-sm transition-shadow"
+                className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3 transition-shadow hover:shadow-sm dark:border-white/10 dark:bg-white/5"
               >
                 <div className="flex items-start gap-2">
-                  <div className="bg-purple-100 dark:bg-purple-900 border border-purple-300 dark:border-purple-950 rounded-full p-0.5 mt-0.5 flex-shrink-0">
-                    <CheckCircle2 className="h-3 w-3 text-purple-600 dark:text-purple-400" />
+                  <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-violet-200 bg-white text-xs font-semibold text-violet-700 shadow-sm dark:border-violet-400/20 dark:bg-slate-950 dark:text-violet-200">
+                    {index + 1}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h4 className="text-md font-bold text-gray-900 dark:text-gray-100 mb-1">
-                      {index + 1}. {step.title}
+                    <h4 className="mb-1 text-[15px] font-semibold leading-6 text-slate-950 dark:text-slate-100">
+                      {step.title}
                     </h4>
                     {step.description && (
-                      <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
+                      <p className="text-[14px] leading-6 text-slate-600 dark:text-slate-300">
                         {step.description}
                       </p>
                     )}

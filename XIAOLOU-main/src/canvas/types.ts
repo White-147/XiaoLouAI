@@ -127,6 +127,7 @@ export interface ContextMenuState {
   type: 'global' | 'node-connector' | 'node-options' | 'add-nodes'; // 'global' = right click on canvas, 'add-nodes' = double click
   sourceNodeId?: string; // If 'node-connector' or 'node-options', which node originated the click
   connectorSide?: 'left' | 'right';
+  placeNodeAtMenuPosition?: boolean; // For drag-to-empty connector drops.
 }
 
 export interface Viewport {

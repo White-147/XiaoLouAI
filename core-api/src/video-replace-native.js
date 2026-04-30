@@ -37,6 +37,7 @@ const { DatabaseSync } = require("node:sqlite");
 const { spawn, spawnSync } = require("node:child_process");
 const { corsHeaders } = require("./http");
 const { killProcessTree, isProcessAlive } = require("./process-tree");
+const { decodeAuthToken } = require("./store");
 
 // ---------------------------------------------------------------------------
 // Configuration (env-overridable)
@@ -777,6 +778,184 @@ function spawnPipelineAsync(jobId) {
 // Job status → response shape (matches Python's JobStatus.model_dump())
 // ---------------------------------------------------------------------------
 
+function makeVrAccessError(statusCode, code, message) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  err.code = code;
+  return err;
+}
+
+function firstHeaderValue(req, name) {
+  const value = req?.headers?.[name];
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value[0] || "";
+  return "";
+}
+
+function getRequestActorId(req, url = null) {
+  let resolved = null;
+  let tokenActorId = null;
+  let headerActorId = null;
+
+  const authHeader = firstHeaderValue(req, "authorization");
+  if (authHeader.startsWith("Bearer ")) {
+    const userId = decodeAuthToken(authHeader.slice(7));
+    if (userId) {
+      tokenActorId = userId;
+      resolved = userId;
+    }
+  }
+
+  const headerValue = firstHeaderValue(req, "x-actor-id").trim();
+  if (headerValue) headerActorId = headerValue;
+
+  if (headerActorId && tokenActorId && headerActorId !== tokenActorId) {
+    console.warn("[vr-native] actor mismatch on authenticated request, preferring Authorization actor", {
+      tokenActorId,
+      headerActorId,
+      path: url?.pathname || "",
+    });
+    resolved = tokenActorId;
+  } else if (!resolved && headerActorId) {
+    resolved = headerActorId;
+  }
+
+  if (!resolved && url?.searchParams) {
+    const queryActorId =
+      url.searchParams.get("actorId") || url.searchParams.get("actor_id");
+    if (queryActorId && queryActorId.trim()) {
+      resolved = queryActorId.trim();
+    }
+  }
+
+  return resolved || null;
+}
+
+function resolveRequestActor(req, url, store, options = {}) {
+  return resolveActorAccessById(getRequestActorId(req, url), store, options);
+}
+
+function resolveActorAccessById(rawActorId, store, options = {}) {
+  if (!rawActorId) {
+    if (options.optional) return { actorId: null, actor: null };
+    throw makeVrAccessError(401, "UNAUTHORIZED", "Login required");
+  }
+
+  if (!store?.resolveActor) {
+    return { actorId: rawActorId, actor: { id: rawActorId, platformRole: "customer" } };
+  }
+
+  const actor = store.resolveActor(rawActorId);
+  if (!actor || actor.platformRole === "guest") {
+    if (options.optional) return { actorId: rawActorId, actor };
+    throw makeVrAccessError(403, "FORBIDDEN", "You do not have access to video replace jobs.");
+  }
+
+  return { actorId: actor.id || rawActorId, actor };
+}
+
+function getActorAccessForFiltering(actorId, store) {
+  try {
+    const access = resolveActorAccessById(actorId, store, { optional: true });
+    return access.actorId && access.actor && access.actor.platformRole !== "guest"
+      ? access
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getJobActorId(job) {
+  const value = job?.data?.actor_id || job?.data?.actorId || job?.data?.created_by;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function getJobProjectId(job) {
+  const value = job?.data?.project_id || job?.data?.projectId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function canActorAccessProject(projectId, actorId, store) {
+  if (!projectId || !actorId || !store?.assertProjectAccess) return false;
+  try {
+    store.assertProjectAccess(projectId, actorId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isJobVisibleToActor(job, access, store, projectId = null) {
+  if (!job || !access?.actorId || !access?.actor) return false;
+  const actor = access.actor;
+  const jobActorId = getJobActorId(job);
+  const jobProjectId = getJobProjectId(job);
+
+  if (projectId) {
+    if (jobProjectId !== projectId) return false;
+    if (actor.platformRole === "super_admin") return true;
+    if (!jobActorId || jobActorId !== access.actorId) return false;
+    return canActorAccessProject(projectId, access.actorId, store);
+  }
+
+  if (actor.platformRole === "super_admin") return true;
+  return Boolean(jobActorId && jobActorId === access.actorId);
+}
+
+function assertVideoReplaceJobAccess(job, req, url, store) {
+  const access = resolveRequestActor(req, url, store);
+  if (isJobVisibleToActor(job, access, store)) return access;
+  throw makeVrAccessError(403, "FORBIDDEN", "You do not have access to this video replace job.");
+}
+
+function assertVideoReplaceJobSyncAccess(job, projectId, req, url, store) {
+  const access = assertVideoReplaceJobAccess(job, req, url, store);
+  if (store?.assertProjectAccess) {
+    store.assertProjectAccess(projectId, access.actorId);
+  }
+
+  const jobActorId = getJobActorId(job);
+  const jobProjectId = getJobProjectId(job);
+  const canSync =
+    access.actor?.platformRole === "super_admin" ||
+    (jobActorId === access.actorId && (jobProjectId === projectId || !jobProjectId));
+
+  if (!canSync) {
+    throw makeVrAccessError(
+      403,
+      "FORBIDDEN",
+      "This video replace job cannot be synced to the selected project.",
+    );
+  }
+
+  return access;
+}
+
+function parseJobRow(row) {
+  let data = {};
+  try {
+    data = JSON.parse(row.data || "{}");
+  } catch {
+    data = {};
+  }
+  return { ...row, data };
+}
+
+function filterVisibleVideoReplaceAssets(assets, actorId, projectId, store = projectAssetStore) {
+  if (!Array.isArray(assets)) return [];
+  const access = getActorAccessForFiltering(actorId, store);
+  return assets.filter((asset) => {
+    if (asset?.sourceModule !== "video_replace" || !asset?.sourceTaskId) return true;
+    if (!access) return false;
+    try {
+      const job = dbGet(asset.sourceTaskId);
+      return isJobVisibleToActor(job, access, store, projectId || null);
+    } catch {
+      return false;
+    }
+  });
+}
+
 function jobToStatus(job) {
   const d = job.data || {};
   const queueAhead = _pipelineQueueAhead(job.job_id);
@@ -807,15 +986,24 @@ function jobToStatus(job) {
     mode: d.mode || null,
     tracker_backend: d.tracker_backend || null,
     replacer_backend: d.replacer_backend || null,
+    actor_id: getJobActorId(job),
+    project_id: getJobProjectId(job),
+    project_asset_id: d.project_asset_id || null,
   };
 }
 
-function listJobs(limit = 30) {
+function listJobs(limit = 30, options = {}) {
   const cappedLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+  const access = options.access || null;
+  const projectId = options.projectId || null;
+  const store = options.store || null;
+
   return getDb()
-    .prepare("SELECT * FROM jobs ORDER BY updated_at DESC LIMIT ?")
-    .all(cappedLimit)
-    .map((row) => ({ ...row, data: JSON.parse(row.data || "{}") }))
+    .prepare("SELECT * FROM jobs ORDER BY updated_at DESC")
+    .all()
+    .map(parseJobRow)
+    .filter((job) => isJobVisibleToActor(job, access, store, projectId))
+    .slice(0, cappedLimit)
     .map(jobToStatus);
 }
 
@@ -861,19 +1049,31 @@ function buildVideoReplaceAssetInput(job) {
       referenceUrl: status.target_reference_url,
       advanced: status.advanced,
       updatedAt: status.updated_at,
+      actorId: status.actor_id,
+      projectId: status.project_id,
     },
     scope: "generated",
   };
 }
 
-function syncVideoReplaceJobToProjectAsset(jobId, projectId, store = projectAssetStore) {
+function syncVideoReplaceJobToProjectAsset(jobId, projectId, store = projectAssetStore, options = {}) {
   if (!store || !projectId) return null;
   const job = dbGet(jobId);
   if (!job) return null;
-  const asset = store.saveProjectAsset(projectId, buildVideoReplaceAssetInput(job));
+  const actorId = getJobActorId(job) || options.actorId || null;
+  const assetJob = {
+    ...job,
+    data: {
+      ...(job.data || {}),
+      actor_id: actorId,
+      project_id: projectId,
+    },
+  };
+  const asset = store.saveProjectAsset(projectId, buildVideoReplaceAssetInput(assetJob));
   if (asset) {
     dbUpdate(jobId, {
       dataPatch: {
+        actor_id: actorId,
         project_id: projectId,
         project_asset_id: asset.id,
       },
@@ -886,7 +1086,8 @@ function syncVideoReplaceJobToProjectAsset(jobId, projectId, store = projectAsse
 // Route handlers
 // ---------------------------------------------------------------------------
 
-async function handleUpload(req, res) {
+async function handleUpload(req, res, store) {
+  const actorContext = resolveRequestActor(req, null, store, { optional: true });
   const ct = req.headers["content-type"] || "";
   if (!ct.includes("multipart/form-data")) {
     return vrFail(res, "BAD_CONTENT_TYPE", "Expected multipart/form-data", 400);
@@ -985,6 +1186,7 @@ async function handleUpload(req, res) {
   const jobId = `vr_${randomUUID().replace(/-/g, "").slice(0, 10)}`;
 
   dbCreate(jobId, {
+    actor_id: actorContext.actorId,
     video_url: videoUrl,
     video_abs_path: storedPath,
     video_stored_name: storedName,
@@ -1035,10 +1237,19 @@ async function handleReferenceUpload(req, res) {
   });
 }
 
-async function handleImportJob(req, res) {
+async function handleImportJob(req, res, store) {
+  const actorContext = resolveRequestActor(req, null, store, { optional: true });
   const body = await readJsonBodyLocal(req);
   const videoUrl = (body.video_url || "").trim();
   if (!videoUrl) return vrFail(res, "INVALID_URL", "video_url is required", 400);
+  const projectId = String(body.project_id || body.projectId || "").trim() || null;
+  if (projectId && store?.assertProjectAccess && actorContext.actorId) {
+    try {
+      store.assertProjectAccess(projectId, actorContext.actorId);
+    } catch (err) {
+      return vrFail(res, err?.code || "FORBIDDEN", err?.message || "You do not have access to this project.", err?.statusCode || 403);
+    }
+  }
 
   const absUrl = resolveExternalUrl(videoUrl);
   if (!absUrl) return vrFail(res, "INVALID_URL", `不支持的资产地址: ${videoUrl}`, 400);
@@ -1084,6 +1295,8 @@ async function handleImportJob(req, res) {
   const jobId = `vr_${randomUUID().replace(/-/g, "").slice(0, 10)}`;
 
   dbCreate(jobId, {
+    actor_id: actorContext.actorId,
+    project_id: projectId,
     video_url: storedVideoUrl,
     video_abs_path: storedPath,
     video_stored_name: storedName,
@@ -1130,9 +1343,14 @@ async function handleReferenceImport(req, res) {
   });
 }
 
-async function handleDetect(req, res, jobId) {
+async function handleDetect(req, res, jobId, store, url) {
   const job = dbGet(jobId);
   if (!job) return vrFail(res, "JOB_NOT_FOUND", "任务不存在", 404);
+  try {
+    assertVideoReplaceJobAccess(job, req, url, store);
+  } catch (err) {
+    return vrFail(res, err?.code || "FORBIDDEN", err?.message || "Forbidden", err?.statusCode || 403);
+  }
   if (job.stage === "detecting") {
     return vrFail(res, "DETECTION_ALREADY_RUNNING", "检测正在进行中", 409);
   }
@@ -1157,9 +1375,16 @@ async function handleDetect(req, res, jobId) {
   vrOk(res, jobToStatus(updated));
 }
 
-async function handleGenerate(req, res, jobId) {
+async function handleGenerate(req, res, jobId, store, url) {
   const job = dbGet(jobId);
   if (!job) return vrFail(res, "JOB_NOT_FOUND", "任务不存在", 404);
+
+  let access;
+  try {
+    access = assertVideoReplaceJobAccess(job, req, url, store);
+  } catch (err) {
+    return vrFail(res, err?.code || "FORBIDDEN", err?.message || "Forbidden", err?.statusCode || 403);
+  }
 
   if (job.stage !== "detected") {
     return vrFail(res, "INVALID_STAGE",
@@ -1172,6 +1397,22 @@ async function handleGenerate(req, res, jobId) {
 
   const { source_person_id, target_reference_url } = payload;
   const projectId = String(payload.project_id || payload.projectId || "").trim() || null;
+  const existingProjectId = getJobProjectId(job);
+  if (projectId && store?.assertProjectAccess) {
+    try {
+      store.assertProjectAccess(projectId, access.actorId);
+    } catch (err) {
+      return vrFail(res, err?.code || "FORBIDDEN", err?.message || "You do not have access to this project.", err?.statusCode || 403);
+    }
+  }
+  if (
+    existingProjectId &&
+    projectId &&
+    existingProjectId !== projectId &&
+    access.actor?.platformRole !== "super_admin"
+  ) {
+    return vrFail(res, "FORBIDDEN", "This video replace job belongs to another project.", 403);
+  }
   const candidates = job.data?.detection?.candidates || [];
   const validIds = new Set(candidates.map((c) => c.person_id));
   if (!validIds.has(source_person_id)) {
@@ -1210,15 +1451,17 @@ async function handleGenerate(req, res, jobId) {
       advanced_requested: rawAdvanced,
       advanced_clamp_notes: clampNotes,
       prompt: payload.prompt || null,
+      actor_id: getJobActorId(job) || access.actorId,
       project_id: projectId,
     },
   });
 
   if (projectId && projectAssetStore) {
     try {
-      const actorId = req.headers["x-actor-id"] || null;
-      projectAssetStore.assertProjectAccess(projectId, actorId);
-      syncVideoReplaceJobToProjectAsset(jobId, projectId, projectAssetStore);
+      projectAssetStore.assertProjectAccess(projectId, access.actorId);
+      syncVideoReplaceJobToProjectAsset(jobId, projectId, projectAssetStore, {
+        actorId: access.actorId,
+      });
     } catch (err) {
       console.warn("[vr-native] could not sync queued job to project asset:", err?.message || err);
     }
@@ -1232,21 +1475,32 @@ async function handleGenerate(req, res, jobId) {
   vrOk(res, jobToStatus(updated));
 }
 
-function handleListJobs(res, url) {
+function handleListJobs(req, res, url, store) {
   const limit = url.searchParams.get("limit") || 30;
-  vrOk(res, { items: listJobs(limit) });
+  const projectId =
+    String(url.searchParams.get("project_id") || url.searchParams.get("projectId") || "").trim() || null;
+  try {
+    const access = resolveRequestActor(req, url, store);
+    if (projectId && store?.assertProjectAccess) {
+      store.assertProjectAccess(projectId, access.actorId);
+    }
+    vrOk(res, { items: listJobs(limit, { access, projectId, store }) });
+  } catch (err) {
+    vrFail(res, err?.code || "FORBIDDEN", err?.message || "Forbidden", err?.statusCode || 403);
+  }
 }
 
-async function handleSyncJobAsset(req, res, jobId, store) {
+async function handleSyncJobAsset(req, res, jobId, store, url) {
   const job = dbGet(jobId);
   if (!job) return vrFail(res, "JOB_NOT_FOUND", "任务不存在", 404);
   const body = await readJsonBodyLocal(req);
   const projectId = String(body.project_id || body.projectId || "").trim();
   if (!projectId) return vrFail(res, "MISSING_PROJECT", "project_id is required", 400);
   try {
-    const actorId = req.headers["x-actor-id"] || null;
-    store?.assertProjectAccess(projectId, actorId);
-    const asset = syncVideoReplaceJobToProjectAsset(jobId, projectId, store);
+    const access = assertVideoReplaceJobSyncAccess(job, projectId, req, url, store);
+    const asset = syncVideoReplaceJobToProjectAsset(jobId, projectId, store, {
+      actorId: access.actorId,
+    });
     if (!asset) return vrFail(res, "SYNC_FAILED", "同步到项目资产失败", 500);
     vrOk(res, { asset, job: jobToStatus(dbGet(jobId)) });
   } catch (err) {
@@ -1254,15 +1508,25 @@ async function handleSyncJobAsset(req, res, jobId, store) {
   }
 }
 
-function handleGetJob(res, jobId) {
+function handleGetJob(req, res, jobId, store, url) {
   const job = dbGet(jobId);
   if (!job) return vrFail(res, "JOB_NOT_FOUND", "任务不存在", 404);
+  try {
+    assertVideoReplaceJobAccess(job, req, url, store);
+  } catch (err) {
+    return vrFail(res, err?.code || "FORBIDDEN", err?.message || "Forbidden", err?.statusCode || 403);
+  }
   vrOk(res, jobToStatus(job));
 }
 
-function handleCancelJob(res, jobId) {
+function handleCancelJob(req, res, jobId, store, url) {
   const job = dbGet(jobId);
   if (!job) return vrFail(res, "JOB_NOT_FOUND", "任务不存在", 404);
+  try {
+    assertVideoReplaceJobAccess(job, req, url, store);
+  } catch (err) {
+    return vrFail(res, err?.code || "FORBIDDEN", err?.message || "Forbidden", err?.statusCode || 403);
+  }
   if (TERMINAL_STAGES.has(job.stage)) {
     return vrFail(res, "ALREADY_TERMINAL", `任务已处于终止状态 (${job.stage})，无法取消`, 400);
   }
@@ -1277,7 +1541,15 @@ function handleCancelJob(res, jobId) {
   vrOk(res, jobToStatus(updated));
 }
 
-async function handleStreamJob(req, res, jobId) {
+async function handleStreamJob(req, res, jobId, store, url) {
+  const initialJob = dbGet(jobId);
+  if (!initialJob) return vrFail(res, "JOB_NOT_FOUND", "job not found", 404);
+  try {
+    assertVideoReplaceJobAccess(initialJob, req, url, store);
+  } catch (err) {
+    return vrFail(res, err?.code || "FORBIDDEN", err?.message || "Forbidden", err?.statusCode || 403);
+  }
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -1414,7 +1686,7 @@ async function handleVideoReplaceRequest(req, res, url, store = null) {
   try {
     // POST /api/video-replace/upload
     if (req.method === "POST" && apiPath === "/upload") {
-      await handleUpload(req, res);
+      await handleUpload(req, res, store || projectAssetStore);
       return true;
     }
 
@@ -1426,13 +1698,13 @@ async function handleVideoReplaceRequest(req, res, url, store = null) {
 
     // GET /api/video-replace/jobs  (recent history)
     if (req.method === "GET" && apiPath === "/jobs") {
-      handleListJobs(res, url);
+      handleListJobs(req, res, url, store || projectAssetStore);
       return true;
     }
 
     // POST /api/video-replace/jobs  (import from URL)
     if (req.method === "POST" && apiPath === "/jobs") {
-      await handleImportJob(req, res);
+      await handleImportJob(req, res, store || projectAssetStore);
       return true;
     }
 
@@ -1450,37 +1722,37 @@ async function handleVideoReplaceRequest(req, res, url, store = null) {
 
       // POST /jobs/:id/detect
       if (req.method === "POST" && subPath === "/detect") {
-        await handleDetect(req, res, jobId);
+        await handleDetect(req, res, jobId, store || projectAssetStore, url);
         return true;
       }
 
       // POST /jobs/:id/generate
       if (req.method === "POST" && subPath === "/generate") {
-        await handleGenerate(req, res, jobId);
+        await handleGenerate(req, res, jobId, store || projectAssetStore, url);
         return true;
       }
 
       // POST /jobs/:id/cancel
       if (req.method === "POST" && subPath === "/cancel") {
-        handleCancelJob(res, jobId);
+        handleCancelJob(req, res, jobId, store || projectAssetStore, url);
         return true;
       }
 
       // POST /jobs/:id/sync-asset
       if (req.method === "POST" && subPath === "/sync-asset") {
-        await handleSyncJobAsset(req, res, jobId, store || projectAssetStore);
+        await handleSyncJobAsset(req, res, jobId, store || projectAssetStore, url);
         return true;
       }
 
       // GET /jobs/:id
       if (req.method === "GET" && subPath === "") {
-        handleGetJob(res, jobId);
+        handleGetJob(req, res, jobId, store || projectAssetStore, url);
         return true;
       }
 
       // GET /jobs/:id/stream
       if (req.method === "GET" && subPath === "/stream") {
-        await handleStreamJob(req, res, jobId);
+        await handleStreamJob(req, res, jobId, store || projectAssetStore, url);
         return true;
       }
     }
@@ -1673,6 +1945,7 @@ function shutdownPipelines(reason = "core-api shutdown") {
 }
 
 module.exports = {
+  filterVisibleVideoReplaceAssets,
   handleVideoReplaceRequest,
   isVideoReplaceRequest,
   shutdownPipelines,

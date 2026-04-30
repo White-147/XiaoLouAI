@@ -7,6 +7,15 @@ from .config_service import USER_DATA_DIR
 from .migrations.manager import MigrationManager, CURRENT_VERSION
 
 DB_PATH = os.path.join(USER_DATA_DIR, "localmanus.db")
+MAX_INLINE_THUMBNAIL_CHARS = 120_000
+
+
+def _sanitize_canvas_thumbnail(thumbnail: Optional[str]) -> Optional[str]:
+    if not thumbnail:
+        return thumbnail
+    if thumbnail.startswith("data:") and len(thumbnail) > MAX_INLINE_THUMBNAIL_CHARS:
+        return None
+    return thumbnail
 
 class DatabaseService:
     def __init__(self):
@@ -62,7 +71,12 @@ class DatabaseService:
                 ORDER BY updated_at DESC
             """)
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            canvases = []
+            for row in rows:
+                canvas = dict(row)
+                canvas["thumbnail"] = _sanitize_canvas_thumbnail(canvas.get("thumbnail"))
+                canvases.append(canvas)
+            return canvases
 
     async def create_chat_session(self, id: str, model: str, provider: str, canvas_id: str, title: Optional[str] = None):
         """Save a new chat session"""
@@ -82,17 +96,41 @@ class DatabaseService:
             """, (session_id, role, message))
             await db.commit()
 
-    async def get_chat_history(self, session_id: str) -> List[Dict[str, Any]]:
+    async def get_chat_history(self, session_id: str, limit: Optional[int] = None, before_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get chat history for a session"""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = sqlite3.Row
-            cursor = await db.execute("""
-                SELECT role, message, id
-                FROM chat_messages
-                WHERE session_id = ?
-                ORDER BY id ASC
-            """, (session_id,))
+            if limit and limit > 0:
+                bounded_limit = min(max(int(limit), 1), 200)
+                params: tuple[Any, ...]
+                if before_id:
+                    params = (session_id, int(before_id), bounded_limit)
+                    cursor = await db.execute("""
+                        SELECT role, message, id
+                        FROM chat_messages
+                        WHERE session_id = ? AND id < ?
+                        ORDER BY id DESC
+                        LIMIT ?
+                    """, params)
+                else:
+                    params = (session_id, bounded_limit)
+                    cursor = await db.execute("""
+                        SELECT role, message, id
+                        FROM chat_messages
+                        WHERE session_id = ?
+                        ORDER BY id DESC
+                        LIMIT ?
+                    """, params)
+            else:
+                cursor = await db.execute("""
+                    SELECT role, message, id
+                    FROM chat_messages
+                    WHERE session_id = ?
+                    ORDER BY id ASC
+                """, (session_id,))
             rows = await cursor.fetchall()
+            if limit and limit > 0:
+                rows = list(reversed(rows))
             
             messages = []
             for row in rows:
@@ -105,6 +143,49 @@ class DatabaseService:
                         pass
                 
             return messages
+
+    async def get_chat_history_page(self, session_id: str, limit: int = 80, before_id: Optional[int] = None) -> Dict[str, Any]:
+        """Get one page of chat history, newest page first but returned in ascending order."""
+        bounded_limit = min(max(int(limit or 80), 1), 200)
+        query_limit = bounded_limit + 1
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = sqlite3.Row
+            if before_id:
+                cursor = await db.execute("""
+                    SELECT role, message, id
+                    FROM chat_messages
+                    WHERE session_id = ? AND id < ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                """, (session_id, int(before_id), query_limit))
+            else:
+                cursor = await db.execute("""
+                    SELECT role, message, id
+                    FROM chat_messages
+                    WHERE session_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                """, (session_id, query_limit))
+
+            rows_desc = await cursor.fetchall()
+            has_more = len(rows_desc) > bounded_limit
+            kept_rows = list(reversed(rows_desc[:bounded_limit]))
+
+            messages = []
+            for row in kept_rows:
+                row_dict = dict(row)
+                if row_dict['message']:
+                    try:
+                        messages.append(json.loads(row_dict['message']))
+                    except:
+                        pass
+
+            next_before_id = kept_rows[0]['id'] if has_more and kept_rows else None
+            return {
+                'messages': messages,
+                'has_more': has_more,
+                'next_before_id': next_before_id,
+            }
 
     async def list_sessions(self, canvas_id: str) -> List[Dict[str, Any]]:
         """List all chat sessions"""

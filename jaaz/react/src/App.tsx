@@ -14,6 +14,7 @@ import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { Toaster } from 'sonner'
 import { routeTree } from './route-tree.gen'
+import { getAllowedXiaolouParentOrigins } from '@/lib/xiaolou-embed'
 
 import '@/assets/style/App.css'
 import '@/i18n'
@@ -75,6 +76,27 @@ const queryClient = new QueryClient({
 
 function App() {
   const { theme } = useTheme()
+
+  useEffect(() => {
+    const handleXiaolouNavigation = (event: MessageEvent) => {
+      if (!getAllowedXiaolouParentOrigins().has(event.origin)) return
+      if (event.source !== window.parent) return
+      if (event.data?.type !== 'xiaolou:agent-canvas:navigate') return
+
+      const canvasId = String(event.data.canvasId || '').trim()
+      const sessionId = String(event.data.sessionId || '').trim()
+      if (!canvasId) return
+
+      router.navigate({
+        to: '/canvas/$id',
+        params: { id: canvasId },
+        search: sessionId ? { sessionId } : {},
+      })
+    }
+
+    window.addEventListener('message', handleXiaolouNavigation)
+    return () => window.removeEventListener('message', handleXiaolouNavigation)
+  }, [])
 
   // Auto-start ComfyUI on app startup
   useEffect(() => {

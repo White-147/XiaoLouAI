@@ -20,6 +20,12 @@ export interface SameTypeMediaConnectionChoice {
     mediaType: NodeType.IMAGE | NodeType.VIDEO;
 }
 
+type ConnectorMenuOptions = {
+    x?: number;
+    y?: number;
+    placeNodeAtMenuPosition?: boolean;
+};
+
 export const useConnectionDragging = () => {
     // ============================================================================
     // STATE
@@ -116,7 +122,7 @@ export const useConnectionDragging = () => {
      * @param onConnectionMade - Optional callback called with (parentId, childId) when connection is created
      */
     const completeConnectionDrag = (
-        onAddNext: (nodeId: string, direction: 'left' | 'right') => void,
+        onAddNext: (nodeId: string, direction: 'left' | 'right', options?: ConnectorMenuOptions) => void,
         onUpdateNodes: (updater: (prev: NodeData[]) => NodeData[]) => void,
         nodes: NodeData[],
         onConnectionMade?: (parentId: string, childId: string) => void,
@@ -224,6 +230,14 @@ export const useConnectionDragging = () => {
         // Short click - open menu
         if (dragDuration < 200 && !hoveredNodeId) {
             onAddNext(connectionStart.nodeId, connectionStart.handle);
+        }
+        // Drag released on empty canvas - open the add-node menu at the drop point.
+        else if (!hoveredNodeId) {
+            onAddNext(connectionStart.nodeId, connectionStart.handle, {
+                x: tempConnectionEnd?.x,
+                y: tempConnectionEnd?.y,
+                placeNodeAtMenuPosition: true,
+            });
         }
         // Drag to node - media nodes use type-based rules, not target-side rules.
         else if (hoveredNodeId) {

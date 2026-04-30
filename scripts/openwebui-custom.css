@@ -1,0 +1,30 @@
+/* Hide Open WebUI sidebar */
+#sidebar {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Hide mobile sidebar overlay */
+#sidebar ~ div[class*="fixed"][class*="bg-black"] {
+  display: none !important;
+}
+
+/* Make main chat area fill full width */
+#chat-container {
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
+/* Hide the hamburger / sidebar toggle in navbar */
+#sidebar-toggle-button,
+button[aria-label="Open Sidebar"],
+button[aria-label="Close Sidebar"] {
+  display: none !important;
+}
+
+/* Hide the top-left sidebar toggle area in navbar */
+nav.drag-region > div:first-child button[aria-controls="sidebar"] {
+  display: none !important;
+}

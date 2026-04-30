@@ -42,7 +42,11 @@ interface UsePointerHandlersOptions {
     // Connection dragging
     updateConnectionDrag: (e: React.PointerEvent, nodes: NodeData[], viewport: Viewport) => boolean;
     completeConnectionDrag: (
-        handleAddNext: (nodeId: string, direction: 'left' | 'right') => void,
+        handleAddNext: (
+            nodeId: string,
+            direction: 'left' | 'right',
+            options?: { x?: number; y?: number; placeNodeAtMenuPosition?: boolean }
+        ) => void,
         setNodes: React.Dispatch<React.SetStateAction<NodeData[]>>,
         nodes: NodeData[],
         onConnectionMade?: (parentId: string, childId: string) => void
@@ -55,7 +59,11 @@ interface UsePointerHandlersOptions {
 
     // Other
     releasePointerCapture: (e: React.PointerEvent) => void;
-    handleAddNext: (nodeId: string, direction: 'left' | 'right') => void;
+    handleAddNext: (
+        nodeId: string,
+        direction: 'left' | 'right',
+        options?: { x?: number; y?: number; placeNodeAtMenuPosition?: boolean }
+    ) => void;
     updateNode: (id: string, updates: Partial<NodeData>) => void;
 }
 

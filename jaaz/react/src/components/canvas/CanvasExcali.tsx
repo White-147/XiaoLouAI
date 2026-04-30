@@ -11,13 +11,19 @@ import {
 } from '@/lib/xiaolou-embed'
 import * as ISocket from '@/types/socket'
 import { CanvasData } from '@/types/types'
-import { Excalidraw, convertToExcalidrawElements } from '@excalidraw/excalidraw'
+import {
+  Excalidraw,
+  convertToExcalidrawElements,
+  getDataURL,
+  viewportCoordsToSceneCoords,
+} from '@excalidraw/excalidraw'
 import {
   ExcalidrawImageElement,
   ExcalidrawEmbeddableElement,
   OrderedExcalidrawElement,
   Theme,
   NonDeleted,
+  FileId,
 } from '@excalidraw/excalidraw/element/types'
 import '@excalidraw/excalidraw/index.css'
 import {
@@ -50,6 +56,11 @@ type XiaolouAgentCanvasProjectSaveRequestMessage = {
   requestId?: string
 }
 
+const SVG_PASTE_MAX_SIZE = 720
+const CANVAS_THUMBNAIL_MAX_SIZE = 640
+const CANVAS_EMBEDDED_IMAGE_MAX_SIZE = 1600
+const CANVAS_DATA_IMAGE_COMPACT_THRESHOLD = 700_000
+
 function normalizeCanvasFiles(
   files?: ExcalidrawInitialDataState['files'] | BinaryFiles
 ) {
@@ -81,6 +92,208 @@ function normalizeInitialCanvasData(
       : data.appState,
     files: normalizeCanvasFiles(data.files),
   }
+}
+
+function isCompressibleDataImage(dataURL?: string | null) {
+  return /^data:image\/(png|jpe?g|webp);base64,/i.test(String(dataURL || ''))
+}
+
+function compressDataImage(
+  dataURL: string,
+  maxSize: number,
+  quality = 0.82
+): Promise<string> {
+  if (!isCompressibleDataImage(dataURL)) return Promise.resolve(dataURL)
+
+  return new Promise((resolve) => {
+    const image = new Image()
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, maxSize / Math.max(image.width, image.height))
+        const width = Math.max(1, Math.round(image.width * scale))
+        const height = Math.max(1, Math.round(image.height * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const context = canvas.getContext('2d')
+        if (!context) {
+          resolve(dataURL)
+          return
+        }
+        context.drawImage(image, 0, 0, width, height)
+        const compressed = canvas.toDataURL('image/webp', quality)
+        resolve(compressed.length < dataURL.length ? compressed : dataURL)
+      } catch {
+        resolve(dataURL)
+      }
+    }
+    image.onerror = () => resolve(dataURL)
+    image.src = dataURL
+  })
+}
+
+function collectReferencedFileIds(
+  elements: Readonly<OrderedExcalidrawElement[]>
+) {
+  const referenced = new Set<string>()
+  elements.forEach((element) => {
+    const fileId = (element as { fileId?: string | null }).fileId
+    if (fileId && !(element as { isDeleted?: boolean }).isDeleted) {
+      referenced.add(fileId)
+    }
+  })
+  return referenced
+}
+
+async function compactCanvasFiles(
+  elements: Readonly<OrderedExcalidrawElement[]>,
+  files: BinaryFiles
+) {
+  const referenced = collectReferencedFileIds(elements)
+  const compactedEntries = await Promise.all(
+    Object.entries(files || {})
+      .filter(([id]) => referenced.has(id))
+      .map(async ([id, file]) => {
+        const rawDataURL = String(file.dataURL || '')
+        const shouldCompact =
+          isCompressibleDataImage(rawDataURL) &&
+          rawDataURL.length > CANVAS_DATA_IMAGE_COMPACT_THRESHOLD
+        const dataURL = shouldCompact
+          ? await compressDataImage(rawDataURL, CANVAS_EMBEDDED_IMAGE_MAX_SIZE)
+          : normalizeJaazApiUrl(rawDataURL)
+        return [
+          id,
+          {
+            ...file,
+            dataURL,
+          },
+        ] as const
+      })
+  )
+  return Object.fromEntries(compactedEntries) as BinaryFiles
+}
+
+function isEditablePasteTarget(target: EventTarget | null) {
+  const element = target instanceof HTMLElement ? target : null
+  if (!element) return false
+  return Boolean(
+    element.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')
+  )
+}
+
+function getClipboardString(item: DataTransferItem) {
+  return new Promise<string>((resolve) => {
+    item.getAsString((value) => resolve(value || ''))
+  })
+}
+
+function extractSvgMarkupFromText(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  const directMatch = trimmed.match(/<svg[\s\S]*<\/svg>/i)
+  if (directMatch?.[0]) return directMatch[0]
+
+  try {
+    const doc = new DOMParser().parseFromString(trimmed, 'text/html')
+    const svg = doc.querySelector('svg')
+    return svg ? new XMLSerializer().serializeToString(svg) : null
+  } catch {
+    return null
+  }
+}
+
+function sanitizeSvgMarkup(svgMarkup: string) {
+  const doc = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml')
+  if (doc.querySelector('parsererror')) return null
+
+  doc
+    .querySelectorAll('script, foreignObject, iframe, object, embed, audio, video')
+    .forEach((node) => node.remove())
+
+  doc.querySelectorAll('*').forEach((node) => {
+    Array.from(node.attributes).forEach((attr) => {
+      const name = attr.name.toLowerCase()
+      const value = attr.value.trim().toLowerCase()
+      if (
+        name.startsWith('on') ||
+        ((name === 'href' || name.endsWith(':href')) && value.startsWith('javascript:'))
+      ) {
+        node.removeAttribute(attr.name)
+      }
+    })
+  })
+
+  const svg = doc.documentElement
+  if (svg.nodeName.toLowerCase() !== 'svg') return null
+  if (!svg.getAttribute('xmlns')) {
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  }
+  return new XMLSerializer().serializeToString(svg)
+}
+
+function parseSvgLength(value?: string | null) {
+  if (!value) return null
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function getSvgDisplaySize(svgMarkup: string) {
+  const doc = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml')
+  const svg = doc.documentElement
+  const viewBox = svg.getAttribute('viewBox') || svg.getAttribute('viewbox')
+  const viewBoxParts = viewBox
+    ? viewBox.trim().split(/[\s,]+/).map((part) => Number.parseFloat(part))
+    : []
+
+  const width =
+    parseSvgLength(svg.getAttribute('width')) ||
+    (viewBoxParts.length === 4 && viewBoxParts[2] > 0 ? viewBoxParts[2] : null) ||
+    320
+  const height =
+    parseSvgLength(svg.getAttribute('height')) ||
+    (viewBoxParts.length === 4 && viewBoxParts[3] > 0 ? viewBoxParts[3] : null) ||
+    240
+
+  const scale = Math.min(1, SVG_PASTE_MAX_SIZE / Math.max(width, height))
+  return {
+    width: Math.max(24, Math.round(width * scale)),
+    height: Math.max(24, Math.round(height * scale)),
+  }
+}
+
+function clipboardMightContainSvg(data: DataTransfer) {
+  if (Array.from(data.types || []).includes('image/svg+xml')) return true
+  if (Array.from(data.items || []).some((item) => item.type === 'image/svg+xml')) {
+    return true
+  }
+  return Boolean(
+    extractSvgMarkupFromText(data.getData('text/plain')) ||
+      extractSvgMarkupFromText(data.getData('text/html'))
+  )
+}
+
+async function readSvgFromClipboard(data: DataTransfer) {
+  const directSvg = data.getData('image/svg+xml')
+  const directMarkup = extractSvgMarkupFromText(directSvg)
+  if (directMarkup) return sanitizeSvgMarkup(directMarkup)
+
+  for (const item of Array.from(data.items || [])) {
+    if (item.type === 'image/svg+xml') {
+      const file = item.getAsFile()
+      const text = file ? await file.text() : await getClipboardString(item)
+      const markup = extractSvgMarkupFromText(text)
+      if (markup) return sanitizeSvgMarkup(markup)
+    }
+  }
+
+  const plainMarkup = extractSvgMarkupFromText(data.getData('text/plain'))
+  if (plainMarkup) return sanitizeSvgMarkup(plainMarkup)
+
+  const htmlMarkup = extractSvgMarkupFromText(data.getData('text/html'))
+  if (htmlMarkup) return sanitizeSvgMarkup(htmlMarkup)
+
+  return null
 }
 
 const CanvasExcali: React.FC<CanvasExcaliProps> = ({
@@ -128,13 +341,14 @@ const CanvasExcali: React.FC<CanvasExcaliProps> = ({
         throw new Error('Canvas is not ready')
       }
 
+      const compactedFiles = await compactCanvasFiles(elements, files)
       const data: CanvasData = {
         elements,
         appState: {
           ...appState,
           collaborators: undefined!,
         },
-        files,
+        files: compactedFiles,
       }
 
       let thumbnail = ''
@@ -142,9 +356,13 @@ const CanvasExcali: React.FC<CanvasExcaliProps> = ({
         .filter((element) => element.type === 'image')
         .sort((a, b) => b.updated - a.updated)[0]
       if (latestImage) {
-        const file = files[latestImage.fileId!]
+        const file = compactedFiles[latestImage.fileId!]
         if (file) {
-          thumbnail = file.dataURL
+          thumbnail = await compressDataImage(
+            String(file.dataURL || ''),
+            CANVAS_THUMBNAIL_MAX_SIZE,
+            0.72
+          )
         }
       }
 
@@ -287,6 +505,63 @@ const CanvasExcali: React.FC<CanvasExcaliProps> = ({
       )
     },
     [excalidrawAPI]
+  )
+
+  const addSvgToExcalidraw = useCallback(
+    async (svgMarkup: string) => {
+      if (!excalidrawAPI) return
+
+      const { width, height } = getSvgDisplaySize(svgMarkup)
+      const appState = excalidrawAPI.getAppState()
+      const container = document.querySelector('.excalidraw')
+      const rect = container?.getBoundingClientRect()
+      const center = rect
+        ? viewportCoordsToSceneCoords(
+            {
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2,
+            },
+            {
+              zoom: appState.zoom,
+              offsetLeft: appState.offsetLeft,
+              offsetTop: appState.offsetTop,
+              scrollX: appState.scrollX,
+              scrollY: appState.scrollY,
+            }
+          )
+        : { x: 0, y: 0 }
+      const fileId = `svg-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}` as FileId
+      const file = new File([svgMarkup], `${fileId}.svg`, {
+        type: 'image/svg+xml',
+      })
+      const dataURL = await getDataURL(file)
+      const [element] = convertToExcalidrawElements(
+        [
+          {
+            type: 'image',
+            x: center.x - width / 2,
+            y: center.y - height / 2,
+            width,
+            height,
+            fileId,
+            status: 'saved',
+            scale: [1, 1],
+            crop: null,
+          },
+        ],
+        { regenerateIds: true }
+      ) as ExcalidrawImageElement[]
+
+      await addImageToExcalidraw(element, {
+        id: fileId,
+        dataURL,
+        mimeType: file.type as BinaryFileData['mimeType'],
+        created: Date.now(),
+      })
+    },
+    [addImageToExcalidraw, excalidrawAPI]
   )
 
   const addVideoEmbed = useCallback(
@@ -487,6 +762,30 @@ const CanvasExcali: React.FC<CanvasExcaliProps> = ({
       eventBus.off('Socket::Session::VideoGenerated', handleVideoGenerated)
     }
   }, [handleImageGenerated, handleVideoGenerated])
+
+  useEffect(() => {
+    const handleSvgPaste = (event: ClipboardEvent) => {
+      if (!excalidrawAPI || !event.clipboardData) return
+      if (isEditablePasteTarget(event.target)) return
+      if (!clipboardMightContainSvg(event.clipboardData)) return
+
+      event.preventDefault()
+      void readSvgFromClipboard(event.clipboardData)
+        .then((svgMarkup) => {
+          if (svgMarkup) {
+            void addSvgToExcalidraw(svgMarkup)
+          }
+        })
+        .catch((error) => {
+          console.warn('Failed to paste SVG into canvas:', error)
+        })
+    }
+
+    window.addEventListener('paste', handleSvgPaste)
+    return () => {
+      window.removeEventListener('paste', handleSvgPaste)
+    }
+  }, [addSvgToExcalidraw, excalidrawAPI])
 
   useEffect(() => {
     const handleXiaolouSaveRequest = (event: MessageEvent) => {

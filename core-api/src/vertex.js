@@ -113,6 +113,48 @@ function getVertexGcsBucket() {
   return (process.env.VERTEX_GCS_BUCKET || "").replace(/\/$/, "");
 }
 
+const VERTEX_PROMPT_POLICY_REJECTION_CODE = "PROMPT_REJECTED_BY_PROVIDER";
+
+function extractVertexSupportCode(message) {
+  const match = String(message || "").match(/Support codes?:\s*([A-Za-z0-9_-]+)/i);
+  return match ? match[1] : "";
+}
+
+function isVertexPromptPolicyRejection(message) {
+  const text = String(message || "").toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes("prompt could not be submitted") ||
+    (text.includes("sensitive words") && text.includes("responsible ai")) ||
+    (text.includes("responsible ai") && (text.includes("violat") || text.includes("allowlisting")))
+  );
+}
+
+function toVertexPromptPolicyError(message, details = {}) {
+  const providerMessage = String(message || "").trim();
+  const supportCode = extractVertexSupportCode(providerMessage);
+  const userMessage = [
+    "Google Vertex Veo refused this prompt before generation because it matched Google's Responsible AI safety policy.",
+    "Please rephrase the prompt with more neutral wording and try again.",
+    supportCode ? `Support code: ${supportCode}` : "",
+  ].filter(Boolean).join(" ");
+
+  const wrapped = new Error(userMessage);
+  wrapped.name = "VertexPromptRejectedError";
+  wrapped.code = VERTEX_PROMPT_POLICY_REJECTION_CODE;
+  wrapped.failureReason = VERTEX_PROMPT_POLICY_REJECTION_CODE;
+  wrapped.status = Number(details.status || 400);
+  wrapped.statusCode = wrapped.status;
+  wrapped.provider = "google-vertex";
+  wrapped.providerMessage = providerMessage;
+  wrapped.supportCode = supportCode || null;
+  wrapped.userMessage = userMessage;
+  wrapped.isProviderPolicyRejection = true;
+  if (details.providerCode) wrapped.providerCode = details.providerCode;
+  if (details.cause) wrapped.cause = details.cause;
+  return wrapped;
+}
+
 function unwrapVertexApiError(error) {
   const rawMessage =
     typeof error?.message === "string" && error.message.trim()
@@ -124,6 +166,9 @@ function unwrapVertexApiError(error) {
   if (!Number.isFinite(status)) status = 0;
 
   let code = typeof error?.code === "string" ? error.code.trim() : "";
+  if (!code && typeof error?.status === "string" && error.status.trim()) {
+    code = error.status.trim();
+  }
   let message = rawMessage || "Vertex request failed";
 
   if (rawMessage.startsWith("{")) {
@@ -162,6 +207,14 @@ function unwrapVertexApiError(error) {
 
 function toVertexApiError(error) {
   const normalized = unwrapVertexApiError(error);
+  if (isVertexPromptPolicyRejection(normalized.message)) {
+    return toVertexPromptPolicyError(normalized.message, {
+      status: normalized.status,
+      providerCode: normalized.code,
+      cause: error,
+    });
+  }
+
   const wrapped = new Error(normalized.message || "Vertex request failed");
 
   wrapped.name =
@@ -573,7 +626,12 @@ async function startVertexVeoTask({
 
   const body = await resp.text();
   if (!resp.ok) {
-    throw new Error(`Vertex Veo operation start failed (${resp.status}): ${body.slice(0, 800)}`);
+    const normalizedError = toVertexApiError({ message: body, status: resp.status });
+    if (normalizedError.code === VERTEX_PROMPT_POLICY_REJECTION_CODE) {
+      throw normalizedError;
+    }
+    normalizedError.message = `Vertex Veo operation start failed (${resp.status}): ${normalizedError.message || body.slice(0, 800)}`;
+    throw normalizedError;
   }
 
   const data = JSON.parse(body);
@@ -636,7 +694,12 @@ async function pollVertexVeoTask(operationName) {
   const body = await resp.text();
 
   if (!resp.ok) {
-    throw new Error(`Vertex Veo poll failed (${resp.status}): ${body.slice(0, 400)}`);
+    const normalizedError = toVertexApiError({ message: body, status: resp.status });
+    if (normalizedError.code === VERTEX_PROMPT_POLICY_REJECTION_CODE) {
+      throw normalizedError;
+    }
+    normalizedError.message = `Vertex Veo poll failed (${resp.status}): ${normalizedError.message || body.slice(0, 400)}`;
+    throw normalizedError;
   }
 
   const data = JSON.parse(body);
@@ -646,8 +709,7 @@ async function pollVertexVeoTask(operationName) {
   }
 
   if (data.error) {
-    const errMsg = data.error?.message || JSON.stringify(data.error);
-    return { done: true, error: errMsg };
+    return { done: true, error: toVertexApiError(data.error) };
   }
 
   // Extract GCS URI — handle both response shapes from the API
@@ -747,7 +809,11 @@ async function waitForVertexVeoOperation(operationName, opts = {}) {
 
     if (result.done) {
       if (result.error) {
-        throw new Error(`Vertex Veo failed: ${result.error}`);
+        if (result.error instanceof Error) {
+          throw result.error;
+        }
+        const normalizedError = toVertexApiError(new Error(`Vertex Veo failed: ${result.error}`));
+        throw normalizedError;
       }
       return result;
     }

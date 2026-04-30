@@ -419,6 +419,7 @@ export default function VideoReplace() {
       const result = await importVideoReplaceJob({
         video_url: asset.url,
         original_filename: asset.name,
+        project_id: currentProjectId,
       });
       if (resetVersionRef.current !== requestVersion) return;
       const now = new Date().toISOString();

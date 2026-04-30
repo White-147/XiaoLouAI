@@ -423,44 +423,6 @@ export type WalletLedgerEntry = {
   createdAt: string;
 };
 
-export type CreditUsageMode = "personal" | "organization";
-export type CreditUsageSubjectType = "user" | "organization" | "platform";
-
-export type CreditUsageSubject = {
-  type: CreditUsageSubjectType;
-  id: string | null;
-  label: string;
-  detail?: string | null;
-  role?: string | null;
-};
-
-export type CreditUsageSeriesPoint = {
-  bucketStart: string;
-  bucketLabel: string;
-  consumedCredits: number;
-  refundedCredits: number;
-};
-
-export type CreditUsageStats = {
-  subject: CreditUsageSubject;
-  mode: CreditUsageMode | "admin" | null;
-  windowDays: number;
-  bucket: "day";
-  wallets: Wallet[];
-  summary: {
-    consumedCredits: number;
-    todayConsumedCredits: number;
-    refundedCredits: number;
-    pendingFrozenCredits: number;
-    availableCredits: number;
-    frozenCredits: number;
-    recentTaskCount: number;
-    lastActivityAt: string | null;
-  };
-  series: CreditUsageSeriesPoint[];
-  recentEntries: WalletLedgerEntry[];
-};
-
 export type CreditQuote = {
   actionCode: string;
   label: string;
@@ -853,7 +815,7 @@ export class ApiRequestError extends Error {
     super(message);
     this.name = "ApiRequestError";
     this.code = options?.code || "API_REQUEST_FAILED";
-    this.status = options?.status ?? 500;
+    this.status = options?.status || 500;
   }
 }
 
@@ -1061,18 +1023,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      headers,
-    });
-  } catch (error) {
-    throw new ApiRequestError("无法连接到本地创作服务，请确认 core-api 正在运行后重试。", {
-      code: "NETWORK_ERROR",
-      status: 0,
-    });
-  }
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
 
   const responseText = await response.text();
   let payload: ApiEnvelope<T> | null = null;
@@ -1221,24 +1175,6 @@ export async function getCreateVideoCapabilities(
   return request<MediaCapabilitiesResponse>(`/api/create/videos/capabilities?mode=${encodeURIComponent(mode)}`);
 }
 
-function appendCreditQuoteInput(search: URLSearchParams, input?: CreditQuoteRequestInput) {
-  if (input?.projectId) search.set("projectId", input.projectId);
-  if (input?.sourceText) search.set("sourceText", input.sourceText);
-  if (input?.text) search.set("text", input.text);
-  if (input?.count) search.set("count", String(input.count));
-  if (input?.shotCount) search.set("shotCount", String(input.shotCount));
-  if (input?.storyboardId) search.set("storyboardId", input.storyboardId);
-  if (input?.model) search.set("model", input.model);
-  if (input?.aspectRatio) search.set("aspectRatio", input.aspectRatio);
-  if (input?.resolution) search.set("resolution", input.resolution);
-}
-
-export async function getCreateCreditQuote(actionCode: string, input?: CreditQuoteRequestInput) {
-  const search = new URLSearchParams({ action: actionCode });
-  appendCreditQuoteInput(search, input);
-  return request<CreditQuote>(`/api/create/credit-quote?${search.toString()}`);
-}
-
 export async function generateCreateVideos(input: {
   projectId?: string;
   assetSyncMode?: "auto" | "manual";
@@ -1252,7 +1188,7 @@ export async function generateCreateVideos(input: {
   referenceImageUrl?: string;
   firstFrameUrl?: string;
   lastFrameUrl?: string;
-  videoMode?: VideoGenerationMode;
+  videoMode?: VideoGenerationMode | "video_edit" | "motion_control" | "video_extend";
   multiReferenceImages?: VideoMultiReferenceImages;
   referenceVideoUrls?: string[];
   referenceAudioUrls?: string[];
@@ -1463,6 +1399,28 @@ export async function autoGenerateStoryboards(
   });
 }
 
+function appendCreditQuoteInput(search: URLSearchParams, input?: CreditQuoteRequestInput) {
+  if (input?.projectId) search.set("projectId", input.projectId);
+  if (input?.sourceText) search.set("sourceText", input.sourceText);
+  if (input?.text) search.set("text", input.text);
+  if (input?.count) search.set("count", String(input.count));
+  if (input?.shotCount) search.set("shotCount", String(input.shotCount));
+  if (input?.storyboardId) search.set("storyboardId", input.storyboardId);
+  if (input?.model) search.set("model", input.model);
+  if (input?.aspectRatio) search.set("aspectRatio", input.aspectRatio);
+  if (input?.resolution) search.set("resolution", input.resolution);
+}
+
+export async function getCreateCreditQuote(actionCode: string, input?: CreditQuoteRequestInput) {
+  if (input?.projectId) {
+    return getProjectCreditQuote(input.projectId, actionCode, input);
+  }
+
+  const search = new URLSearchParams({ action: actionCode });
+  appendCreditQuoteInput(search, input);
+  return request<CreditQuote>(`/api/create/credit-quote?${search.toString()}`);
+}
+
 export async function getProjectCreditQuote(
   projectId: string,
   actionCode: string,
@@ -1615,31 +1573,6 @@ export async function listWalletLedger(walletId: string) {
     }
     throw error;
   }
-}
-
-export async function getWalletUsageStats(mode: CreditUsageMode = "personal") {
-  const search = new URLSearchParams({ mode });
-  return request<CreditUsageStats>(`/api/wallet/usage-stats?${search.toString()}`);
-}
-
-export async function searchCreditUsageSubjects(search?: string) {
-  const params = new URLSearchParams();
-  if (search?.trim()) params.set("search", search.trim());
-  const query = params.toString();
-  return request<{ items: CreditUsageSubject[] }>(
-    `/api/admin/credit-usage-subjects${query ? `?${query}` : ""}`,
-  );
-}
-
-export async function getAdminCreditUsageStats(input: {
-  subjectType?: CreditUsageSubjectType;
-  subjectId?: string | null;
-}) {
-  const params = new URLSearchParams({
-    subjectType: input.subjectType || "platform",
-  });
-  if (input.subjectId) params.set("subjectId", input.subjectId);
-  return request<CreditUsageStats>(`/api/admin/credit-usage-stats?${params.toString()}`);
 }
 
 export async function createWalletRechargeOrder(input: CreateWalletRechargeOrderInput) {
@@ -2346,6 +2279,9 @@ export type VideoReplaceJobStatus = {
   queue_position?: number | null;
   created_at: string;
   updated_at: string;
+  actor_id?: string | null;
+  project_id?: string | null;
+  project_asset_id?: string | null;
   source_video_url: string | null;
   thumbnail_url: string | null;
   meta: VideoReplaceMeta | null;
@@ -2445,6 +2381,7 @@ export async function uploadVideoReplaceSource(file: File) {
 export async function importVideoReplaceJob(input: {
   video_url: string;
   original_filename?: string;
+  project_id?: string | null;
 }) {
   return videoReplaceRequest<VideoReplaceUploadResult>("/jobs", {
     method: "POST",
@@ -2510,9 +2447,11 @@ export async function getVideoReplaceJob(jobId: string) {
   );
 }
 
-export async function listVideoReplaceJobs(limit = 30) {
+export async function listVideoReplaceJobs(limit = 30, projectId?: string | null) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (projectId) params.set("project_id", projectId);
   return videoReplaceRequest<{ items: VideoReplaceJobStatus[] }>(
-    `/jobs?limit=${encodeURIComponent(String(limit))}`,
+    `/jobs?${params.toString()}`,
   );
 }
 
@@ -2534,5 +2473,6 @@ export async function cancelVideoReplaceJob(jobId: string) {
 }
 
 export function videoReplaceStreamUrl(jobId: string): string {
-  return `${VIDEO_REPLACE_BASE}/jobs/${encodeURIComponent(jobId)}/stream`;
+  const params = new URLSearchParams({ actorId: getCurrentActorId() });
+  return `${VIDEO_REPLACE_BASE}/jobs/${encodeURIComponent(jobId)}/stream?${params.toString()}`;
 }

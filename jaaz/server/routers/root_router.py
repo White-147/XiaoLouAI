@@ -149,5 +149,7 @@ async def list_chat_sessions():
 
 
 @router.get("/chat_session/{session_id}")
-async def get_chat_session(session_id: str):
+async def get_chat_session(session_id: str, limit: int = 0, before_id: int | None = None):
+    if limit and limit > 0:
+        return await db_service.get_chat_history_page(session_id, limit, before_id)
     return await db_service.get_chat_history(session_id)

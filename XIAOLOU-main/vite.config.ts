@@ -6,8 +6,7 @@ import { defineConfig, loadEnv } from 'vite';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   const apiProxyTarget = env.VITE_CORE_API_PROXY_TARGET || 'http://127.0.0.1:4100';
-  const jaazProxyTarget = env.VITE_JAAZ_DEV_PROXY_TARGET || 'http://localhost:5174';
-  const jaazApiProxyTarget = env.VITE_JAAZ_API_PROXY_TARGET || 'http://127.0.0.1:57988';
+  const jaazGatewayProxyTarget = env.VITE_JAAZ_GATEWAY_PROXY_TARGET || apiProxyTarget;
   const canvasApiProxyTarget = env.VITE_CANVAS_API_PROXY_TARGET || env.VITE_TWITCANVA_API_PROXY_TARGET || apiProxyTarget;
 
   return {
@@ -71,17 +70,16 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
         '/jaaz-api': {
-          target: jaazApiProxyTarget,
+          target: jaazGatewayProxyTarget,
           changeOrigin: true,
-          rewrite: (requestPath) => requestPath.replace(/^\/jaaz-api(?=\/|$)/, '') || '/',
         },
         '/jaaz': {
-          target: jaazProxyTarget,
+          target: jaazGatewayProxyTarget,
           changeOrigin: true,
           ws: true,
         },
         '/socket.io': {
-          target: jaazApiProxyTarget,
+          target: jaazGatewayProxyTarget,
           changeOrigin: true,
           ws: true,
         },

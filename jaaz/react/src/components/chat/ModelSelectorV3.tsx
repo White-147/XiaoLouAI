@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, Component } from 'lucide-react'
 import {
@@ -24,6 +24,7 @@ interface ModelSelectorV3Props {
 }
 
 const getToolKey = (tool: ToolInfo) => `${tool.provider}:${tool.id}`
+const AUTO_MODEL_PREFERENCE_KEY = 'jaaz_auto_model_preference'
 
 const areSameTools = (left: ToolInfo[], right: ToolInfo[]) => {
   if (left.length !== right.length) return false
@@ -49,13 +50,14 @@ const ModelSelectorV3: React.FC<ModelSelectorV3Props> = ({
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const { t } = useTranslation()
 
-  // 初始化时判断auto模式：如果所有工具都被选中，则为auto模式
-  const initialAutoMode = areSameTools(selectedTools, getSafeDefaultTools(allTools))
-  const [autoMode, setAutoMode] = useState(initialAutoMode)
-
-  useEffect(() => {
-    setAutoMode(areSameTools(selectedTools, getSafeDefaultTools(allTools)))
-  }, [allTools, selectedTools])
+  const getInitialAutoMode = () => {
+    const storedValue = window.localStorage.getItem(AUTO_MODEL_PREFERENCE_KEY)
+    if (storedValue === 'false') return false
+    if (storedValue === 'true') return true
+    return areSameTools(selectedTools, getSafeDefaultTools(allTools))
+  }
+  // Auto means the Agent can choose among the currently selected tool pool.
+  const [autoMode, setAutoMode] = useState(getInitialAutoMode)
 
   // Group models by provider
   const groupModelsByProvider = (models: typeof allTools) => {
@@ -130,9 +132,6 @@ const ModelSelectorV3: React.FC<ModelSelectorV3Props> = ({
         )
       )
 
-      // 更新auto模式状态
-      const isAuto = areSameTools(newSelected, getSafeDefaultTools(allTools))
-      setAutoMode(isAuto)
     }
     onModelToggle?.(modelKey, checked)
   }
@@ -147,26 +146,9 @@ const ModelSelectorV3: React.FC<ModelSelectorV3Props> = ({
         onModelToggle?.(modelKey, true)
       }
     } else {
-      // Image and video models
-      if (autoMode) {
-        // 如果当前是auto模式，切换到非auto模式并只选中点击的模型
-        setAutoMode(false)
-        const tool = allTools.find((m) => m.provider + ':' + m.id === modelKey)
-        if (tool) {
-          setSelectedTools([tool])
-          localStorage.setItem(
-            'disabled_tool_ids',
-            JSON.stringify(
-              allTools.filter((t) => t.id !== tool.id).map((t) => t.id)
-            )
-          )
-          onModelToggle?.(modelKey, true)
-        }
-      } else {
-        // 非auto模式，切换当前模型的选中状态
-        const isSelected = selectedTools.some(t => t.provider + ':' + t.id === modelKey)
-        handleModelToggle(modelKey, !isSelected)
-      }
+      // Image and video model pool: auto mode still chooses only among these selected tools.
+      const isSelected = selectedTools.some(t => t.provider + ':' + t.id === modelKey)
+      handleModelToggle(modelKey, !isSelected)
     }
   }
 
@@ -176,18 +158,8 @@ const ModelSelectorV3: React.FC<ModelSelectorV3Props> = ({
       return
     }
 
-    if (enabled) {
-      // Keep Xiaolou defaults small to avoid oversized tool schema payloads.
-      const selectedToolsList = getSafeDefaultTools(allTools)
-      setSelectedTools(selectedToolsList)
-      localStorage.setItem(
-        'disabled_tool_ids',
-        JSON.stringify(
-          allTools.filter((t) => !selectedToolsList.includes(t)).map((t) => t.id)
-        )
-      )
-    } else {
-      // Fall back to the same safe defaults when leaving auto mode.
+    if (enabled && selectedTools.length === 0) {
+      // Auto selection needs a user pool. Seed it with Xiaolou's safe defaults only when empty.
       const selectedToolsList: ToolInfo[] = getSafeDefaultTools(allTools)
 
       if (selectedToolsList.length > 0) {
@@ -201,6 +173,7 @@ const ModelSelectorV3: React.FC<ModelSelectorV3Props> = ({
       }
     }
     setAutoMode(enabled)
+    localStorage.setItem(AUTO_MODEL_PREFERENCE_KEY, String(enabled))
     onAutoToggle?.(enabled)
   }
 
@@ -331,8 +304,7 @@ const ModelSelectorV3: React.FC<ModelSelectorV3Props> = ({
                         </div>
                         <Checkbox
                           checked={isModelSelected(modelKey)}
-                          className={`ml-4 ${autoMode && activeTab !== 'text' ? 'opacity-50' : ''}`}
-                          disabled={autoMode && activeTab !== 'text'}
+                          className="ml-4"
                         />
                       </div>
                     )

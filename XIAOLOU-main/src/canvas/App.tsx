@@ -39,6 +39,7 @@ import { useAutoSave } from './hooks/useAutoSave';
 import { useGenerationRecovery } from './hooks/useGenerationRecovery';
 import { useVideoFrameExtraction } from './hooks/useVideoFrameExtraction';
 import { extractVideoLastFrame } from './utils/videoHelpers';
+import { getNodeRect } from './utils/nodeGeometry';
 import { generateUUID } from './utils/secureContextPolyfills';
 import { SelectionBoundingBox } from './components/canvas/SelectionBoundingBox';
 import { DEFAULT_XIAOLOU_IMAGE_TO_VIDEO_MODEL_ID } from './config/canvasVideoModels';
@@ -70,6 +71,11 @@ import {
 import { getXiaolouCanvasDraftStorageKey } from './integrations/xiaolouCanvasSession';
 import { canUseXiaolouAssetBridge, createXiaolouAsset } from './integrations/xiaolouAssetBridge';
 import { sanitizeCanvasNodesForPersistence } from './utils/canvasPersistence';
+import {
+  buildCanvasProjectSnapshot,
+  isRemoteCanvasVersionNewer,
+  mergeCanvasProjectSnapshots,
+} from './utils/canvasProjectMerge';
 import {
   hasCanvasHostServices,
   getCanvasHostServices,
@@ -642,6 +648,8 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
   const latestNodesRef = React.useRef(nodes);
   const latestGroupsRef = React.useRef(groups);
   const latestCanvasTitleRef = React.useRef(canvasTitle);
+  const latestViewportRef = React.useRef(viewport);
+  const latestIsDirtyRef = React.useRef(isDirty);
 
   // Mark as dirty when nodes or title change
   const isInitialMount = React.useRef(true);
@@ -797,7 +805,9 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
     latestNodesRef.current = nodes;
     latestGroupsRef.current = groups;
     latestCanvasTitleRef.current = canvasTitle;
-  }, [canvasTitle, groups, nodes]);
+    latestViewportRef.current = viewport;
+    latestIsDirtyRef.current = isDirty;
+  }, [canvasTitle, groups, isDirty, nodes, viewport]);
 
   // ── Project / theme sync ──────────────────────────────────────────────────
   //
@@ -912,16 +922,127 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
     );
   }, [queryCanvasProjectId, setCanvasTitle, setEditingTitleValue, setNodes, setGroups, setViewport, setSelectedNodeIds]);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || window.parent !== window) {
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const syncRemoteProject = async () => {
+      if (cancelled || inFlight) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+
+      const services = getCanvasHostServices();
+      if (!services?.loadProject || !services.getCanvasProjectVersion) return;
+
+      const baseVersion = services.getCanvasProjectVersion();
+      if (!baseVersion?.id) return;
+      if (queryCanvasProjectId && baseVersion.id !== queryCanvasProjectId) return;
+      const activeProjectId = baseVersion.id;
+
+      inFlight = true;
+      try {
+        const remoteProject = await services.loadProject(activeProjectId);
+        if (cancelled) return;
+        if (!isRemoteCanvasVersionNewer(remoteProject.updatedAt, baseVersion.updatedAt)) return;
+
+        const baseCanvasData = baseVersion.canvasData;
+        const remoteCanvasData = remoteProject.canvasData;
+        const baseSnapshot = buildCanvasProjectSnapshot({
+          title: baseVersion.title || remoteProject.title,
+          nodes: baseCanvasData?.nodes || [],
+          groups: baseCanvasData?.groups || [],
+          viewport: baseCanvasData?.viewport,
+        });
+        const localSnapshot = buildCanvasProjectSnapshot({
+          title: latestCanvasTitleRef.current,
+          nodes: latestNodesRef.current,
+          groups: latestGroupsRef.current,
+          viewport: latestViewportRef.current,
+        });
+        const remoteSnapshot = buildCanvasProjectSnapshot({
+          title: remoteProject.title,
+          nodes: remoteCanvasData?.nodes || [],
+          groups: remoteCanvasData?.groups || [],
+          viewport: remoteCanvasData?.viewport,
+        });
+        const hasLocalChanges = latestIsDirtyRef.current && hasMeaningfulCanvasContent({
+          nodes: latestNodesRef.current,
+          groups: latestGroupsRef.current,
+          title: latestCanvasTitleRef.current,
+        });
+        const nextSnapshot = hasLocalChanges
+          ? mergeCanvasProjectSnapshots(baseSnapshot, localSnapshot, remoteSnapshot)
+          : remoteSnapshot;
+
+        ignoreNextChange.current = !hasLocalChanges;
+        pendingContentViewportSafetyCheckRef.current = true;
+        setCanvasTitle(nextSnapshot.title || DEFAULT_CANVAS_TITLE);
+        setEditingTitleValue(nextSnapshot.title || DEFAULT_CANVAS_TITLE);
+        setNodes(sanitizeCanvasNodesForPersistence(nextSnapshot.nodes));
+        setGroups(nextSnapshot.groups);
+        setViewport(nextSnapshot.viewport);
+        setSelectedNodeIds([]);
+        setIsDirty(hasLocalChanges);
+        hydratedDraftMetaRef.current = {
+          canvasProjectId: remoteProject.id,
+          hasUnsavedChanges: hasLocalChanges,
+          savedAt: remoteProject.updatedAt || null,
+        };
+        services.adoptCanvasProjectVersion?.({
+          id: remoteProject.id,
+          title: remoteProject.title,
+          updatedAt: remoteProject.updatedAt,
+          canvasData: remoteProject.canvasData,
+        });
+        console.log('[Canvas] Remote project version merged:', remoteProject.id);
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[Canvas] Remote project sync failed:', error);
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void syncRemoteProject();
+    }, 15000);
+    const initialTimer = window.setTimeout(() => {
+      void syncRemoteProject();
+    }, 5000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void syncRemoteProject();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.clearTimeout(initialTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [queryCanvasProjectId, setCanvasTitle, setEditingTitleValue, setGroups, setNodes, setSelectedNodeIds, setViewport]);
+
   const { handleGenerate: handleGenerateSingle } = useGeneration({
     nodes,
     updateNode,
     generationAccess,
   });
 
+  // Keep a ref to handleGenerate so setTimeout callbacks can access the latest version
+  const handleGenerateRef = React.useRef<(id: string) => void>(() => undefined);
+
   const handleGenerate = React.useCallback((id: string) => {
     const sourceNode = nodes.find((node) => node.id === id);
     if (!sourceNode) return;
 
+    const isPlainImageNode = sourceNode.type === NodeType.IMAGE;
+    const isPlainVideoNode = sourceNode.type === NodeType.VIDEO;
     const isImageGenerationNode =
       sourceNode.type === NodeType.IMAGE || sourceNode.type === NodeType.IMAGE_EDITOR;
     const batchCount = isImageGenerationNode
@@ -929,8 +1050,6 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
       : 1;
 
     if (
-      !isImageGenerationNode ||
-      batchCount <= 1 ||
       sourceNode.status === NodeStatus.LOADING ||
       (generationAccess && !generationAccess.canGenerate)
     ) {
@@ -945,38 +1064,97 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
       }
       return count;
     }, 0);
+    const hasPromptSource = Boolean(sourceNode.prompt?.trim()) || textPromptCount > 0;
+    const isPromptOptionalKlingFrameToFrameVideo =
+      isPlainVideoNode &&
+      (sourceNode.videoModel || sourceNode.model || '').startsWith('kling-') &&
+      sourceNode.videoMode === 'frame-to-frame' &&
+      (sourceNode.parentIds?.length || 0) >= 2;
 
-    if (!sourceNode.prompt?.trim() && textPromptCount === 0) {
+    const sourceRect = getNodeRect(sourceNode);
+    const siblingX = sourceRect.right + 100;
+    const siblingYStep = Math.max(sourceRect.height + 80, 500);
+    const createGenerationClone = (
+      index: number,
+      totalCount: number,
+      parentIds: string[],
+    ): NodeData => {
+      const totalHeight = (totalCount - 1) * siblingYStep;
+      const startYOffset = -totalHeight / 2;
+
+      return {
+        ...sourceNode,
+        id: generateUUID(),
+        x: siblingX,
+        y: sourceNode.y + startYOffset + (index * siblingYStep),
+        status: NodeStatus.IDLE,
+        loadingKind: undefined,
+        resultUrl: undefined,
+        resultAspectRatio: undefined,
+        errorMessage: undefined,
+        taskId: undefined,
+        generationStartTime: undefined,
+        lastFrame: undefined,
+        angleMode: false,
+        batchCount: 1,
+        parentIds: [...parentIds],
+        frameInputs: sourceNode.frameInputs?.map((input) => ({ ...input })),
+        characterReferenceUrls: sourceNode.characterReferenceUrls
+          ? [...sourceNode.characterReferenceUrls]
+          : undefined,
+      };
+    };
+
+    const hasGeneratedPlainMediaResult =
+      (isPlainImageNode || isPlainVideoNode) &&
+      typeof sourceNode.resultUrl === 'string' &&
+      sourceNode.resultUrl.trim().length > 0;
+
+    if (hasGeneratedPlainMediaResult) {
+      if (!hasPromptSource && !isPromptOptionalKlingFrameToFrameVideo) {
+        void handleGenerateSingle(id);
+        return;
+      }
+
+      const cloneCount = isPlainImageNode ? batchCount : 1;
+      const clonedNodes = Array.from({ length: cloneCount }, (_, index) =>
+        createGenerationClone(
+          index,
+          cloneCount,
+          (sourceNode.parentIds || []).filter((parentId) => parentId !== sourceNode.id),
+        ),
+      );
+
+      setNodes((prev) => [...prev, ...clonedNodes]);
+      setSelectedNodeIds(clonedNodes.map((node) => node.id));
+
+      clonedNodes.forEach((node, index) => {
+        window.setTimeout(() => {
+          void handleGenerateRef.current(node.id);
+        }, 150 + (index * 350));
+      });
+      return;
+    }
+
+    if (!isImageGenerationNode || batchCount <= 1) {
       void handleGenerateSingle(id);
       return;
     }
 
-    const startX = sourceNode.x + 360;
-    const yStep = 500;
+    if (!hasPromptSource) {
+      void handleGenerateSingle(id);
+      return;
+    }
+
     const siblingCount = batchCount - 1;
-    const totalHeight = (siblingCount - 1) * yStep;
-    const startYOffset = -totalHeight / 2;
     const extraParentIds =
       sourceNode.resultUrl && !sourceNode.parentIds?.includes(sourceNode.id)
         ? [sourceNode.id, ...(sourceNode.parentIds || [])]
         : [...(sourceNode.parentIds || [])];
 
-    const clonedNodes: NodeData[] = Array.from({ length: siblingCount }, (_, index) => ({
-      ...sourceNode,
-      id: generateUUID(),
-      x: startX,
-      y: sourceNode.y + startYOffset + (index * yStep),
-      status: NodeStatus.IDLE,
-      resultUrl: undefined,
-      resultAspectRatio: undefined,
-      errorMessage: undefined,
-      taskId: undefined,
-      generationStartTime: undefined,
-      lastFrame: undefined,
-      angleMode: false,
-      batchCount: 1,
-      parentIds: extraParentIds,
-    }));
+    const clonedNodes: NodeData[] = Array.from({ length: siblingCount }, (_, index) =>
+      createGenerationClone(index, siblingCount, extraParentIds),
+    );
 
     if (clonedNodes.length > 0) {
       setNodes((prev) => [...prev, ...clonedNodes]);
@@ -986,13 +1164,11 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
 
     clonedNodes.forEach((node, index) => {
       window.setTimeout(() => {
-        void handleGenerateSingle(node.id);
+        void handleGenerateRef.current(node.id);
       }, 150 + (index * 350));
     });
-  }, [generationAccess, handleGenerateSingle, nodes, setNodes]);
+  }, [generationAccess, handleGenerateSingle, nodes, setNodes, setSelectedNodeIds]);
 
-  // Keep a ref to handleGenerate so setTimeout callbacks can access the latest version
-  const handleGenerateRef = React.useRef(handleGenerate);
   React.useEffect(() => {
     handleGenerateRef.current = handleGenerate;
   }, [handleGenerate]);

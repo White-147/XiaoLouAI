@@ -62,6 +62,40 @@ function apiError(statusCode, code, message) {
   return error;
 }
 
+function buildTaskFailurePatch(error) {
+  const outputSummary =
+    String(error?.userMessage || error?.message || "provider call failed").trim() ||
+    "provider call failed";
+  const failureReason =
+    String(error?.failureReason || error?.code || error?.name || "PROVIDER_CALL_FAILED").trim() ||
+    "PROVIDER_CALL_FAILED";
+
+  const patch = {
+    outputSummary,
+    failureReason,
+    error: outputSummary,
+  };
+
+  const providerStatusCode = Number(error?.statusCode ?? error?.status);
+  if (Number.isFinite(providerStatusCode) && providerStatusCode > 0) {
+    patch.providerStatusCode = providerStatusCode;
+  }
+  if (error?.provider) {
+    patch.provider = String(error.provider);
+  }
+  if (error?.providerCode) {
+    patch.providerCode = String(error.providerCode);
+  }
+  if (error?.supportCode) {
+    patch.providerSupportCode = String(error.supportCode);
+  }
+  if (error?.providerMessage) {
+    patch.providerMessage = String(error.providerMessage).slice(0, 1000);
+  }
+
+  return patch;
+}
+
 function normalizeEmail(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return normalized || null;
@@ -552,7 +586,7 @@ const FIXED_CREATE_VIDEO_CAPABILITIES = {
       duration: "8s",
       aspectRatio: "16:9",
       resolution: "720p",
-      supportedDurations: ["8s"],
+      supportedDurations: ["4s", "6s", "8s"],
       supportedAspectRatios: ["16:9"],
       supportedResolutions: ["720p"],
     },
@@ -560,7 +594,7 @@ const FIXED_CREATE_VIDEO_CAPABILITIES = {
       duration: "8s",
       aspectRatio: "16:9",
       resolution: "720p",
-      supportedDurations: ["8s"],
+      supportedDurations: ["4s", "6s", "8s"],
       supportedAspectRatios: ["16:9"],
       supportedResolutions: ["720p"],
     },
@@ -1552,10 +1586,10 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
     inputModes: {
       multi_param: createVideoCapabilitySet({
         status: "stable",
-        supportedDurations: ["8s"],
+        supportedDurations: ["4s", "6s", "8s"],
         supportedAspectRatios: ["16:9", "9:16"],
         supportedResolutions: ["1080p", "720p"],
-        durationControl: "fixed",
+        durationControl: "selectable",
         aspectRatioControl: "selectable",
         resolutionControl: "selectable",
         defaultDuration: "8s",
@@ -1582,10 +1616,10 @@ const CREATE_VIDEO_MULTI_PARAM_MODELS = [
     inputModes: {
       multi_param: createVideoCapabilitySet({
         status: "stable",
-        supportedDurations: ["8s"],
+        supportedDurations: ["4s", "6s", "8s"],
         supportedAspectRatios: ["16:9", "9:16"],
         supportedResolutions: ["1080p", "720p"],
-        durationControl: "fixed",
+        durationControl: "selectable",
         aspectRatioControl: "selectable",
         resolutionControl: "selectable",
         defaultDuration: "8s",
@@ -6231,12 +6265,13 @@ class MockStore {
           outputSummary
         });
       } catch (error) {
+        const failurePatch = buildTaskFailurePatch(error);
         this.updateTask(taskId, {
           status: "failed",
           progressPercent: 100,
           currentStage: "failed",
           etaSeconds: 0,
-          outputSummary: error?.message || "provider call failed"
+          ...failurePatch
         });
       }
     }, 1600);
@@ -11437,12 +11472,13 @@ MockStore.prototype.scheduleTaskLifecycle = function scheduleTaskLifecycle(taskI
       this.refundTaskBilling(taskId, error?.message || "provider call failed");
       this.syncLegacyWalletState();
       const latestTask = this.state.tasks.find((item) => item.id === taskId);
+      const failurePatch = buildTaskFailurePatch(error);
       this.updateTask(taskId, {
         status: "failed",
         progressPercent: 100,
         currentStage: "failed",
         etaSeconds: 0,
-        outputSummary: error?.message || "provider call failed",
+        ...failurePatch,
         settledCredits: Number(latestTask?.settledCredits || 0),
         frozenCredits: Number(latestTask?.frozenCredits || 0),
         billingStatus: latestTask?.billingStatus || "refunded",

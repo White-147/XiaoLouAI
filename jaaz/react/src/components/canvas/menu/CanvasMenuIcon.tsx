@@ -2,6 +2,7 @@ import { ToolType as ExcalidrawToolType } from '@excalidraw/excalidraw/types'
 import {
   ArrowUpRight,
   Circle,
+  Eraser,
   Hand,
   Image,
   Link,
@@ -21,6 +22,7 @@ export type ToolType = Extract<
   | 'arrow'
   | 'line'
   | 'freedraw'
+  | 'eraser'
   | 'text'
   | 'image'
   | 'embeddable'
@@ -35,6 +37,7 @@ const icons: Record<ToolType, React.ComponentType<{ className?: string }>> = {
   arrow: ArrowUpRight,
   line: Minus,
   freedraw: Pencil,
+  eraser: Eraser,
   text: Type,
   image: Image,
   embeddable: Link,
@@ -48,6 +51,7 @@ export const toolShortcuts: Record<ToolType, string> = {
   arrow: 'A',
   line: 'L',
   freedraw: 'P',
+  eraser: 'E',
   text: 'T',
   image: '9',
   embeddable: '',

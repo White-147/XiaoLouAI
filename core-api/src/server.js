@@ -11,6 +11,7 @@ const {
   reconcileOnStartup: reconcileVideoReplaceOnStartup,
 } = require("./video-replace-native");
 const { collectNetworkAccessInfo } = require("./network-access");
+const { handleJaazGatewayRequest, handleJaazGatewayUpgrade } = require("./jaaz-gateway");
 const { startJaazKeepAlive } = require("./jaaz-services");
 
 async function dispatch(req, res, url, routes, store) {
@@ -106,6 +107,10 @@ function createServer() {
       return;
     }
 
+    if (await handleJaazGatewayRequest(req, res, url)) {
+      return;
+    }
+
     const handled = await dispatch(req, res, url, routes, store);
     if (!handled) {
       error(res, 404, "NOT_FOUND", "route not found");
@@ -116,6 +121,13 @@ function createServer() {
     if (typeof store.close === "function") {
       store.close();
     }
+  });
+
+  server.on("upgrade", (req, socket, head) => {
+    if (handleJaazGatewayUpgrade(req, socket, head)) {
+      return;
+    }
+    socket.destroy();
   });
 
   return server;
