@@ -1,0 +1,22 @@
+node_modules/
+venv/
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore all dist/ folders
+dist/
+# Allow react/dist/ by also un-ignoring the parent
+!react/
+!react/dist/
+
+build
+.DS_Store
+
+# User data
+user_data/
+
+.continue
+
+.env

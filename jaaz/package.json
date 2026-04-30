@@ -1,0 +1,104 @@
+{
+  "name": "jaaz",
+  "version": "1.0.30",
+  "description": "AI design agent local desktop app",
+  "author": "weixuanfu",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "cd react && npx vite build && cd .. && npm run start:electron",
+    "dev:react": "cd react && npm run dev",
+    "dev:electron": "cross-env NODE_ENV=development npx electron electron/main.js",
+    "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
+    "start:frontend": "cd frontend && npm run dev",
+    "start:electron": "npx electron electron/main.js",
+    "build:electron": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:ts": "cd electron && tsc",
+    "watch:ts": "cd electron && tsc --watch",
+    "clean:ts": "cd electron && rm -rf dist",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest --watch"
+  },
+  "publish": "always",
+  "build": {
+    "appId": "com.jaaz.app",
+    "productName": "Jaaz",
+    "publish": {
+      "provider": "github",
+      "releaseType": "draft"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json",
+      "assets/icons/*"
+    ],
+    "extraResources": [
+      {
+        "from": "server/dist/",
+        "to": "server/dist/"
+      },
+      {
+        "from": "react/dist/",
+        "to": "react/dist/"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "assets/icons/jaaz.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "gatekeeperAssess": false,
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "notarize": false
+    },
+    "afterSign": "scripts/notarize.js",
+    "win": {
+      "icon": "assets/icons/jaaz.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@electron/notarize": "^3.0.1",
+    "@types/electron": "^1.4.38",
+    "@types/node": "^20.19.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^35.1.0",
+    "electron-builder": "^24.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.1"
+  },
+  "dependencies": {
+    "@google/gemini-cli-core": "^0.1.9",
+    "7zip-min": "^2.1.0",
+    "electron-updater": "^6.6.2",
+    "got": "11.8.6",
+    "os-proxy-config": "^1.1.2",
+    "playwright": "^1.52.0",
+    "playwright-extra": "^4.3.6",
+    "playwright-extra-plugin-stealth": "^0.0.1"
+  }
+}

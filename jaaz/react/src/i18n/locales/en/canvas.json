@@ -1,0 +1,63 @@
+{
+  "title": "Canvas",
+  "rename": "Rename Canvas",
+  "delete": "Delete Canvas",
+  "share": "Share Canvas",
+  "export": "Export Canvas",
+  "exportImages": "Export",
+  "import": "Import Canvas",
+  "untitled": "Untitled",
+  "back": "Back",
+  "saveSnapshot": "Save Snapshot",
+  "loadSnapshot": "Load Snapshot",
+  "saved": "Saved ✅",
+  "messages": {
+    "canvasRenamed": "Canvas renamed successfully",
+    "canvasDeleted": "Canvas deleted successfully",
+    "canvasExported": "Canvas exported successfully",
+    "canvasImported": "Canvas imported successfully",
+    "failedToRename": "Failed to rename canvas",
+    "failedToDelete": "Failed to delete canvas",
+    "failedToCreateFile": "Failed to create file",
+    "nothingSelected": "No assets selected",
+    "exportingAssets": "Exporting assets...",
+    "failedToExportImages": "Failed to export images",
+    "gptImagePermissionRequired": "You must enable gpt-image-1 model permissions to use this feature!"
+  },
+  "deleteDialog": {
+    "title": "Delete Canvas",
+    "description": "Are you sure you want to delete this Canvas? This action cannot be undone.",
+    "cancel": "Cancel",
+    "delete": "Delete"
+  },
+  "tool": {
+    "hand": "Hand",
+    "selection": "Selection",
+    "rectangle": "Rectangle",
+    "ellipse": "Ellipse",
+    "text": "Text",
+    "image": "Image",
+    "shape": "Shape",
+    "arrow": "Arrow",
+    "line": "Line",
+    "zoomFit": "Zoom to fit"
+  },
+  "popbar": {
+    "addToChat": "Add to chat",
+    "magicGenerate": "✨ Magic Generate"
+  },
+  "myAssets": "My Assets",
+  "selectAFolder": "Select a folder",
+  "selectAFolderDescription": "Select a folder to view its images and videos",
+  "noMediaFiles": "No media files",
+  "noMediaFilesDescription": "No images or videos in this folder",
+  "mediaFiles": "media files",
+  "openInExplorer": "Open in system file browser",
+  "basicInfo": "Basic info",
+  "fileName": "File name",
+  "fileSize": "File size",
+  "modifiedTime": "Modified time",
+  "dimensions": "Dimensions",
+  "filePath": "File path",
+  "pngMetadata": "PNG Metadata"
+}

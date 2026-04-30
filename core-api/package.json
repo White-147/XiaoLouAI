@@ -1,0 +1,17 @@
+{
+  "name": "core-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "verify": "node scripts/verify.js",
+    "normalize:canvas-workflows": "node scripts/normalize_canvas_workflow_models.js --write"
+  },
+  "dependencies": {
+    "@google/genai": "^1.49.0",
+    "sharp": "^0.34.5",
+    "ws": "^8.20.0"
+  }
+}

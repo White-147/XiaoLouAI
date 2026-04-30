@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.local
+!.env.example
+data/
+weights/
+*.sqlite
+*.sqlite-journal
+.idea/
+.vscode/
+*.log
