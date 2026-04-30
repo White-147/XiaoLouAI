@@ -12,7 +12,7 @@ import { getAuthToken, useActorId } from "../../lib/actor-session";
 import { getCurrentProjectId } from "../../lib/session";
 import { useTheme, type AppTheme } from "../../lib/theme";
 
-const DEFAULT_JAAZ_AGENT_CANVAS_URL = "/jaaz/";
+const DEFAULT_JAAZ_AGENT_CANVAS_URL = import.meta.env.DEV ? "http://localhost:5174/jaaz/" : "/jaaz/";
 
 type XiaolouJaazAuthMessage = {
   type: "xiaolou:auth";
@@ -63,7 +63,9 @@ function appendEmbedParam(url: string) {
 
 function resolveJaazRootUrl() {
   const configured = String(import.meta.env.VITE_JAAZ_AGENT_CANVAS_URL || "").trim();
-  return appendEmbedParam(configured || DEFAULT_JAAZ_AGENT_CANVAS_URL);
+  const useDevDefault =
+    import.meta.env.DEV && (!configured || /^\/jaaz\/?/i.test(configured));
+  return appendEmbedParam(useDevDefault ? DEFAULT_JAAZ_AGENT_CANVAS_URL : configured);
 }
 
 function readRequestedCanvasProject(locationSearch = ""): AgentStudioCanvasProjectSyncInput | null {

@@ -361,8 +361,9 @@ function getYunwuPayloadError(payload) {
   return null;
 }
 
-function isRetryableAliyunFailure(statusCode, message = "") {
+function isRetryableAliyunFailure(statusCode, message = "", errorCode = "") {
   const normalizedMessage = String(message || "").toLowerCase();
+  const normalizedCode = String(errorCode || "").toLowerCase();
   if ([408, 409, 425, 429, 500, 502, 503, 504].includes(Number(statusCode))) {
     return true;
   }
@@ -370,7 +371,16 @@ function isRetryableAliyunFailure(statusCode, message = "") {
     normalizedMessage.includes("rate limit") ||
     normalizedMessage.includes("throttle") ||
     normalizedMessage.includes("too many requests") ||
-    normalizedMessage.includes("temporarily unavailable")
+    normalizedMessage.includes("temporarily unavailable") ||
+    normalizedMessage.includes("fetch failed") ||
+    normalizedMessage.includes("socket hang up") ||
+    normalizedMessage.includes("network") ||
+    normalizedMessage.includes("disconnected") ||
+    normalizedMessage.includes("timed out") ||
+    normalizedMessage.includes("tls") ||
+    ["econnreset", "etimedout", "econnrefused", "ehostunreach", "enotfound", "und_err_connect_timeout"].includes(
+      normalizedCode
+    )
   );
 }
 
@@ -1158,6 +1168,7 @@ async function requestAliyun(path, init = {}) {
     try {
       const response = await fetch(`${DEFAULT_BASE_URL}${path}`, {
         method: init.method || "GET",
+        signal: init.signal,
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
@@ -1192,7 +1203,10 @@ async function requestAliyun(path, init = {}) {
       return payload;
     } catch (error) {
       lastError = error;
-      if (attempt < maxAttempts && isRetryableAliyunFailure(error?.statusCode, error?.message)) {
+      if (
+        attempt < maxAttempts &&
+        isRetryableAliyunFailure(error?.statusCode, error?.message, error?.cause?.code || error?.code)
+      ) {
         await sleep(Math.min(12000, 1200 * 2 ** (attempt - 1)));
         continue;
       }
@@ -1939,18 +1953,174 @@ function parseTextResponse(payload) {
   throw providerError("Aliyun text response is empty");
 }
 
+function normalizeOpenAiStreamText(value) {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (part && typeof part.text === "string") return part.text;
+      if (part && typeof part.content === "string") return part.content;
+      return "";
+    })
+    .join("");
+}
+
+async function consumeAliyunTextStream(response, onDelta) {
+  if (!response.body) {
+    throw providerError("Aliyun text stream has no body", 502, "ALIYUN_STREAM_EMPTY");
+  }
+
+  const decoder = new TextDecoder("utf-8");
+  const reader = response.body.getReader();
+  let buffered = "";
+  let fullText = "";
+
+  const handleDataLine = (data) => {
+    if (!data || data === "[DONE]") return;
+    let parsed;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (parsed?.error) {
+      throw providerError(
+        parsed.error?.message || "Aliyun text stream error",
+        502,
+        "ALIYUN_STREAM_ERROR",
+      );
+    }
+
+    const delta = parsed?.choices?.[0]?.delta || {};
+    const reasoning = normalizeOpenAiStreamText(
+      delta.reasoning_content ?? delta.reasoningContent ?? delta.reasoning,
+    );
+    const content = normalizeOpenAiStreamText(delta.content);
+
+    if (reasoning) {
+      onDelta?.({ kind: "reasoning", text: reasoning });
+    }
+    if (content) {
+      fullText += content;
+      onDelta?.({ kind: "content", text: content });
+    }
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffered += decoder.decode(value, { stream: true });
+      let index;
+      while ((index = buffered.search(/\r?\n\r?\n/)) !== -1) {
+        const raw = buffered.slice(0, index);
+        buffered = buffered.slice(buffered[index] === "\r" ? index + 4 : index + 2);
+        for (const rawLine of raw.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (!line || !line.startsWith("data:")) continue;
+          handleDataLine(line.slice(5).trim());
+        }
+      }
+    }
+    buffered += decoder.decode();
+    for (const rawLine of buffered.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || !line.startsWith("data:")) continue;
+      handleDataLine(line.slice(5).trim());
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Ignore release errors after aborts.
+    }
+  }
+
+  if (fullText.trim()) return fullText.trim();
+  throw providerError("Aliyun text stream returned empty content", 502, "ALIYUN_STREAM_EMPTY");
+}
+
+async function generateTextWithAliyunStream({
+  messages,
+  model,
+  temperature,
+  max_tokens,
+  signal,
+  onDelta,
+}) {
+  const apiKey = process.env.DASHSCOPE_API_KEY;
+  if (!apiKey) {
+    throw providerError("DASHSCOPE_API_KEY is not configured", 503, "PROVIDER_NOT_CONFIGURED");
+  }
+
+  const normalizedModel = normalizeModelId(model);
+  const shouldEnableThinking = /^(qwen|qwq)/i.test(normalizedModel);
+  const body = {
+    model: normalizedModel,
+    temperature,
+    max_tokens,
+    stream: true,
+    stream_options: { include_usage: true },
+    ...(shouldEnableThinking ? { enable_thinking: true } : {}),
+    messages: messages.map((message) => ({
+      role: message?.role || "user",
+      content: String(message?.content || ""),
+    })),
+  };
+
+  const response = await fetch(`${DEFAULT_BASE_URL}/compatible-mode/v1/chat/completions`, {
+    method: "POST",
+    signal,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      "X-DashScope-SSE": "enable",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    let payload = null;
+    try {
+      payload = raw ? JSON.parse(raw) : {};
+    } catch {
+      payload = { message: raw };
+    }
+    throw providerError(formatAliyunErrorMessage(payload, response.status), response.status || 502, "ALIYUN_API_ERROR");
+  }
+
+  return consumeAliyunTextStream(response, onDelta);
+}
+
 async function generateTextWithAliyun({
   messages,
   model = "qwen-plus",
   temperature = 0.2,
   max_tokens = 4096,
+  signal,
+  onDelta,
 }) {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw providerError("messages array is required", 400, "BAD_REQUEST");
   }
 
+  if (typeof onDelta === "function") {
+    return generateTextWithAliyunStream({
+      messages,
+      model,
+      temperature,
+      max_tokens,
+      signal,
+      onDelta,
+    });
+  }
+
   const payload = await requestAliyun("/compatible-mode/v1/chat/completions", {
     method: "POST",
+    signal,
     body: {
       model: normalizeModelId(model),
       temperature,

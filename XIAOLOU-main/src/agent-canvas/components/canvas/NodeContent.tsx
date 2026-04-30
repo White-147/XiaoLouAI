@@ -6,9 +6,10 @@
  */
 
 import React, { useRef, useState, useEffect } from 'react';
-import { AlertTriangle, Loader2, Maximize2, ImageIcon as ImageIcon, Film, Pencil, Video, GripVertical, Download, Expand, Shrink, HardDrive } from 'lucide-react';
+import { AlertTriangle, Loader2, Maximize2, ImageIcon as ImageIcon, Film, GripVertical, Download, Expand, Shrink, HardDrive } from 'lucide-react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { classifyCanvasPersistedUrl } from '../../utils/canvasPersistence';
+import { getNodeContentHeight, getNodeWidth } from '../../utils/nodeGeometry';
 
 /**
  * Return a URL that is safe to hand to <img src>/<video src>, or undefined
@@ -61,9 +62,6 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     onExpand,
     onDragStart,
     onDragEnd,
-    onWriteContent,
-    onTextToVideo,
-    onTextToImage,
     onImageToImage,
     onImageToVideo,
     onUpdate,
@@ -82,6 +80,12 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     const isLocalModel = data.type === NodeType.LOCAL_IMAGE_MODEL || data.type === NodeType.LOCAL_VIDEO_MODEL;
     const resultMediaUrl = safeRenderableMediaUrl(data.resultUrl);
     const resultPosterUrl = safeRenderableMediaUrl(data.lastFrame);
+    const nodeWidth = getNodeWidth(data);
+    const nodeContentHeight = getNodeContentHeight(data);
+    const errorScale = Math.max(1, Math.min(2.35, nodeWidth / 365));
+    const compactErrorScale = Math.max(1, Math.min(1.8, nodeWidth / 365));
+    const errorPanelWidth = Math.min(Math.max(260, nodeWidth * 0.68), Math.max(260, nodeWidth - 36));
+    const errorScrollMaxHeight = Math.max(150, Math.min(nodeContentHeight * 0.6, 520));
 
     // Sync local state ONLY when data.prompt changes externally (not from our own update)
     useEffect(() => {
@@ -139,11 +143,26 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                         </div>
                     )}
                     {data.status === NodeStatus.ERROR && !isLoading && (
-                        <div className="absolute left-3 top-3 z-20 flex max-w-[80%] items-start gap-2 rounded-lg bg-red-950/85 px-2.5 py-2 text-left text-[11px] text-red-100 shadow-lg ring-1 ring-inset ring-red-400/25 backdrop-blur-sm">
-                            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-300" />
+                        <div
+                            className="absolute z-20 flex items-start rounded-lg bg-red-950/85 text-left text-red-100 shadow-lg ring-1 ring-inset ring-red-400/25 backdrop-blur-sm"
+                            style={{
+                                left: 12 * compactErrorScale,
+                                top: 12 * compactErrorScale,
+                                maxWidth: Math.min(nodeWidth * 0.82, 720),
+                                gap: 8 * compactErrorScale,
+                                padding: `${8 * compactErrorScale}px ${10 * compactErrorScale}px`,
+                                fontSize: 11 * compactErrorScale,
+                                lineHeight: `${17 * compactErrorScale}px`,
+                            }}
+                        >
+                            <AlertTriangle size={14 * compactErrorScale} className="mt-0.5 shrink-0 text-red-300" />
                             <div className="min-w-0">
                                 <div className="font-medium text-red-200">本次生成失败，已保留上次成功结果</div>
-                                <div className="mt-0.5 line-clamp-2 break-words text-red-100/80">
+                                <div
+                                    className="mt-0.5 overflow-y-auto whitespace-pre-wrap break-words text-red-100/80"
+                                    style={{ maxHeight: Math.max(56, nodeContentHeight * 0.28) }}
+                                    title={data.errorMessage || undefined}
+                                >
                                     {data.errorMessage || '可重新生成以重试。'}
                                 </div>
                             </div>
@@ -151,71 +170,41 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                     )}
                 </div>
             ) : data.type === NodeType.TEXT ? (
-                /* Text Node - Menu or Editing Mode */
+                /* Text Node - Direct editing by default */
                 <div className={`relative w-full bg-[#1a1a1a] rounded-2xl overflow-hidden ${selected ? 'ring-1 ring-blue-500/30' : ''}`}>
-                    {data.textMode === 'editing' ? (
-                        /* Editing Mode - Text Area */
-                        <div className="p-4">
-                            <textarea
-                                value={localPrompt}
-                                onChange={(e) => handleTextChange(e.target.value)}
+                    <div className="p-4">
+                        <textarea
+                            value={localPrompt}
+                            onChange={(e) => handleTextChange(e.target.value)}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onWheel={(e) => e.stopPropagation()}
+                            onBlur={() => {
+                                // Ensure final value is saved on blur
+                                if (updateTimeoutRef.current) {
+                                    clearTimeout(updateTimeoutRef.current);
+                                }
+                                if (localPrompt !== data.prompt) {
+                                    onUpdate?.(data.id, { prompt: localPrompt });
+                                }
+                            }}
+                            placeholder="在此输入文本内容…"
+                            className="w-full bg-transparent text-white text-base leading-6 resize-none outline-none placeholder:text-neutral-600"
+                            style={{ minHeight: data.isPromptExpanded === false ? '150px' : '300px' }}
+                            autoFocus
+                        />
+                        {/* Expand/Shrink Button */}
+                        <div className="flex justify-end mt-2">
+                            <button
+                                onClick={() => onUpdate?.(data.id, { isPromptExpanded: data.isPromptExpanded === false })}
                                 onPointerDown={(e) => e.stopPropagation()}
-                                onWheel={(e) => e.stopPropagation()}
-                                onBlur={() => {
-                                    // Ensure final value is saved on blur
-                                    if (updateTimeoutRef.current) {
-                                        clearTimeout(updateTimeoutRef.current);
-                                    }
-                                    if (localPrompt !== data.prompt) {
-                                        onUpdate?.(data.id, { prompt: localPrompt });
-                                    }
-                                }}
-                                placeholder="在此输入文本内容…"
-                                className="w-full bg-transparent text-white text-sm resize-none outline-none placeholder:text-neutral-600"
-                                style={{ minHeight: data.isPromptExpanded ? '300px' : '150px' }}
-                                autoFocus
-                            />
-                            {/* Expand/Shrink Button */}
-                            <div className="flex justify-end mt-2">
-                                <button
-                                    onClick={() => onUpdate?.(data.id, { isPromptExpanded: !data.isPromptExpanded })}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-neutral-500 hover:text-white hover:bg-neutral-700 rounded transition-colors"
-                                    title={data.isPromptExpanded ? '收起编辑区' : '展开编辑区'}
-                                >
-                                    {data.isPromptExpanded ? <Shrink size={12} /> : <Expand size={12} />}
-                                    <span>{data.isPromptExpanded ? '收起' : '展开'}</span>
-                                </button>
-                            </div>
+                                className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-neutral-500 hover:text-white hover:bg-neutral-700 rounded transition-colors"
+                                title={data.isPromptExpanded === false ? '展开编辑区' : '收起编辑区'}
+                            >
+                                {data.isPromptExpanded === false ? <Expand size={12} /> : <Shrink size={12} />}
+                                <span>{data.isPromptExpanded === false ? '展开' : '收起'}</span>
+                            </button>
                         </div>
-                    ) : (
-                        /* Menu Mode - Show Options */
-                        <div className="p-5 flex flex-col gap-4">
-                            {/* Header */}
-                            <div className="text-neutral-500 text-sm font-medium">
-                                你可以：
-                            </div>
-
-                            {/* Menu Options */}
-                            <div className="flex flex-col gap-1">
-                                <TextNodeMenuItem
-                                    icon={<Pencil size={16} />}
-                                    label="自行撰写内容"
-                                    onClick={() => onWriteContent?.(data.id)}
-                                />
-                                <TextNodeMenuItem
-                                    icon={<Video size={16} />}
-                                    label="文本生成视频"
-                                    onClick={() => onTextToVideo?.(data.id)}
-                                />
-                                <TextNodeMenuItem
-                                    icon={<ImageIcon size={16} />}
-                                    label="文本生成图片"
-                                    onClick={() => onTextToImage?.(data.id)}
-                                />
-                            </div>
-                        </div>
-                    )}
+                    </div>
                 </div>
             ) : (
                 /* Placeholder / Empty State for Image/Video */
@@ -247,17 +236,51 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                            failed nodes fell back to the empty-placeholder UI and
                            looked visually identical to "idle". */
                         <div
-                            className="relative z-10 flex max-w-[260px] flex-col items-center gap-2 px-3 text-center"
+                            className="relative z-10 flex flex-col items-center text-center"
                             onPointerDown={(e) => e.stopPropagation()}
+                            style={{
+                                width: errorPanelWidth,
+                                maxWidth: 'calc(100% - 32px)',
+                                gap: 8 * errorScale,
+                                paddingInline: 12 * errorScale,
+                            }}
                         >
-                            <div className="rounded-full bg-red-500/15 p-2 text-red-400">
-                                <AlertTriangle size={22} />
+                            <div
+                                className="rounded-full bg-red-500/15 text-red-400"
+                                style={{ padding: 8 * errorScale }}
+                            >
+                                <AlertTriangle size={22 * errorScale} />
                             </div>
-                            <div className="text-sm font-medium text-red-300">生成失败</div>
-                            <div className="max-h-40 w-full overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-red-500/5 px-2 py-1.5 text-[11px] leading-5 text-red-200 ring-1 ring-inset ring-red-500/20">
+                            <div
+                                className="font-medium text-red-300"
+                                style={{
+                                    fontSize: 14 * errorScale,
+                                    lineHeight: `${20 * errorScale}px`,
+                                }}
+                            >
+                                生成失败
+                            </div>
+                            <div
+                                className="w-full overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-red-500/5 text-red-200 ring-1 ring-inset ring-red-500/20"
+                                style={{
+                                    maxHeight: errorScrollMaxHeight,
+                                    padding: `${7 * errorScale}px ${9 * errorScale}px`,
+                                    fontSize: 11 * errorScale,
+                                    lineHeight: `${18 * errorScale}px`,
+                                }}
+                                title={data.errorMessage || undefined}
+                            >
                                 {data.errorMessage || '任务已失败，但未记录具体原因。请查看浏览器控制台或服务器日志。'}
                             </div>
-                            <div className="text-[10px] text-neutral-500">可重新生成以重试。</div>
+                            <div
+                                className="text-neutral-500"
+                                style={{
+                                    fontSize: 10 * errorScale,
+                                    lineHeight: `${14 * errorScale}px`,
+                                }}
+                            >
+                                可重新生成以重试。
+                            </div>
                         </div>
                     ) : (
                         <div className="relative z-10 flex flex-col items-center justify-center gap-4 px-4 text-neutral-400/70">
@@ -465,23 +488,3 @@ const CanvasVideoPreview: React.FC<CanvasVideoPreviewProps> = ({ src, poster, cl
         </div>
     );
 };
-
-interface TextNodeMenuItemProps {
-    icon: React.ReactNode;
-    label: string;
-    onClick?: () => void;
-}
-
-/**
- * Menu item component for Text node options
- */
-const TextNodeMenuItem: React.FC<TextNodeMenuItemProps> = ({ icon, label, onClick }) => (
-    <button
-        className="flex items-center gap-3 w-full p-2.5 rounded-lg text-left text-neutral-400 hover:bg-[#252525] hover:text-white transition-colors"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={onClick}
-    >
-        <span className="text-neutral-500">{icon}</span>
-        <span className="text-sm font-medium">{label}</span>
-    </button>
-);

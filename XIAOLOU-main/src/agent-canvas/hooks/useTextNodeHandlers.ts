@@ -26,7 +26,7 @@ export const useTextNodeHandlers = ({
      * Handle "Write your own content" - switches Text node to editing mode
      */
     const handleWriteContent = (nodeId: string) => {
-        updateNode(nodeId, { textMode: 'editing' });
+        updateNode(nodeId, { textMode: 'editing', isPromptExpanded: true });
     };
 
     /**
@@ -57,6 +57,7 @@ export const useTextNodeHandlers = ({
         // Update text node to editing mode with linked video
         updateNode(nodeId, {
             textMode: 'editing',
+            isPromptExpanded: true,
             linkedVideoNodeId: videoNodeId
         });
 
@@ -93,7 +94,8 @@ export const useTextNodeHandlers = ({
 
         // Update text node to editing mode
         updateNode(nodeId, {
-            textMode: 'editing'
+            textMode: 'editing',
+            isPromptExpanded: true
         });
 
         // Add image node

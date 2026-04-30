@@ -71,10 +71,9 @@ function serveJaazStatic(req, res, url) {
   }
 
   const extension = path.extname(filePath).toLowerCase();
-  const isIndex = path.resolve(filePath) === path.resolve(indexPath);
   const headers = {
     "Content-Type": MIME_TYPES[extension] || "application/octet-stream",
-    "Cache-Control": isIndex ? "no-store" : "public, max-age=31536000, immutable",
+    "Cache-Control": "no-store",
   };
   res.writeHead(200, headers);
   if (req.method === "HEAD") {

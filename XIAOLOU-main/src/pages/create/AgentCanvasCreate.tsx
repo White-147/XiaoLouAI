@@ -19,19 +19,19 @@ import {
   API_BASE_URL,
   createAsset,
   deleteAsset,
-  deleteCanvasProject,
+  deleteAgentCanvasProject,
   generateCreateImages,
   generateCreateVideos,
-  getCanvasProject,
+  getAgentCanvasProject,
   getCreateImageCapabilities,
   getCreateVideoCapabilities,
   getTask,
   listAssets,
-  listCanvasProjects,
+  listAgentCanvasProjects,
   listCreateVideos,
   listCreateImages,
   newIdempotencyKey,
-  saveCanvasProject,
+  saveAgentCanvasProject,
   uploadFile,
   type Asset,
 } from "../../lib/api";
@@ -402,13 +402,15 @@ async function recoverVideoGeneration(
   projectId?: string | null,
 ): Promise<HostRecoverGenerationResult> {
   let taskStatus: string | undefined;
+  let taskMessage = "";
   try {
     const task = await getTask(taskId);
     taskStatus = task?.status;
+    taskMessage = String(task?.outputSummary || task?.currentStage || "").trim();
     if (["failed", "cancelled", "canceled"].includes(task.status || "")) {
       return {
         status: "failed",
-        error: task.outputSummary || task.currentStage || "视频创作任务失败。",
+        error: taskMessage || "视频创作任务失败。",
       };
     }
   } catch (err) {
@@ -457,7 +459,11 @@ async function recoverVideoGeneration(
   }
 
   if (taskStatus === "succeeded") {
-    return { status: "pending" };
+    return {
+      status: "failed",
+      error: taskMessage ||
+        "视频任务已完成，但没有返回有效视频地址。通常是模型安全策略过滤、参考素材不合规，或上游没有产出视频文件。请调整提示词/参考图后重新生成。",
+    };
   }
   return { status: "pending" };
 }
@@ -617,6 +623,27 @@ function writeCanvasSessionProjectId(actorId: string | null, projectId: string |
   } catch { /* ignore storage errors */ }
 }
 
+function readAgentCanvasProjectIdFromSearch(search: string): string | null {
+  const params = new URLSearchParams(search);
+  const projectId = params.get("agentCanvasProjectId")?.trim() || params.get("canvasProjectId")?.trim();
+  return projectId || null;
+}
+
+function writeAgentCanvasProjectIdToSearch(projectId: string): void {
+  if (typeof window === "undefined" || !projectId.trim()) return;
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("agentCanvasProjectId") === projectId) {
+      return;
+    }
+    url.searchParams.delete("canvasProjectId");
+    url.searchParams.set("agentCanvasProjectId", projectId);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    /* keep save successful even if URL state cannot be updated */
+  }
+}
+
 type CanvasProjectLoadState =
   | { status: "idle" }
   | { status: "syncing" }
@@ -651,6 +678,14 @@ export default function AgentCanvasCreate() {
   const [currentProjectId, , currentProjectContext] = useCurrentProjectId();
   const [theme] = useTheme();
   const location = useLocation();
+  const pendingLoadProjectId = useMemo(
+    () => readAgentCanvasProjectIdFromSearch(location.search),
+    [location.search],
+  );
+  const pendingLoadRequestKey = useMemo(
+    () => (pendingLoadProjectId ? `${actorId || "guest"}:${pendingLoadProjectId}` : null),
+    [actorId, pendingLoadProjectId],
+  );
   const [canvasProjectLoadState, setCanvasProjectLoadState] = useState<CanvasProjectLoadState>({ status: "idle" });
   const [canvasProjectLoadAttempt, setCanvasProjectLoadAttempt] = useState(0);
 
@@ -683,7 +718,9 @@ export default function AgentCanvasCreate() {
   // ── Save-state refs ────────────────────────────────────────────────────────
   // canvasProjectIdRef is pre-seeded from localStorage so the same project is
   // updated across refreshes (prevents duplicate project creation).
-  const canvasProjectIdRef = useRef<string | null>(readCanvasSessionProjectId(actorId));
+  const canvasProjectIdRef = useRef<string | null>(
+    pendingLoadProjectId || readCanvasSessionProjectId(actorId),
+  );
   const canvasProjectUpdatedAtRef = useRef<string | null>(null);
   const canvasProjectBaseTitleRef = useRef<string | null>(null);
   const canvasProjectBaseDataRef = useRef<unknown>(null);
@@ -713,7 +750,7 @@ export default function AgentCanvasCreate() {
   };
 
   useEffect(() => {
-    if (location.search.includes("canvasProjectId=")) {
+    if (pendingLoadProjectId) {
       return;
     }
     canvasProjectIdRef.current = readCanvasSessionProjectId(actorId);
@@ -722,7 +759,7 @@ export default function AgentCanvasCreate() {
     canvasProjectBaseDataRef.current = null;
     canvasSaveBlockedRef.current = false;
     canvasSaveConflictAlertedRef.current = false;
-  }, [actorId, location.search]);
+  }, [actorId, pendingLoadProjectId]);
 
   // ── Build services object (stable via useMemo, closures over mutable refs) ──
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -925,12 +962,12 @@ export default function AgentCanvasCreate() {
 
       // ── Canvas projects ─────────────────────────────────────────────────────
       async listProjects() {
-        const response = await listCanvasProjects();
+        const response = await listAgentCanvasProjects();
         return { items: response.items };
       },
 
       async loadProject(id) {
-        const project = await getCanvasProject(id);
+        const project = await getAgentCanvasProject(id);
         const raw = project.canvasData as
           | { nodes?: unknown[]; groups?: unknown[]; viewport?: { x: number; y: number; zoom: number } }
           | null;
@@ -945,6 +982,7 @@ export default function AgentCanvasCreate() {
           thumbnailUrl: sanitizedThumbnail,
           createdAt: project.createdAt || "",
           updatedAt: project.updatedAt || "",
+          agentContext: project.agentContext ?? null,
           canvasData: raw
             ? ({
                 nodes: sanitizedNodes,
@@ -960,7 +998,7 @@ export default function AgentCanvasCreate() {
       },
 
       async deleteProject(id) {
-        await deleteCanvasProject(id);
+        await deleteAgentCanvasProject(id);
         return { deleted: true };
       },
 
@@ -1011,18 +1049,19 @@ export default function AgentCanvasCreate() {
             const persistNodes = sanitizeCanvasNodesForPersistence(asyncCleaned.nodes);
             const persistGroups = sanitizeCanvasGroupsForPersistence(asyncCleaned.groups);
             const persistThumbnailUrl = sanitizePersistedCanvasString(thumbnailUrl) ?? undefined;
-            const saved = await saveCanvasProject({
+            const saved = await saveAgentCanvasProject({
               id: canvasProjectIdRef.current || undefined,
               expectedUpdatedAt: canvasProjectUpdatedAtRef.current || undefined,
               baseTitle: canvasProjectBaseTitleRef.current || undefined,
               baseCanvasData: canvasProjectBaseDataRef.current ?? undefined,
-              title: workflow.title || "未命名画布项目",
+              title: workflow.title || "未命名智能画布项目",
               thumbnailUrl: persistThumbnailUrl,
               canvasData: {
                 nodes: persistNodes,
                 groups: persistGroups,
                 viewport: workflow.viewport,
               },
+              agentContext: workflow.agentContext ?? null,
             });
             canvasProjectIdRef.current = saved.id;
             canvasProjectUpdatedAtRef.current = saved.updatedAt || null;
@@ -1032,6 +1071,7 @@ export default function AgentCanvasCreate() {
             canvasSaveConflictAlertedRef.current = false;
             // Persist so next mount re-uses the same project (no duplicate creation)
             writeCanvasSessionProjectId(actorIdRef.current, saved.id);
+            writeAgentCanvasProjectIdToSearch(saved.id);
             console.log("[AgentCanvasCreate] Canvas project saved:", saved.id);
           } catch (err) {
             if (err instanceof Error && /409|CONFLICT|updated elsewhere/i.test(err.message)) {
@@ -1068,17 +1108,8 @@ export default function AgentCanvasCreate() {
     notifyCanvasThemeChange(theme);
   }, [theme]);
 
-  // ── Handle pending project load from URL (?canvasProjectId=) ─────────────
-  const pendingLoadProjectId = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    return params.get("canvasProjectId") || null;
-  }, [location.search]);
-
+  // ── Handle pending project load from URL (?agentCanvasProjectId=) ─────────
   const lastLoadedProjectRequestKeyRef = useRef<string | null>(null);
-  const pendingLoadRequestKey = useMemo(
-    () => (pendingLoadProjectId ? `${actorId || "guest"}:${pendingLoadProjectId}` : null),
-    [actorId, pendingLoadProjectId],
-  );
 
   useEffect(() => {
     if (!pendingLoadProjectId) {
@@ -1101,7 +1132,7 @@ export default function AgentCanvasCreate() {
     setCanvasProjectLoadState({ status: "loading" });
     (async () => {
       try {
-        const project = await getCanvasProject(pendingLoadProjectId);
+        const project = await getAgentCanvasProject(pendingLoadProjectId);
         if (cancelled) return;
         const canvasData = project.canvasData as {
           nodes?: unknown[]; groups?: unknown[];
@@ -1120,6 +1151,7 @@ export default function AgentCanvasCreate() {
           nodes: sanitizedNodes,
           groups: sanitizedGroups,
           viewport: canvasData?.viewport,
+          agentContext: project.agentContext ?? null,
         });
         lastLoadedProjectRequestKeyRef.current = pendingLoadRequestKey;
         canvasProjectIdRef.current = project.id;
@@ -1136,7 +1168,7 @@ export default function AgentCanvasCreate() {
         clearCanvasProjectLoad();
         setCanvasProjectLoadState({
           status: "error",
-          message: describeRequestError(err, "画布项目加载失败，请稍后重试。"),
+          message: describeRequestError(err, "智能画布项目加载失败，请稍后重试。"),
         });
         console.warn("[AgentCanvasCreate] Failed to load canvas project:", err);
       }
@@ -1172,8 +1204,8 @@ export default function AgentCanvasCreate() {
               {canvasProjectLoadState.status === "syncing"
                 ? "正在同步当前账号项目上下文"
                 : canvasProjectLoadState.status === "loading"
-                  ? "正在加载画布项目"
-                  : "画布项目加载失败"}
+                  ? "正在加载智能画布项目"
+                  : "智能画布项目加载失败"}
             </div>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
               {canvasProjectLoadState.status === "syncing"

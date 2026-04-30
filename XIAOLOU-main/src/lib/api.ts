@@ -2108,6 +2108,13 @@ export type CanvasProject = {
 
 export type CanvasProjectSummary = Omit<CanvasProject, "canvasData">;
 
+export type AgentCanvasProject = CanvasProject & {
+  kind?: "agent_canvas";
+  agentContext?: unknown | null;
+};
+
+export type AgentCanvasProjectSummary = Omit<AgentCanvasProject, "canvasData" | "agentContext">;
+
 function canvasProjectSummaryTime(value: string | null | undefined) {
   if (!value) return Number.NEGATIVE_INFINITY;
   const time = Date.parse(value);
@@ -2172,6 +2179,48 @@ export async function saveCanvasProject(input: {
 
 export async function deleteCanvasProject(projectId: string) {
   return request<{ deleted: boolean; projectId: string }>(`/api/canvas-projects/${projectId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listAgentCanvasProjects() {
+  const response = await request<{ items: AgentCanvasProjectSummary[] }>("/api/agent-canvas/projects");
+  return {
+    ...response,
+    items: dedupeCanvasProjectSummaries(
+      Array.isArray(response.items) ? response.items : [],
+    ) as AgentCanvasProjectSummary[],
+  };
+}
+
+export async function getAgentCanvasProject(projectId: string) {
+  return request<AgentCanvasProject>(`/api/agent-canvas/projects/${projectId}`);
+}
+
+export async function saveAgentCanvasProject(input: {
+  id?: string;
+  title?: string;
+  thumbnailUrl?: string | null;
+  canvasData?: unknown;
+  agentContext?: unknown | null;
+  expectedUpdatedAt?: string | null;
+  baseTitle?: string | null;
+  baseCanvasData?: unknown;
+}) {
+  if (input.id) {
+    return request<AgentCanvasProject>(`/api/agent-canvas/projects/${input.id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+  return request<AgentCanvasProject>("/api/agent-canvas/projects", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteAgentCanvasProject(projectId: string) {
+  return request<{ deleted: boolean; projectId: string }>(`/api/agent-canvas/projects/${projectId}`, {
     method: "DELETE",
   });
 }

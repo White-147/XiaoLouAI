@@ -27,18 +27,23 @@ import { cn } from "../lib/utils";
 import {
   createAsset,
   deleteAsset,
+  deleteAgentCanvasProject,
   deleteCanvasProject,
+  getAgentCanvasProject,
   getCanvasProject,
   getProject,
   listAssets,
+  listAgentCanvasProjects,
   listCanvasProjects,
   listVideoReplaceJobs,
+  saveAgentCanvasProject,
   saveCanvasProject,
   syncVideoReplaceJobAsset,
   updateAsset,
   uploadFile,
   type Asset,
   type AssetSourceModule,
+  type AgentCanvasProjectSummary,
   type CanvasProjectSummary,
 } from "../lib/api";
 import { useActorId } from "../lib/actor-session";
@@ -337,6 +342,32 @@ function normalizeCanvasProjectSummaries(items: CanvasProjectSummary[]): CanvasP
   );
 }
 
+function normalizeAgentCanvasProjectSummaries(items: AgentCanvasProjectSummary[]): AgentCanvasProjectSummary[] {
+  const byId = new globalThis.Map<string, AgentCanvasProjectSummary>();
+  for (const item of items) {
+    const id = typeof item?.id === "string" ? item.id.trim() : "";
+    if (!id) continue;
+    const candidate = item.id === id ? item : { ...item, id };
+    const existing = byId.get(id);
+    const candidateUpdatedAt = toDateSortTime(candidate.updatedAt);
+    const existingUpdatedAt = toDateSortTime(existing?.updatedAt);
+    const candidateCreatedAt = toDateSortTime(candidate.createdAt);
+    const existingCreatedAt = toDateSortTime(existing?.createdAt);
+    if (
+      !existing ||
+      candidateUpdatedAt > existingUpdatedAt ||
+      (candidateUpdatedAt === existingUpdatedAt && candidateCreatedAt > existingCreatedAt)
+    ) {
+      byId.set(id, candidate);
+    }
+  }
+  return Array.from(byId.values()).sort(
+    (left, right) =>
+      toDateSortTime(right.updatedAt) - toDateSortTime(left.updatedAt) ||
+      toDateSortTime(right.createdAt) - toDateSortTime(left.createdAt),
+  );
+}
+
 function getCachedProjectAssets(projectId: string) {
   return projectAssetsCache.get(projectId) || null;
 }
@@ -366,7 +397,12 @@ function fetchProjectAssets(projectId: string) {
   return request;
 }
 
-type SidebarSection = "assets" | "agent-studio-assets" | "agent-studio-projects" | "canvas-projects";
+type SidebarSection =
+  | "assets"
+  | "agent-studio-assets"
+  | "agent-studio-projects"
+  | "agent-canvas-projects"
+  | "canvas-projects";
 
 export default function Assets() {
   const navigate = useNavigate();
@@ -395,10 +431,16 @@ export default function Assets() {
   const [canvasLoadedOnce, setCanvasLoadedOnce] = useState(false);
   const [canvasRefreshing, setCanvasRefreshing] = useState(false);
   const [deletingCanvasId, setDeletingCanvasId] = useState<string | null>(null);
+  const [agentCanvasProjects, setAgentCanvasProjects] = useState<AgentCanvasProjectSummary[]>([]);
+  const [agentCanvasLoadedOnce, setAgentCanvasLoadedOnce] = useState(false);
+  const [agentCanvasRefreshing, setAgentCanvasRefreshing] = useState(false);
+  const [deletingAgentCanvasId, setDeletingAgentCanvasId] = useState<string | null>(null);
   const assetLoadRequestIdRef = useRef(0);
   const projectTitleRequestIdRef = useRef(0);
   const canvasLoadRequestIdRef = useRef(0);
   const canvasThumbnailBackfillRunRef = useRef(0);
+  const agentCanvasLoadRequestIdRef = useRef(0);
+  const agentCanvasThumbnailBackfillRunRef = useRef(0);
 
   const loadProjectTitle = useCallback(async () => {
     const requestId = ++projectTitleRequestIdRef.current;
@@ -510,6 +552,70 @@ export default function Assets() {
     [],
   );
 
+  const backfillAgentCanvasThumbnails = useCallback(
+    async (projects: AgentCanvasProjectSummary[]) => {
+      const runId = ++agentCanvasThumbnailBackfillRunRef.current;
+      const missing = normalizeAgentCanvasProjectSummaries(projects).filter((project) => !project.thumbnailUrl);
+      if (missing.length === 0) return;
+
+      for (const project of missing) {
+        if (runId !== agentCanvasThumbnailBackfillRunRef.current) return;
+
+        try {
+          const detail = await getAgentCanvasProject(project.id);
+          if (runId !== agentCanvasThumbnailBackfillRunRef.current) return;
+
+          const data = detail.canvasData as {
+            nodes?: { type?: string; resultUrl?: string; status?: string }[];
+          } | null;
+          const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+          const imageUrls = nodes
+            .filter(
+              (node) =>
+                node.type === "Image" &&
+                node.status === "success" &&
+                node.resultUrl &&
+                !node.resultUrl.startsWith("data:"),
+            )
+            .map((node) => {
+              const url = node.resultUrl!;
+              if (/^https?:\/\//i.test(url)) {
+                try {
+                  const parsed = new URL(url);
+                  if (parsed.pathname.startsWith("/uploads/")) return parsed.pathname;
+                } catch {
+                  /* keep url */
+                }
+              }
+              return url;
+            })
+            .slice(0, 4);
+
+          if (imageUrls.length === 0) continue;
+
+          const blob = await generateGridThumbnail(imageUrls);
+          if (runId !== agentCanvasThumbnailBackfillRunRef.current || !blob) continue;
+
+          const file = new File([blob], `agent-canvas-thumb-${Date.now()}.jpg`, { type: "image/jpeg" });
+          const uploaded = await uploadFile(file, "canvas-thumbnail");
+          const thumbUrl = uploaded.url || uploaded.urlPath;
+
+          await saveAgentCanvasProject({ id: project.id, thumbnailUrl: thumbUrl });
+          if (runId !== agentCanvasThumbnailBackfillRunRef.current) return;
+
+          setAgentCanvasProjects((prev) =>
+            normalizeAgentCanvasProjectSummaries(
+              prev.map((item) => (item.id === project.id ? { ...item, thumbnailUrl: thumbUrl } : item)),
+            ),
+          );
+        } catch {
+          /* non-fatal */
+        }
+      }
+    },
+    [],
+  );
+
   const loadCanvasProjects = useCallback(async () => {
     const requestId = ++canvasLoadRequestIdRef.current;
     canvasThumbnailBackfillRunRef.current += 1;
@@ -529,6 +635,26 @@ export default function Assets() {
       }
     }
   }, [actorId, backfillCanvasThumbnails]);
+
+  const loadAgentCanvasProjects = useCallback(async () => {
+    const requestId = ++agentCanvasLoadRequestIdRef.current;
+    agentCanvasThumbnailBackfillRunRef.current += 1;
+    setAgentCanvasRefreshing(true);
+    try {
+      const response = await listAgentCanvasProjects();
+      if (requestId !== agentCanvasLoadRequestIdRef.current) return;
+      const normalizedItems = normalizeAgentCanvasProjectSummaries(response.items);
+      setAgentCanvasProjects(normalizedItems);
+      setAgentCanvasLoadedOnce(true);
+      void backfillAgentCanvasThumbnails(normalizedItems);
+    } catch {
+      /* keep */
+    } finally {
+      if (requestId === agentCanvasLoadRequestIdRef.current) {
+        setAgentCanvasRefreshing(false);
+      }
+    }
+  }, [actorId, backfillAgentCanvasThumbnails]);
 
   const refreshAssetsView = useCallback((options: { force?: boolean; onlyIfStale?: boolean; silent?: boolean } = {}) => {
     void loadProjectTitle();
@@ -586,6 +712,11 @@ export default function Assets() {
   }, [activeSection]);
 
   useEffect(() => {
+    if (activeSection !== "agent-canvas-projects") return;
+    void import("./create/AgentCanvasCreate");
+  }, [activeSection]);
+
+  useEffect(() => {
     const refresh = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       refreshAssetsView({ onlyIfStale: true, silent: true });
@@ -602,6 +733,10 @@ export default function Assets() {
   useEffect(() => {
     void loadCanvasProjects();
   }, [loadCanvasProjects]);
+
+  useEffect(() => {
+    void loadAgentCanvasProjects();
+  }, [loadAgentCanvasProjects]);
 
   useEffect(() => {
     const refreshAfterAgentAssetSync = (event: Event) => {
@@ -712,8 +847,14 @@ export default function Assets() {
     [canvasProjects],
   );
 
+  const agentCanvasProjectDateGroups = useMemo(
+    () => groupByLocalDate(agentCanvasProjects, (project) => project.updatedAt),
+    [agentCanvasProjects],
+  );
+
   const showInitialAssetsLoading = !assetsLoadedOnce && assetsRefreshing;
   const showInitialCanvasLoading = !canvasLoadedOnce && canvasRefreshing;
+  const showInitialAgentCanvasLoading = !agentCanvasLoadedOnce && agentCanvasRefreshing;
 
   // ── Create / edit form ────────────────────────────────────────────
   const openCreate = () => {
@@ -835,6 +976,26 @@ export default function Assets() {
       console.error("[Assets] Failed to delete canvas project:", err);
     } finally {
       setDeletingCanvasId(null);
+    }
+  };
+
+  const handleDeleteAgentCanvasProject = async (projectId: string) => {
+    if (deletingAgentCanvasId === projectId) return;
+    const removed = agentCanvasProjects.find((p) => p.id === projectId);
+    setAgentCanvasProjects((prev) => prev.filter((p) => p.id !== projectId));
+    setDeletingAgentCanvasId(projectId);
+    try {
+      await deleteAgentCanvasProject(projectId);
+      void loadAgentCanvasProjects().catch(() => {});
+    } catch (err) {
+      if (removed) {
+        setAgentCanvasProjects((prev) =>
+          normalizeAgentCanvasProjectSummaries([...prev, removed]),
+        );
+      }
+      console.error("[Assets] Failed to delete agent canvas project:", err);
+    } finally {
+      setDeletingAgentCanvasId(null);
     }
   };
 
@@ -1046,7 +1207,7 @@ export default function Assets() {
           >
             <span className="flex items-center gap-3">
               <LayoutGrid className="h-4 w-4" />
-              智能体画布项目
+              Jaaz 智能体画布项目
             </span>
             <span
               className={cn(
@@ -1055,6 +1216,31 @@ export default function Assets() {
               )}
             >
               {agentStudioProjectAssets.length}
+            </span>
+          </button>
+
+          <div className="my-2" />
+
+          <button
+            onClick={() => setActiveSection("agent-canvas-projects")}
+            className={cn(
+              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              activeSection === "agent-canvas-projects"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <span className="flex items-center gap-3">
+              <Sparkles className="h-4 w-4" />
+              智能画布项目
+            </span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs",
+                activeSection === "agent-canvas-projects" ? "bg-primary/20" : "bg-secondary",
+              )}
+            >
+              {agentCanvasProjects.length}
             </span>
           </button>
 
@@ -1456,7 +1642,7 @@ export default function Assets() {
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/30 px-6">
               <h3 className="flex items-center gap-2 text-sm font-medium">
                 <LayoutGrid className="h-4 w-4 text-primary" />
-                智能体画布项目
+                Jaaz 智能体画布项目
                 <span className="text-xs text-muted-foreground">
                   （保存 Jaaz 整个可编辑画布工程，已同步 {agentStudioProjectAssets.length} 项）
                 </span>
@@ -1468,7 +1654,7 @@ export default function Assets() {
                     type="text"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="搜索智能体画布项目"
+                    placeholder="搜索 Jaaz 智能体画布项目"
                     className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-4 text-sm transition-shadow focus:outline-none focus:ring-2 focus:ring-primary/50"
                   />
                 </div>
@@ -1484,7 +1670,7 @@ export default function Assets() {
                   className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   <Sparkles className="h-4 w-4" />
-                  新建智能体画布
+                  新建 Jaaz 智能体画布
                 </button>
               </div>
             </div>
@@ -1498,7 +1684,7 @@ export default function Assets() {
               ) : agentStudioFilteredProjectAssets.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center text-muted-foreground">
                   <LayoutGrid className="mb-4 h-12 w-12 opacity-20" />
-                  <p>暂无智能体画布项目</p>
+                  <p>暂无 Jaaz 智能体画布项目</p>
                   <p className="mt-1 text-xs">在智能体画布中发起对话后，会保存为可重新编辑的 Jaaz 工程</p>
                 </div>
               ) : (
@@ -1590,6 +1776,134 @@ export default function Assets() {
                                   {sessionId ? <p className="truncate">Session: {sessionId}</p> : null}
                                   <p>{new Date(asset.updatedAt || asset.createdAt).toLocaleString("zh-CN")}</p>
                                 </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        ) : activeSection === "agent-canvas-projects" ? (
+          <>
+            <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/30 px-6">
+              <h3 className="flex items-center gap-2 text-sm font-medium">
+                <Sparkles className="h-4 w-4 text-primary" />
+                智能画布项目
+                <span className="text-xs text-muted-foreground">
+                  （保存智能画布节点、对话上下文和视口，已保存 {agentCanvasProjects.length} 项）
+                </span>
+              </h3>
+              <div className="flex items-center gap-3">
+                {agentCanvasRefreshing ? <LoaderCircle className="h-4 w-4 animate-spin text-primary" /> : null}
+                <button
+                  onClick={() => void loadAgentCanvasProjects()}
+                  className="rounded-md border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-accent"
+                >
+                  刷新
+                </button>
+                <button
+                  onClick={() => navigate("/create/agent-canvas")}
+                  className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  新建智能画布
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+              {showInitialAgentCanvasLoading ? (
+                <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground">
+                  <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-sm">加载智能画布项目中...</p>
+                </div>
+              ) : agentCanvasProjects.length === 0 ? (
+                <div className="flex h-64 flex-col items-center justify-center text-muted-foreground">
+                  <Sparkles className="mb-4 h-12 w-12 opacity-20" />
+                  <p>暂无智能画布项目</p>
+                  <p className="mt-1 text-xs">在智能画布中对话或生成后，会自动保存完整界面上下文</p>
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {agentCanvasProjectDateGroups.map((group) => (
+                    <section key={group.dateKey} className="space-y-3">
+                      {renderDateLine(group.dateKey)}
+                      <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
+                        {group.items.map((cp) => {
+                          const pendingDelete = deletingAgentCanvasId === cp.id;
+                          return (
+                            <article
+                              key={cp.id}
+                              className="glass-panel group flex cursor-pointer flex-col overflow-hidden rounded-xl"
+                              onClick={() => navigate(`/create/agent-canvas?agentCanvasProjectId=${cp.id}`)}
+                            >
+                              <div className="relative aspect-video bg-muted">
+                                {cp.thumbnailUrl ? (
+                                  <img
+                                    src={getGeneratedMediaUrl(cp.thumbnailUrl) || cp.thumbnailUrl}
+                                    alt={cp.title}
+                                    className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <GeneratedMediaPlaceholder
+                                    kind="image"
+                                    label="智能画布"
+                                    className="h-full w-full"
+                                    description="点击后恢复画布和对话上下文"
+                                  />
+                                )}
+
+                                <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-medium text-white backdrop-blur">
+                                  智能画布
+                                </div>
+
+                                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
+                                  <button
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      navigate(`/create/agent-canvas?agentCanvasProjectId=${cp.id}`);
+                                    }}
+                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
+                                    title="继续编辑"
+                                  >
+                                    <Play className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleDeleteAgentCanvasProject(cp.id);
+                                    }}
+                                    disabled={pendingDelete}
+                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                                    title="删除"
+                                  >
+                                    {pendingDelete ? (
+                                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-1 flex-col p-3">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                  <h3 className="truncate text-sm font-medium">{cp.title}</h3>
+                                  <span className="rounded bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
+                                    Agent
+                                  </span>
+                                </div>
+                                <p className="line-clamp-2 flex-1 text-xs text-muted-foreground">
+                                  保存了智能画布节点、分组、视口和侧边栏对话上下文
+                                </p>
+                                <p className="mt-2 text-[11px] text-muted-foreground/80">
+                                  {new Date(cp.updatedAt).toLocaleString("zh-CN")}
+                                </p>
                               </div>
                             </article>
                           );

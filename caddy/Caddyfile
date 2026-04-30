@@ -30,10 +30,7 @@ www.xiaolouai.cn {
 	}
 
 	log {
-		output file D:/xuan/小楼WEB/caddy/logs/access.log {
-			roll_size 50mb
-			roll_keep 5
-		}
+		output stdout
 	}
 }
 
@@ -65,10 +62,7 @@ http://www.xiaolou.cn, http://xiaolou.cn {
 	}
 
 	log {
-		output file D:/xuan/小楼WEB/caddy/logs/xiaolou-cn-access.log {
-			roll_size 50mb
-			roll_keep 5
-		}
+		output stdout
 	}
 }
 
@@ -98,10 +92,7 @@ http://www.aitianmu.cn, http://aitianmu.cn {
 	}
 
 	log {
-		output file D:/xuan/小楼WEB/caddy/logs/aitianmu-cn-access.log {
-			roll_size 50mb
-			roll_keep 5
-		}
+		output stdout
 	}
 }
 

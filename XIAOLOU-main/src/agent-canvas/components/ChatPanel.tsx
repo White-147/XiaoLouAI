@@ -32,6 +32,7 @@ import {
     Share2,
     SlidersHorizontal,
     Sparkles,
+    Square,
     Trash2,
     Users,
     Video,
@@ -45,13 +46,15 @@ import {
     ChatMessage as ChatMessageType,
     ChatSession,
     type AgentCanvasSnapshot,
+    type AgentActivityEvent,
+    type AgentCanvasProjectChatContext,
     type CanvasAgentAction,
 } from '../hooks/useChatAgent';
 import {
-    fetchJaazModelsAndTools,
-    type JaazModelInfo,
-    type JaazToolInfo,
-} from '../services/jaazAgentBridge';
+    fetchNativeAgentModelsAndTools,
+    type NativeAgentModelInfo,
+    type NativeAgentToolInfo,
+} from '../services/nativeAgentCatalog';
 import {
     CANVAS_IMAGE_MODELS,
     DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID,
@@ -80,11 +83,16 @@ import {
     getVideoCapabilitiesFromXiaolou,
 } from '../integrations/xiaolouGenerationBridge';
 import { buildFallbackVideoCapabilities } from '../config/canvasVideoModels';
+import {
+    SKILL_CATEGORIES as AGENT_SKILL_CATEGORIES,
+    SKILLS as AGENT_SKILLS,
+    type AgentCanvasSkill,
+} from '../config/agentCanvasSkills';
 import type { BridgeMediaCapabilitySet, BridgeMediaModelCapability } from '../types';
 
 type ComposerMenu = 'more' | 'skills' | 'mode' | 'model' | 'imageAttach' | 'imageSettings' | 'videoSettings' | 'videoShot' | 'videoAttach' | 'share' | null;
 type ComposerMode = 'agent' | 'image' | 'video';
-type ModelPreferenceTab = 'image' | 'video' | '3d';
+type ModelPreferenceTab = 'cot' | 'image' | 'video' | '3d';
 type VideoComposerMode = 'reference' | 'start_end_frame' | 'multi_param' | 'video_edit' | 'motion_control';
 type VideoApiMode = 'image_to_video' | 'start_end_frame' | 'multi_param' | 'video_edit' | 'motion_control' | 'video_extend';
 type VideoFrameRole = 'firstFrame' | 'lastFrame';
@@ -217,14 +225,20 @@ type ComposerModelOption = {
 };
 
 const MODEL_PREFERENCE_TABS: Array<{ value: ModelPreferenceTab; label: string }> = [
+    { value: 'cot', label: 'CoT' },
     { value: 'image', label: 'Image' },
     { value: 'video', label: 'Video' },
     { value: '3d', label: '3D' },
 ];
 
-const PREFERRED_TEXT_MODEL_IDS = [
-    'qwen-plus',
+const COT_TEXT_MODEL_IDS = [
+    'qwen3.6-plus',
     'vertex:gemini-3-flash-preview',
+];
+
+const PREFERRED_TEXT_MODEL_IDS = [
+    ...COT_TEXT_MODEL_IDS,
+    'qwen-plus',
     'vertex:gemini-3.1-pro-preview',
 ];
 
@@ -328,6 +342,8 @@ interface ChatPanelProps {
     canvasTheme?: 'dark' | 'light';
     getCanvasSnapshot?: () => AgentCanvasSnapshot;
     onApplyActions?: (actions: CanvasAgentAction[]) => Promise<void> | void;
+    restoreProjectContext?: AgentCanvasProjectChatContext | null;
+    onProjectContextChange?: (context: AgentCanvasProjectChatContext) => void;
 }
 
 function Tooltip({
@@ -348,6 +364,126 @@ function Tooltip({
             {children}
             <div className={`pointer-events-none absolute z-50 whitespace-nowrap rounded-lg bg-neutral-950 px-3 py-2 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 ${placementClass}`}>
                 {label}
+            </div>
+        </div>
+    );
+}
+
+function getActivityPhaseLabel(phase: AgentActivityEvent['phase']) {
+    if (phase === 'USING_TOOLS') return 'USING TOOLS';
+    return phase;
+}
+
+function isTransportActivityEvent(event: AgentActivityEvent) {
+    const value = `${event.title || ''} ${event.detail || ''}`.toLowerCase();
+    return value.includes('sse') || value.includes('streaming') || value.includes('事件流');
+}
+
+function AgentActivityPanel({
+    events,
+    pending = false,
+}: {
+    events: AgentActivityEvent[];
+    pending?: boolean;
+}) {
+    if (events.length === 0 && !pending) return null;
+
+    const fallbackEvent: AgentActivityEvent = {
+        id: 'agent-activity-pending',
+        phase: 'THINKING',
+        title: '模型正在思考...',
+        detail: '正在等待模型和 Agent 过程事件',
+        status: 'active',
+        timestamp: new Date(),
+    };
+    const displayEvents = (events.length > 0 ? events : [fallbackEvent])
+        .filter((event) => !isTransportActivityEvent(event));
+    if (displayEvents.length === 0) return null;
+    const visibleEvents = displayEvents.slice(-8);
+    const currentActivity = [...displayEvents].reverse().find((event) => event.status === 'active') || displayEvents[displayEvents.length - 1];
+    const progressLabel =
+        currentActivity?.status === 'active'
+            ? '进行中'
+            : currentActivity?.status === 'error'
+                ? '已中断'
+                : '已完成';
+    const progressLabelClassName =
+        currentActivity?.status === 'active'
+            ? 'bg-neutral-950 text-white'
+            : currentActivity?.status === 'error'
+                ? 'bg-red-50 text-red-600'
+                : 'bg-emerald-50 text-emerald-600';
+    const latestStreamEvent = [...displayEvents].reverse().find((event) => event.streamText);
+    const streamEvent = latestStreamEvent;
+    const currentStreamText = streamEvent?.streamText || '';
+    const streamLabel = streamEvent?.streamMeta?.includes('Provider：langgraph')
+        ? 'AGENT THINKING STREAM'
+        : (streamEvent?.streamKind === 'reasoning' ? 'MODEL THINKING STREAM' : 'MODEL OUTPUT STREAM');
+
+    return (
+        <div className="rounded-2xl border border-violet-100 bg-white px-4 py-3 shadow-[0_10px_30px_rgba(15,23,42,0.07)]">
+            {currentStreamText && (
+                <div className="rounded-xl border border-neutral-200 bg-neutral-950 px-3 py-2.5 text-xs leading-5 text-neutral-50 shadow-inner">
+                    <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-400">
+                        <span>{streamLabel}</span>
+                        {streamEvent?.streamMeta && <span className="truncate normal-case tracking-normal">{streamEvent.streamMeta}</span>}
+                    </div>
+                    <div className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words font-mono">
+                        {currentStreamText}
+                        {streamEvent?.status === 'active' && <span className="ml-0.5 animate-pulse text-lime-300">▌</span>}
+                    </div>
+                </div>
+            )}
+
+            <div className="mt-3 flex items-center justify-between border-t border-neutral-100 pt-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">
+                    Agent 过程
+                </span>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${progressLabelClassName}`}>
+                    {progressLabel}
+                </span>
+            </div>
+
+            <div className="mt-2 space-y-2">
+                {visibleEvents.map((event) => (
+                    <div key={event.id} className="flex gap-2.5">
+                        <span className={`mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+                            event.status === 'active'
+                                ? 'bg-neutral-900 text-white'
+                                : event.status === 'error'
+                                    ? 'bg-red-50 text-red-500'
+                                    : 'bg-neutral-100 text-neutral-500'
+                        }`}>
+                            {event.status === 'active' ? (
+                                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                            ) : event.status === 'error' ? (
+                                <AlertCircle className="h-2.5 w-2.5" />
+                            ) : (
+                                <Check className="h-2.5 w-2.5" />
+                            )}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate text-xs font-medium text-neutral-800">
+                                    {event.title}
+                                </span>
+                                <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] text-neutral-400">
+                                    {getActivityPhaseLabel(event.phase)}
+                                </span>
+                            </div>
+                            {(event.streamText || event.detail) && (
+                                <div className={`mt-0.5 text-xs leading-5 text-neutral-500 ${
+                                    event.streamText
+                                        ? 'max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-neutral-50 px-2 py-1.5 font-mono'
+                                        : 'line-clamp-2'
+                                }`}>
+                                    {event.streamText || event.detail}
+                                    {event.streamText && event.status === 'active' && <span className="ml-0.5 animate-pulse text-neutral-900">▌</span>}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
             </div>
         </div>
     );
@@ -419,15 +555,15 @@ async function imageUrlToBase64(url: string): Promise<string | undefined> {
     }
 }
 
-function modelDisplayName(model: JaazModelInfo) {
+function modelDisplayName(model: NativeAgentModelInfo) {
     return model.display_name?.trim() || model.model;
 }
 
-function toolDisplayName(tool: JaazToolInfo) {
+function toolDisplayName(tool: NativeAgentToolInfo) {
     return tool.display_name?.trim() || tool.id.replace(/^xiaolou_(image|video)_/, '');
 }
 
-function toTextModelOptions(models: JaazModelInfo[]): ComposerModelOption[] {
+function toTextModelOptions(models: NativeAgentModelInfo[]): ComposerModelOption[] {
     return models
         .filter((model) => !model.type || model.type === 'text')
         .map((model) => ({
@@ -438,7 +574,7 @@ function toTextModelOptions(models: JaazModelInfo[]): ComposerModelOption[] {
         }));
 }
 
-function toToolModelOptions(tools: JaazToolInfo[], kind: 'image' | 'video'): ComposerModelOption[] {
+function toToolModelOptions(tools: NativeAgentToolInfo[], kind: 'image' | 'video'): ComposerModelOption[] {
     return tools
         .filter((tool) => tool.type === kind)
         .map((tool) => ({
@@ -497,6 +633,12 @@ function modelOptionDescription(option: ComposerModelOption) {
         if (option.label.includes('PixVerse')) return 'PixVerse 视频模型，适合快速生成视频。';
         if (option.label.includes('Kling') || option.label.includes('kling')) return '可灵视频模型，适合多图和元素视频生成。';
         return '视频生成工具。';
+    }
+
+    if (option.kind === 'text') {
+        if (option.id === 'qwen3.6-plus') return '文本推理与长任务规划模型，适合复杂 Agent 步骤拆解。';
+        if (option.id === 'vertex:gemini-3-flash-preview') return 'Gemini 3 文本推理模型，适合快速规划和多模态上下文理解。';
+        if (option.id === 'qwen-plus') return '通义千问文本模型，适合稳定的中文 Agent 规划。';
     }
 
     return '当前模式可用模型。';
@@ -910,6 +1052,9 @@ type FloatingPanelLayout = {
 
 const FLOATING_MENU_PADDING = 16;
 const FLOATING_MENU_TRIGGER_GAP = 8;
+const CHAT_PANEL_TRANSITION_MS = 360;
+const CHAT_PANEL_OPEN_DELAY_MS = 40;
+const CHAT_BUBBLE_TRANSITION_MS = 180;
 
 function getFloatingPanelLayout(trigger: HTMLElement | null, preferredWidth: number): FloatingPanelLayout | null {
     if (!trigger || typeof window === 'undefined') return null;
@@ -932,6 +1077,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     canvasTheme = 'light',
     getCanvasSnapshot,
     onApplyActions,
+    restoreProjectContext,
+    onProjectContextChange,
 }) => {
     const isDark = canvasTheme === 'dark';
     const [message, setMessage] = useState('');
@@ -942,13 +1089,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const [showChineseTip, setShowChineseTip] = useState(true);
     const [activeMenu, setActiveMenu] = useState<ComposerMenu>(null);
     const [composerMode, setComposerMode] = useState<ComposerMode>('agent');
-    const [skillCategory, setSkillCategory] = useState(SKILL_CATEGORIES[0].id);
+    const [skillCategory, setSkillCategory] = useState(AGENT_SKILL_CATEGORIES[0].id);
+    const [selectedSkill, setSelectedSkill] = useState<AgentCanvasSkill | null>(null);
     const [webSearchEnabled, setWebSearchEnabled] = useState(false);
     const [canvasFilesEnabled, setCanvasFilesEnabled] = useState(true);
     const [showAssetLibrary, setShowAssetLibrary] = useState(false);
     const [thinkingModeEnabled, setThinkingModeEnabled] = useState(false);
-    const [jaazModels, setJaazModels] = useState<JaazModelInfo[]>([]);
-    const [jaazTools, setJaazTools] = useState<JaazToolInfo[]>([]);
+    const [shouldRenderPanel, setShouldRenderPanel] = useState(isOpen);
+    const [isPanelVisible, setIsPanelVisible] = useState(isOpen);
+    const [agentModels, setAgentModels] = useState<NativeAgentModelInfo[]>([]);
+    const [agentTools, setAgentTools] = useState<NativeAgentToolInfo[]>([]);
     const [isLoadingModelCatalog, setIsLoadingModelCatalog] = useState(false);
     const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
     const [selectedTextModel, setSelectedTextModel] = useState('');
@@ -956,7 +1106,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const [selectedVideoTool, setSelectedVideoTool] = useState('');
     const [selectedImageToolIds, setSelectedImageToolIds] = useState<string[]>([]);
     const [selectedVideoToolIds, setSelectedVideoToolIds] = useState<string[]>([]);
-    const [modelPreferenceTab, setModelPreferenceTab] = useState<ModelPreferenceTab>('image');
+    const [modelPreferenceTab, setModelPreferenceTab] = useState<ModelPreferenceTab>('cot');
     const [autoModelPreference, setAutoModelPreference] = useState(true);
     const [imageResolution, setImageResolution] = useState(PREFERRED_IMAGE_RESOLUTION);
     const [imageAspectRatio, setImageAspectRatio] = useState('1:1');
@@ -987,15 +1137,22 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         messages,
         topic,
         isLoading,
+        activityEvents,
         error,
         sessions,
         isLoadingSessions,
         sendMessage,
+        cancelGeneration,
         startNewChat,
         loadSession,
         deleteSession,
         hasMessages,
-    } = useChatAgent({ getCanvasSnapshot, onApplyActions });
+    } = useChatAgent({
+        getCanvasSnapshot,
+        onApplyActions,
+        restoreProjectContext,
+        onProjectContextChange,
+    });
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1039,7 +1196,53 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, isLoading]);
+    }, [messages, isLoading, activityEvents]);
+
+    useEffect(() => {
+        let unmountDelayId = 0;
+
+        if (isOpen) {
+            setIsPanelVisible(false);
+            setShouldRenderPanel(true);
+        } else {
+            setIsPanelVisible(false);
+            unmountDelayId = window.setTimeout(() => {
+                setShouldRenderPanel(false);
+            }, CHAT_PANEL_TRANSITION_MS);
+        }
+
+        return () => {
+            if (unmountDelayId) window.clearTimeout(unmountDelayId);
+        };
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen || !shouldRenderPanel || isPanelVisible) {
+            return;
+        }
+
+        const openDelayId = window.setTimeout(() => {
+            setIsPanelVisible(true);
+        }, CHAT_PANEL_OPEN_DELAY_MS);
+
+        return () => window.clearTimeout(openDelayId);
+    }, [isOpen, isPanelVisible, shouldRenderPanel]);
+
+    useEffect(() => {
+        if (isOpen) {
+            return;
+        }
+
+        setActiveMenu(null);
+        setShowConversationMenu(false);
+        setShowThinkingConfirm(false);
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (composerMode !== 'agent' && selectedSkill) {
+            setSelectedSkill(null);
+        }
+    }, [composerMode, selectedSkill]);
 
     useEffect(() => {
         if (activeMenu !== 'videoSettings' && activeMenu !== 'videoShot') {
@@ -1076,10 +1279,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             setIsLoadingModelCatalog(true);
             setModelCatalogError(null);
             try {
-                const catalog = await fetchJaazModelsAndTools();
+                const catalog = await fetchNativeAgentModelsAndTools();
                 if (cancelled) return;
-                setJaazModels(catalog.models);
-                setJaazTools(catalog.tools);
+                setAgentModels(catalog.models);
+                setAgentTools(catalog.tools);
             } catch (err) {
                 if (cancelled) return;
                 setModelCatalogError(err instanceof Error ? err.message : '模型列表加载失败');
@@ -1142,9 +1345,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         };
     }, []);
 
-    const textModelOptions = useMemo(() => toTextModelOptions(jaazModels), [jaazModels]);
-    const imageModelOptions = useMemo(() => toToolModelOptions(jaazTools, 'image'), [jaazTools]);
-    const videoModelOptions = useMemo(() => toToolModelOptions(jaazTools, 'video'), [jaazTools]);
+    const textModelOptions = useMemo(() => toTextModelOptions(agentModels), [agentModels]);
+    const cotTextModelOptions = useMemo(
+        () => COT_TEXT_MODEL_IDS
+            .map((id) => textModelOptions.find((option) => option.id === id))
+            .filter((option): option is ComposerModelOption => Boolean(option)),
+        [textModelOptions],
+    );
+    const imageModelOptions = useMemo(() => toToolModelOptions(agentTools, 'image'), [agentTools]);
+    const videoModelOptions = useMemo(() => toToolModelOptions(agentTools, 'video'), [agentTools]);
 
     useEffect(() => {
         if (!selectedTextModel && textModelOptions.length > 0) {
@@ -1238,7 +1447,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         imageSettingsSummary,
         showImageDimensionSettings && currentImageSize ? currentImageSizeLabel : null,
     ].filter(Boolean).join(' · ');
-    const hasComposerPayload = message.trim().length > 0 || attachedMedia.length > 0;
+    const hasComposerPayload = message.trim().length > 0 || attachedMedia.length > 0 || !!selectedSkill;
     const selectedVideoOption = useMemo(
         () => videoModelOptions.find((option) => option.id === selectedVideoTool),
         [selectedVideoTool, videoModelOptions],
@@ -1642,7 +1851,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         setAttachedMedia((prev) => prev.filter((item) => item.nodeId !== nodeId));
     };
 
-    const buildComposerInstruction = () => {
+    const buildComposerInstruction = (skill: AgentCanvasSkill | null = selectedSkill) => {
         const imageModelLabel = autoModelPreference
             ? (selectedImagePoolLabels.length ? selectedImagePoolLabels.join(' / ') : selectedImageOption?.label || currentCanvasImageModel.name)
             : (selectedImageOption?.label || currentCanvasImageModel.name);
@@ -1655,6 +1864,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
         if (thinkingModeEnabled) {
             lines.push('启用思考模式：先制定复杂任务计划，再按步骤自主执行；回复中只展示清晰结论和必要步骤，不暴露内部推理。');
+        }
+
+        if (skill) {
+            lines.push(`当前启用 Skill：${skill.title}（${skill.id}）。`);
+            if (skill.hiddenInstruction) {
+                lines.push(skill.hiddenInstruction);
+            }
         }
 
         if (composerMode === 'image') {
@@ -1905,13 +2121,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     };
 
     const handleSend = async () => {
-        if ((!message.trim() && attachedMedia.length === 0) || isLoading) return;
+        if ((!message.trim() && attachedMedia.length === 0 && !selectedSkill) || isLoading) return;
 
         const currentMessage = message.trim();
         const currentMedia = attachedMedia;
+        const currentSkill = selectedSkill;
+        const outgoingMessage = currentMessage || (currentSkill ? `使用 Skill：${currentSkill.title}` : '');
 
         setMessage('');
         setAttachedMedia([]);
+        setSelectedSkill(null);
         setActiveMenu(null);
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
@@ -1933,7 +2152,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         const allowedVideoToolIds = composerMode === 'image' ? undefined : activeVideoToolPool;
 
         await sendMessage(
-            currentMessage,
+            outgoingMessage,
             currentMedia.length > 0
                 ? currentMedia.map((item) => ({
                     type: item.type,
@@ -1945,6 +2164,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             {
                 mode: 'agent',
                 model: selectedTextModel || 'auto',
+                modelLabel: activeModelOption?.label || selectedTextModel || 'Auto',
                 toolId: selectedToolId,
                 toolType: selectedToolType,
                 preferredImageToolId: selectedImageTool,
@@ -1954,7 +2174,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 autoModelPreference,
                 webSearch: webSearchEnabled,
                 includeCanvasFiles: canvasFilesEnabled,
-                instruction: buildComposerInstruction(),
+                instruction: buildComposerInstruction(currentSkill),
+                skillId: currentSkill?.id,
+                skillTitle: currentSkill?.title,
+                skillInstruction: currentSkill?.hiddenInstruction,
+                maxTokens: currentSkill?.maxTokens,
             },
         );
     };
@@ -1963,6 +2187,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         startNewChat();
         setMessage('');
         setAttachedMedia([]);
+        setSelectedSkill(null);
         setActiveMenu(null);
         setShowConversationMenu(false);
         setShowChineseTip(true);
@@ -2072,11 +2297,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         setShowAssetLibrary(false);
     };
 
-    const handleSkillSelect = (prompt: string) => {
-        setMessage((prev) => {
-            const trimmed = prev.trim();
-            return trimmed ? `${trimmed}\n${prompt}` : prompt;
-        });
+    const handleSkillSelect = (skill: AgentCanvasSkill) => {
+        setSelectedSkill(skill);
+        setComposerMode('agent');
         setActiveMenu(null);
         textareaRef.current?.focus();
     };
@@ -2111,7 +2334,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         window.setTimeout(() => setIsDragOver(false), 1400);
     };
 
-    if (!isOpen) return null;
+    if (!shouldRenderPanel) return null;
 
     const showHighlight = isDraggingNode || isDragOver;
     const topicTitle = topic || (hasMessages ? '新的对话' : '智能体画布');
@@ -2122,7 +2345,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     });
     const activeMode = COMPOSER_MODES.find((item) => item.value === composerMode) || COMPOSER_MODES[0];
     const ActiveModeIcon = activeMode.icon;
-    const visibleSkills = SKILLS.filter((skill) => skill.category === skillCategory);
+    const visibleSkills = AGENT_SKILLS.filter((skill) => skill.category === skillCategory);
     const activeModelOptions = composerMode === 'image'
         ? imageModelOptions
         : composerMode === 'video'
@@ -2134,16 +2357,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             ? selectedVideoTool
             : selectedTextModel;
     const activeModelOption = activeModelOptions.find((option) => option.id === activeModelId);
-    const modelPreferenceOptions = modelPreferenceTab === 'image'
-        ? imageModelOptions
-        : modelPreferenceTab === 'video'
-            ? videoModelOptions
-            : [];
-    const modelPreferenceSelectedId = modelPreferenceTab === 'image'
-        ? selectedImageTool
-        : modelPreferenceTab === 'video'
-            ? selectedVideoTool
-            : '';
+    const modelPreferenceOptions = modelPreferenceTab === 'cot'
+        ? cotTextModelOptions
+        : modelPreferenceTab === 'image'
+            ? imageModelOptions
+            : modelPreferenceTab === 'video'
+                ? videoModelOptions
+                : [];
+    const modelPreferenceSelectedId = modelPreferenceTab === 'cot'
+        ? selectedTextModel
+        : modelPreferenceTab === 'image'
+            ? selectedImageTool
+            : modelPreferenceTab === 'video'
+                ? selectedVideoTool
+                : '';
+    const modelPreferenceTitle = MODEL_PREFERENCE_TABS.find((tabItem) => tabItem.value === modelPreferenceTab)?.label || 'Model';
     const activeModelTooltip = '模型偏好';
     const hasRequiredVideoPayload = (() => {
         if (!hasComposerPayload) return false;
@@ -2153,13 +2381,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         if (videoComposerMode === 'motion_control') return videoImages.length > 0;
         return Boolean(message.trim() || attachedMedia.length > 0);
     })();
+    const isAgentGenerating = composerMode === 'agent' && isLoading;
     const isActionDisabled = composerMode === 'agent'
-        ? isLoading
+        ? false
         : composerMode === 'video'
             ? isLoading || isGeneratingComposerVideo || isLoadingVideoCapabilities || !hasRequiredVideoPayload || !hasVideoCapability
             : isLoading || !hasComposerPayload;
     const actionTooltip = composerMode === 'agent'
-        ? '语音输入'
+        ? isAgentGenerating ? '停止生成' : '语音输入'
         : composerMode === 'image'
             ? hasComposerPayload ? '生成图像' : '请输入提示词'
             : !hasVideoCapability
@@ -2242,6 +2471,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     };
 
     const handleComposerAction = () => {
+        if (isAgentGenerating) {
+            cancelGeneration();
+            return;
+        }
+
         if (composerMode === 'agent' && !hasComposerPayload) {
             textareaRef.current?.focus();
             return;
@@ -2294,10 +2528,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const videoToggleButtonClass = (checked: boolean) => `flex h-6 w-10 items-center rounded-full p-0.5 transition-colors ${
         checked ? 'bg-primary' : 'bg-border'
     }`;
+    const panelTransitionStyle: React.CSSProperties = {
+        opacity: isPanelVisible ? 1 : 0,
+        transform: isPanelVisible ? 'translate3d(0, 0, 0)' : 'translate3d(100%, 0, 0)',
+        transition: `transform ${CHAT_PANEL_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${CHAT_PANEL_TRANSITION_MS}ms ease`,
+    };
 
     return (
         <div
-            className={`agent-chat-panel fixed right-0 top-0 z-[90] flex h-full w-[400px] flex-col border-l bg-card text-card-foreground shadow-2xl transition-all duration-300 ${showHighlight ? 'border-primary ring-2 ring-primary/20' : 'border-border'}`}
+            aria-hidden={!isPanelVisible}
+            className={`agent-chat-panel fixed right-0 top-0 z-[90] flex h-full w-[400px] transform-gpu select-text flex-col border-l bg-card text-card-foreground shadow-2xl will-change-transform ${isPanelVisible ? '' : 'pointer-events-none'} ${showHighlight ? 'border-primary ring-2 ring-primary/20' : 'border-border'}`}
+            style={panelTransitionStyle}
             onDragEnter={handleDragEnter}
             onDragLeave={handleDragLeave}
             onDragOver={handleDragOver}
@@ -2527,7 +2768,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             </header>
 
             <main className="flex-1 overflow-y-auto px-4 pb-4 pt-3">
-                {!hasMessages ? (
+                {!hasMessages && activityEvents.length === 0 && !isLoading ? (
                     <div className="flex min-h-[48vh] flex-col items-center justify-center text-center">
                         <h1 className="text-3xl font-bold tracking-normal text-neutral-950">你好</h1>
                         <p className="mt-4 max-w-[260px] text-sm leading-6 text-neutral-500">
@@ -2545,13 +2786,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                 timestamp={msg.timestamp}
                             />
                         ))}
-                    </div>
-                )}
-
-                {isLoading && (
-                    <div className="mt-4 flex items-center gap-2 text-sm text-neutral-500">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        正在生成回复...
+                        {(isLoading || activityEvents.length > 0) && (
+                            <AgentActivityPanel events={activityEvents} pending={isLoading} />
+                        )}
                     </div>
                 )}
 
@@ -2670,28 +2907,48 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     )}
 
                     {composerMode === 'agent' ? (
-                        <textarea
-                            ref={textareaRef}
-                            value={message}
-                            onChange={(e) => setMessage(e.target.value)}
-                            placeholder="请输入你的设计需求"
-                            className="max-h-[128px] min-h-[32px] w-full resize-none bg-transparent text-sm leading-6 text-neutral-950 outline-none placeholder:text-neutral-400"
-                            rows={1}
-                            disabled={isLoading}
-                            onInput={(e) => {
-                                const target = e.target as HTMLTextAreaElement;
-                                target.style.height = 'auto';
-                                const newHeight = Math.min(target.scrollHeight, 128);
-                                target.style.height = `${newHeight}px`;
-                                target.style.overflowY = target.scrollHeight > 128 ? 'auto' : 'hidden';
-                            }}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSend();
-                                }
-                            }}
-                        />
+                        <>
+                            {selectedSkill && (
+                                <div className="mb-2 flex flex-wrap items-center gap-2">
+                                    <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-violet-100 bg-violet-50/80 px-2.5 py-1 text-sm font-medium text-neutral-900">
+                                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] bg-white text-violet-500 shadow-sm">
+                                            <BookOpen size={10} strokeWidth={2.2} />
+                                        </span>
+                                        <span className="truncate">{selectedSkill.title}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedSkill(null)}
+                                            className="-mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-white hover:text-neutral-700"
+                                            aria-label="移除 Skill"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            <textarea
+                                ref={textareaRef}
+                                value={message}
+                                onChange={(e) => setMessage(e.target.value)}
+                                placeholder="请输入你的设计需求"
+                                className="max-h-[128px] min-h-[32px] w-full resize-none bg-transparent text-sm leading-6 text-neutral-950 outline-none placeholder:text-neutral-400"
+                                rows={1}
+                                disabled={isLoading}
+                                onInput={(e) => {
+                                    const target = e.target as HTMLTextAreaElement;
+                                    target.style.height = 'auto';
+                                    const newHeight = Math.min(target.scrollHeight, 128);
+                                    target.style.height = `${newHeight}px`;
+                                    target.style.overflowY = target.scrollHeight > 128 ? 'auto' : 'hidden';
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleSend();
+                                    }
+                                }}
+                            />
+                        </>
                     ) : (
                         <div className="mb-1 flex min-h-[128px] flex-col gap-3">
                             {composerMode === 'video' ? (
@@ -2919,7 +3176,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                             <div className="absolute bottom-11 left-[-48px] z-50 w-[392px] rounded-xl border border-neutral-100 bg-white p-4 shadow-2xl">
                                         <div className="mb-3 text-sm font-semibold text-neutral-950">Skills</div>
                                         <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-                                            {SKILL_CATEGORIES.map((category) => (
+                                            {AGENT_SKILL_CATEGORIES.map((category) => (
                                                 <button
                                                     key={category.id}
                                                     type="button"
@@ -2947,8 +3204,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                                 <button
                                                     key={skill.id}
                                                     type="button"
-                                                    onClick={() => handleSkillSelect(skill.prompt)}
-                                                    className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-neutral-50"
+                                                    onClick={() => handleSkillSelect(skill)}
+                                                    className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${selectedSkill?.id === skill.id ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`}
                                                 >
                                                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-50 text-violet-600">
                                                         <Video size={15} />
@@ -3002,7 +3259,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                                     type="button"
                                                     onClick={() => {
                                                         setComposerMode(mode.value);
-                                                        if (mode.value === 'image' || mode.value === 'video') {
+                                                        if (mode.value === 'agent') {
+                                                            setModelPreferenceTab('cot');
+                                                        } else if (mode.value === 'image' || mode.value === 'video') {
                                                             setModelPreferenceTab(mode.value);
                                                         }
                                                         setActiveMenu(null);
@@ -3471,7 +3730,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                         </div>
 
                                         <div
-                                            className={`mb-2 grid grid-cols-3 rounded-md p-0.5 ${
+                                            className={`mb-2 grid grid-cols-4 rounded-md p-0.5 ${
                                                 isDark ? 'bg-zinc-800/90' : 'bg-neutral-100'
                                             }`}
                                         >
@@ -3514,7 +3773,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                                     : 'mb-1.5 text-xs font-medium text-neutral-500'
                                             }
                                         >
-                                            {modelPreferenceTab === 'image' ? 'Image' : modelPreferenceTab === 'video' ? 'Video' : '3D'}
+                                            {modelPreferenceTitle}
                                         </div>
 
                                         <div className="max-h-60 overflow-y-auto pr-0.5">
@@ -3551,6 +3810,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                                                     setSelectedVideoToolIds((prev) => (
                                                                         autoModelPreference ? toggleModelPoolId(prev, option.id) : [option.id]
                                                                     ));
+                                                                } else if (option.kind === 'text') {
+                                                                    setSelectedTextModel(option.id);
                                                                 }
                                                             }}
                                                             className={
@@ -3687,18 +3948,22 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                             : 'bg-neutral-950 text-white hover:bg-neutral-800'
                                         }`
                                         : composerMode === 'agent'
-                                            ? `flex h-12 w-12 items-center justify-center rounded-full text-white shadow-sm transition-colors ${isActionDisabled
-                                                ? 'cursor-wait bg-neutral-300'
-                                                : 'bg-neutral-950 hover:bg-neutral-800'
+                                            ? `flex h-12 w-12 items-center justify-center rounded-full text-white shadow-sm transition-colors ${isAgentGenerating
+                                                ? 'bg-red-600 hover:bg-red-700'
+                                                : isActionDisabled
+                                                    ? 'cursor-not-allowed bg-neutral-300'
+                                                    : 'bg-neutral-950 hover:bg-neutral-800'
                                             }`
                                             : `flex h-10 min-w-[56px] items-center justify-center gap-1 rounded-full px-3 text-sm font-semibold text-white transition-colors ${isActionDisabled
                                                 ? 'cursor-not-allowed bg-neutral-300'
                                                 : 'bg-neutral-950 hover:bg-neutral-800'
                                             }`
                                     }
-                                    aria-label={composerMode === 'agent' ? '语音输入' : composerMode === 'image' ? (hasComposerPayload ? `生成图像，消耗 ${imageActionCreditsLabel} 积分` : '请输入提示词') : '生成视频'}
+                                    aria-label={composerMode === 'agent' ? (isAgentGenerating ? '停止生成' : '语音输入') : composerMode === 'image' ? (hasComposerPayload ? `生成图像，消耗 ${imageActionCreditsLabel} 积分` : '请输入提示词') : '生成视频'}
                                 >
-                                    {isLoading || isGeneratingComposerVideo ? (
+                                    {isAgentGenerating ? (
+                                        <Square size={15} fill="currentColor" className="animate-pulse" />
+                                    ) : isLoading || isGeneratingComposerVideo ? (
                                         <Loader2 size={16} className="animate-spin" />
                                     ) : composerMode === 'image' ? (
                                         <>
@@ -3751,14 +4016,47 @@ interface ChatBubbleProps {
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({ onClick, isOpen }) => {
-    if (isOpen) return null;
+    const [shouldRenderBubble, setShouldRenderBubble] = useState(!isOpen);
+    const [isBubbleVisible, setIsBubbleVisible] = useState(!isOpen);
+
+    useEffect(() => {
+        let frameId = 0;
+        let timeoutId = 0;
+
+        if (isOpen) {
+            setIsBubbleVisible(false);
+            timeoutId = window.setTimeout(() => {
+                setShouldRenderBubble(false);
+            }, CHAT_BUBBLE_TRANSITION_MS);
+        } else {
+            setShouldRenderBubble(true);
+            frameId = window.requestAnimationFrame(() => {
+                setIsBubbleVisible(true);
+            });
+        }
+
+        return () => {
+            if (frameId) window.cancelAnimationFrame(frameId);
+            if (timeoutId) window.clearTimeout(timeoutId);
+        };
+    }, [isOpen]);
+
+    if (!shouldRenderBubble) return null;
+
+    const bubbleTransitionStyle: React.CSSProperties = {
+        opacity: isBubbleVisible ? 1 : 0,
+        transform: isBubbleVisible ? 'translate3d(0, 0, 0) scale(1)' : 'translate3d(12px, 0, 0) scale(0.96)',
+        transition: `transform ${CHAT_BUBBLE_TRANSITION_MS}ms ease, opacity ${CHAT_BUBBLE_TRANSITION_MS}ms ease`,
+    };
 
     return (
         <button
             type="button"
             onClick={onClick}
-            className="fixed right-4 top-4 z-50 flex h-9 items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+            className={`fixed right-4 top-4 z-50 flex h-9 transform-gpu items-center gap-1.5 rounded-xl border border-border bg-card px-3 text-sm font-medium text-foreground shadow-sm transition-colors will-change-transform hover:bg-accent hover:text-accent-foreground ${isBubbleVisible ? '' : 'pointer-events-none'}`}
+            style={bubbleTransitionStyle}
             aria-label="打开对话"
+            aria-hidden={!isBubbleVisible}
         >
             <MessageSquare size={14} />
             <span>对话</span>

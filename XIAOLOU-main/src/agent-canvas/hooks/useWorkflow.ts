@@ -24,6 +24,7 @@ interface WorkflowData {
     nodes: NodeData[];
     groups: NodeGroup[];
     viewport: Viewport;
+    agentContext?: unknown | null;
 }
 
 interface UseWorkflowOptions {
@@ -36,6 +37,7 @@ interface UseWorkflowOptions {
     setSelectedNodeIds: Dispatch<SetStateAction<string[]>>;
     setCanvasTitle: (title: string) => void;
     setEditingTitleValue: (value: string) => void;
+    getAgentContext?: () => unknown | null;
     onPanelOpen?: () => void; // Called when workflow panel opens
 }
 
@@ -49,6 +51,7 @@ export const useWorkflow = ({
     setSelectedNodeIds,
     setCanvasTitle,
     setEditingTitleValue,
+    getAgentContext,
     onPanelOpen
 }: UseWorkflowOptions) => {
     // Workflow state
@@ -66,7 +69,8 @@ export const useWorkflow = ({
                 title: canvasTitle,
                 nodes: sanitizedNodes,
                 groups,
-                viewport
+                viewport,
+                agentContext: getAgentContext?.() ?? null,
             };
 
             try {
@@ -101,12 +105,13 @@ export const useWorkflow = ({
                 nodes: sanitizedNodes,
                 groups,
                 viewport,
+                agentContext: getAgentContext?.() ?? null,
             };
 
             // Direct-embed mode: call host services save directly
             if (hasCanvasHostServices()) {
                 const services = getCanvasHostServices();
-                void services?.saveCanvas(workflowSnapshot, imageUrls);
+                await services?.saveCanvas(workflowSnapshot, imageUrls);
             }
 
             // iframe mode: notify parent via postMessage
@@ -119,7 +124,7 @@ export const useWorkflow = ({
                 }, '*');
             }
         }
-    }, [workflowId, canvasTitle, nodes, groups, viewport]);
+    }, [workflowId, canvasTitle, nodes, groups, viewport, getAgentContext]);
 
     /**
      * Load workflow from server

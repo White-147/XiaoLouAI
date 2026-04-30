@@ -325,6 +325,8 @@ export default function Layout() {
   }, [actorId]);
 
   useEffect(() => {
+    if (!isAgentStudioCanvasRoute) return;
+
     const keepJaazAlive = () => {
       void ensureJaazServices().catch((error) => {
         if (import.meta.env.DEV) {
@@ -336,7 +338,7 @@ export default function Layout() {
     keepJaazAlive();
     const intervalId = window.setInterval(keepJaazAlive, 60_000);
     return () => window.clearInterval(intervalId);
-  }, []);
+  }, [isAgentStudioCanvasRoute]);
 
   useEffect(() => {
     if (!profileMenuOpen) return;

@@ -771,7 +771,7 @@ export const useGeneration = ({ nodes, updateNode, generationAccess }: UseGenera
 
             if (acceptedTaskId) {
                 const reconciled = await reconcileAcceptedTask(node, acceptedTaskId);
-                if (reconciled !== 'unavailable') {
+                if (reconciled === 'succeeded' || reconciled === 'failed') {
                     console.warn('Generation completed via recovery after local error:', {
                         nodeId: id,
                         taskId: acceptedTaskId,
@@ -779,6 +779,14 @@ export const useGeneration = ({ nodes, updateNode, generationAccess }: UseGenera
                         error,
                     });
                     return;
+                }
+
+                if (reconciled === 'pending') {
+                    console.warn('Generation recovery is still pending after local error; surfacing original error:', {
+                        nodeId: id,
+                        taskId: acceptedTaskId,
+                        error,
+                    });
                 }
             }
 

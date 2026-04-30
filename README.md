@@ -64,6 +64,46 @@ scripts\start_xiaolou_stack.cmd
 
 `/playground` 只保留前端路由入口，不再启动 Docker 容器或连接外置对话服务。
 
+## 部署说明
+
+建议目标机器使用 Node.js 20+。仓库已提交前端、后端、Jaaz UI 的
+`package-lock.json`，部署时按 lockfile 安装依赖即可：
+
+```bash
+cd core-api && npm install
+cd ../XIAOLOU-main && npm install
+cd ../jaaz/react && npm install
+```
+
+生产或公网单域名部署时，先启动这些服务：
+
+```bash
+cd core-api && npm run start      # 4100
+cd XIAOLOU-main && npm run dev    # 3000，或 npm run build && npm run preview
+```
+
+Caddy 用于统一反向代理入口：
+
+- `/api/*`、`/uploads/*`、`/jaaz*`、`/jaaz-api*`、`/socket.io/*` 转发到 `4100`
+- 其他页面转发到前端 `3000`
+
+仓库只提交 `caddy/Caddyfile` 与部署说明，不提交 `caddy.exe`、zip、日志和
+pid 文件。目标机器请安装系统 Caddy，或从官方 release 下载二进制后运行：
+
+```bash
+caddy run --config caddy/Caddyfile
+```
+
+Windows 本地调试可以使用：
+
+```text
+scripts\start_xiaolou_stack.cmd
+scripts\start_caddy.cmd
+```
+
+部署前请根据实际域名修改 `caddy/Caddyfile` 中的站点块，并把真实密钥只写入
+`.env.local`，不要提交到仓库。
+
 ## License
 
 MIT

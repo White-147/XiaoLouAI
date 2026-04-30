@@ -89,6 +89,7 @@ export type HostProjectFull = HostProjectSummary & {
     groups: unknown[];
     viewport: { x: number; y: number; zoom: number };
   } | null;
+  agentContext?: unknown | null;
 };
 
 export type HostSaveWorkflow = {
@@ -97,6 +98,7 @@ export type HostSaveWorkflow = {
   nodes: unknown[];
   groups: unknown[];
   viewport: { x: number; y: number; zoom: number };
+  agentContext?: unknown | null;
 };
 
 export type HostProjectLoadData = {
@@ -106,6 +108,7 @@ export type HostProjectLoadData = {
   nodes: unknown[];
   groups: unknown[];
   viewport?: { x: number; y: number; zoom: number };
+  agentContext?: unknown | null;
 };
 
 export type HostCanvasProjectVersion = {

@@ -56,7 +56,7 @@ const {
 const ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3";
 const DEFAULT_CHAT_MODEL = "doubao-seed-2-0-mini-260215";
 const DEFAULT_AGENT_CANVAS_GEMINI_MODEL = "vertex:gemini-3-flash-preview";
-const DEFAULT_AGENT_CANVAS_TEXT_MODEL = "qwen-plus";
+const DEFAULT_AGENT_CANVAS_TEXT_MODEL = "qwen3.6-plus";
 
 function route(method, path, handler) {
   return { method, path, handler, statusCode: 200 };
@@ -164,6 +164,7 @@ function buildRoutes(store) {
     ...buildToolboxRoutes(store),
     ...buildAdminRoutes(store),
     ...buildCanvasProjectRoutes(store),
+    ...buildAgentCanvasProjectRoutes(store),
     ...buildCanvasLibraryRoutes(store),
   ];
 }
@@ -1643,15 +1644,107 @@ function extractAgentJson(text) {
   return null;
 }
 
+function extractPartialAgentActions(text) {
+  const raw = String(text || "");
+  const actionsMatch = /"actions"\s*:\s*\[/i.exec(raw);
+  if (!actionsMatch) return [];
+
+  const arrayStart = raw.indexOf("[", actionsMatch.index);
+  if (arrayStart < 0) return [];
+
+  const actions = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = arrayStart + 1; index < raw.length; index += 1) {
+    const char = raw[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        try {
+          actions.push(JSON.parse(raw.slice(start, index + 1)));
+        } catch {}
+        start = -1;
+      }
+    }
+  }
+
+  return actions;
+}
+
+function getAgentActionTypeForServer(action) {
+  if (!action || typeof action !== "object" || Array.isArray(action)) return "";
+  return String(action.type || action.action || action.kind || "").trim().toLowerCase();
+}
+
+function isStoryboardTextCreateAction(action) {
+  if (!action || typeof action !== "object" || Array.isArray(action)) return false;
+  if (getAgentActionTypeForServer(action) !== "create_node") return false;
+  const nodeType = String(action.nodeType || action.typeName || action.kind || action.node?.type || action.data?.type || "").trim().toLowerCase();
+  return !nodeType || nodeType === "text" || nodeType.includes("text") || nodeType.includes("文本");
+}
+
+function normalizeStoryboardBreakdownActions(actions) {
+  if (!Array.isArray(actions)) return [];
+  const stamp = Date.now().toString(36);
+  const textActions = [];
+
+  actions.forEach((action, index) => {
+    if (!isStoryboardTextCreateAction(action)) return;
+    const id = String(action.id || action.nodeId || action.targetNodeId || `storyboard-breakdown-${stamp}-${index + 1}`).trim();
+    textActions.push({
+      ...action,
+      id,
+      type: "create_node",
+      nodeType: "Text",
+      title: String(action.title || action.name || action.label || `剧本拆解 - 第 ${textActions.length + 1} 部分`).slice(0, 120),
+      content: String(action.content || action.prompt || action.text || "").trim(),
+      x: Number.isFinite(Number(action.x)) ? Number(action.x) : 800 + textActions.length * 360,
+      y: Number.isFinite(Number(action.y)) ? Number(action.y) : 200,
+    });
+  });
+
+  if (textActions.length === 0) return [];
+
+  return [
+    ...textActions,
+    {
+      type: "group_nodes",
+      groupId: `storyboard-breakdown-group-${stamp}`,
+      label: "剧本拆解",
+      nodeIds: textActions.map((action) => action.id),
+    },
+  ];
+}
+
 function getAgentCanvasTextModel(store) {
-  const fallback = process.env.AGENT_CANVAS_TEXT_MODEL || DEFAULT_AGENT_CANVAS_TEXT_MODEL;
-  const defaultTextModel =
-    typeof store?.getDefaultModelId === "function"
-      ? store.getDefaultModelId("textModelId", fallback)
-      : fallback;
-  return typeof store?.getNodePrimaryModel === "function"
-    ? store.getNodePrimaryModel("script", defaultTextModel)
-    : defaultTextModel;
+  return process.env.AGENT_CANVAS_TEXT_MODEL || DEFAULT_AGENT_CANVAS_TEXT_MODEL;
 }
 
 function extractOpenAiCompletionText(payload) {
@@ -1678,16 +1771,80 @@ function getAgentCanvasModelPlan(requestedModel, fallbackTextModel) {
       { provider: "dashscope", model: textModel, fallbackOnly: true },
     ];
   }
-  return [{ provider: "dashscope", model: normalized || textModel }];
+  if (normalized && normalized !== textModel) {
+    return [
+      { provider: "dashscope", model: normalized },
+      { provider: "dashscope", model: textModel, fallbackOnly: true },
+    ];
+  }
+  return [{ provider: "dashscope", model: textModel }];
+}
+
+function normalizeAgentCanvasMaxTokens(value, fallback = 4096, max = 8000) {
+  const parsed = Number(value);
+  const base = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Math.max(1024, Math.min(max, Math.round(base)));
+}
+
+function createAgentCanvasAbortError() {
+  const error = new Error("Agent canvas request aborted");
+  error.name = "AbortError";
+  error.code = "AGENT_REQUEST_ABORTED";
+  error.statusCode = 499;
+  return error;
+}
+
+function isAgentCanvasAbortError(error) {
+  return (
+    error?.name === "AbortError" ||
+    error?.code === "ABORT_ERR" ||
+    error?.code === "AGENT_REQUEST_ABORTED"
+  );
+}
+
+function throwIfAgentCanvasAborted(signal) {
+  if (signal?.aborted) {
+    throw createAgentCanvasAbortError();
+  }
+}
+
+function createAgentCanvasAbortScope(res) {
+  const controller = new AbortController();
+  let completed = false;
+  const abort = () => {
+    if (!completed && !controller.signal.aborted) controller.abort();
+  };
+  if (res?.on) res.on("close", abort);
+  return {
+    signal: controller.signal,
+    finish() {
+      completed = true;
+      if (res?.off) res.off("close", abort);
+    },
+  };
 }
 
 async function requestAgentCanvasCompletion(messages, options = {}) {
+  const signal = options.signal;
+  throwIfAgentCanvasAborted(signal);
   const requestedModel = String(options.model || process.env.AGENT_CANVAS_MODEL || "auto").trim();
   const textModel = String(options.textModel || process.env.AGENT_CANVAS_TEXT_MODEL || DEFAULT_AGENT_CANVAS_TEXT_MODEL).trim();
+  const maxTokens = normalizeAgentCanvasMaxTokens(options.maxTokens, 4096, options.maxTokenLimit || 8000);
   const plan = getAgentCanvasModelPlan(requestedModel, textModel);
   const errors = [];
 
+  console.info("[agent-canvas] planner model plan", {
+    requestedModel,
+    textModel,
+    plan: plan.map((item) => ({
+      provider: item.provider,
+      model: item.model,
+      fallbackOnly: item.fallbackOnly === true,
+    })),
+  });
+
   for (const candidate of plan) {
+    throwIfAgentCanvasAborted(signal);
     if (candidate.provider === "vertex") {
       if (!hasVertexCredentials()) {
         errors.push(`Gemini 3 is not configured for ${candidate.model}. Set VERTEX_API_KEY in core-api/.env.local.`);
@@ -1699,11 +1856,16 @@ async function requestAgentCanvasCompletion(messages, options = {}) {
           messages,
           stream: false,
           temperature: 0.2,
-          max_tokens: 4096,
+          max_tokens: maxTokens,
           useGoogleSearch: options.useWebSearch === true,
         });
+        throwIfAgentCanvasAborted(signal);
         const text = extractOpenAiCompletionText(completion);
         if (text) {
+          console.info("[agent-canvas] planner model selected", {
+            provider: "vertex",
+            model: candidate.model,
+          });
           return {
             text,
             provider: "vertex",
@@ -1713,6 +1875,7 @@ async function requestAgentCanvasCompletion(messages, options = {}) {
         }
         errors.push(`Gemini 3 returned empty text from ${candidate.model}.`);
       } catch (error) {
+        if (isAgentCanvasAbortError(error) || signal?.aborted) throw createAgentCanvasAbortError();
         errors.push(`Gemini 3 ${candidate.model}: ${compactAgentProviderError(error)}`);
       }
       continue;
@@ -1728,19 +1891,34 @@ async function requestAgentCanvasCompletion(messages, options = {}) {
           messages,
           model: candidate.model || DEFAULT_AGENT_CANVAS_TEXT_MODEL,
           temperature: 0.2,
-          max_tokens: 4096,
+          max_tokens: maxTokens,
+          signal,
+          onDelta: typeof options.onDelta === "function"
+            ? (delta) => options.onDelta({
+                ...delta,
+                provider: "dashscope",
+                model: candidate.model || DEFAULT_AGENT_CANVAS_TEXT_MODEL,
+              })
+            : undefined,
         });
+        throwIfAgentCanvasAborted(signal);
         if (text) {
-          const firstVertex = plan.find((item) => item.provider === "vertex")?.model;
+          const primaryModel = plan.find((item) => !item.fallbackOnly)?.model;
+          console.info("[agent-canvas] planner model selected", {
+            provider: "dashscope",
+            model: candidate.model || DEFAULT_AGENT_CANVAS_TEXT_MODEL,
+            fallbackFrom: candidate.fallbackOnly ? primaryModel : undefined,
+          });
           return {
             text,
             provider: "dashscope",
             model: candidate.model || DEFAULT_AGENT_CANVAS_TEXT_MODEL,
-            fallbackFrom: candidate.fallbackOnly ? firstVertex : undefined,
+            fallbackFrom: candidate.fallbackOnly ? primaryModel : undefined,
           };
         }
         errors.push(`Text model returned empty text from ${candidate.model || DEFAULT_AGENT_CANVAS_TEXT_MODEL}.`);
       } catch (error) {
+        if (isAgentCanvasAbortError(error) || signal?.aborted) throw createAgentCanvasAbortError();
         errors.push(`Text model ${candidate.model || DEFAULT_AGENT_CANVAS_TEXT_MODEL}: ${compactAgentProviderError(error)}`);
       }
     }
@@ -1796,114 +1974,1110 @@ async function buildAgentCanvasWebSearchContext(message) {
   };
 }
 
-function buildAgentCanvasRoutes(store) {
+const AGENT_CANVAS_ACTION_LABELS = {
+  create_node: "创建节点",
+  update_node: "更新节点",
+  delete_nodes: "删除节点",
+  delete_node: "删除节点",
+  connect_nodes: "连接节点",
+  connect_node: "连接节点",
+  move_nodes: "移动节点",
+  move_node: "移动节点",
+  layout_nodes: "整理布局",
+  layout: "整理布局",
+  group_nodes: "分组节点",
+  group_node: "分组节点",
+  generate_image: "生成图片",
+  generate_video: "生成视频",
+  save_canvas: "保存画布",
+};
+
+function agentCanvasHttpError(statusCode, code, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+}
+
+function writeAgentCanvasEvent(res, eventName, data) {
+  if (res.writableEnded || res.destroyed) return;
+  sendEvent(res, eventName, data);
+}
+
+function writeAgentCanvasStreamHeaders(res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+  });
+}
+
+function emitAgentCanvasStatus(emit, phase, title, detail, status = "active") {
+  if (typeof emit !== "function") return;
+  emit("status", {
+    phase,
+    title,
+    detail,
+    status,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function emitAgentCanvasDelta(emit, kind, text, meta = {}) {
+  if (typeof emit !== "function" || !text) return;
+  const safeKind = kind === "reasoning" ? "reasoning" : "content";
+  for (const chunk of Array.from(String(text))) {
+    emit("delta", {
+      kind: safeKind,
+      text: chunk,
+      provider: meta.provider,
+      model: meta.model,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
+function summarizeAgentCanvasActionTypes(actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return [];
+  const counts = new Map();
+  actions.forEach((action) => {
+    const type = getAgentActionTypeForServer(action) || "unknown";
+    counts.set(type, (counts.get(type) || 0) + 1);
+  });
+  return Array.from(counts.entries()).map(([type, count]) => ({
+    type,
+    label: AGENT_CANVAS_ACTION_LABELS[type] || type,
+    count,
+  }));
+}
+
+function formatAgentCanvasActionSummary(actions) {
+  const summary = summarizeAgentCanvasActionTypes(actions);
+  if (summary.length === 0) return "没有需要执行的画布动作";
+  return summary.map((item) => `${item.label} x${item.count}`).join("、");
+}
+
+function getAgentCanvasRequestContextDetail(body, canvasSummary, attachments) {
+  const parts = [
+    `模型：${String(body?.modelLabel || body?.model || "Auto")}`,
+    body?.skillTitle ? `Skill：${String(body.skillTitle)}` : null,
+    `节点：${Array.isArray(canvasSummary?.nodes) ? canvasSummary.nodes.length : 0}`,
+    `选中：${Array.isArray(canvasSummary?.selectedNodeIds) ? canvasSummary.selectedNodeIds.length : 0}`,
+    `附件：${Array.isArray(attachments) ? attachments.length : 0}`,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function emitAgentCanvasParsedActions(emit, actions) {
+  if (!Array.isArray(actions) || actions.length === 0) {
+    emitAgentCanvasStatus(emit, "THINKING", "解析模型动作", "没有需要执行的画布动作", "done");
+    return;
+  }
+  emitAgentCanvasStatus(emit, "THINKING", "解析模型动作", `收到 ${actions.length} 个画布动作`, "done");
+  emitAgentCanvasStatus(emit, "USING_TOOLS", `已生成 ${actions.length} 个画布动作`, formatAgentCanvasActionSummary(actions), "active");
+}
+
+let agentCanvasLangGraphRuntimePromise = null;
+
+function getAgentCanvasLangGraphRuntime() {
+  if (!agentCanvasLangGraphRuntimePromise) {
+    agentCanvasLangGraphRuntimePromise = import("./agent-canvas-langgraph.mjs");
+  }
+  return agentCanvasLangGraphRuntimePromise;
+}
+
+function shouldUseAgentCanvasLangGraph(body, skillId) {
+  if (skillId === "storyboard-breakdown") return false;
+  if (body?.mode && body.mode !== "agent") return false;
+  const enabled = String(process.env.AGENT_CANVAS_LANGGRAPH_ENABLED || "true").trim().toLowerCase();
+  if (enabled === "false" || enabled === "0" || enabled === "off") return false;
+  const runtime = String(body?.runtime || process.env.AGENT_CANVAS_RUNTIME || "langgraphjs").trim().toLowerCase();
+  return !["legacy", "planner", "json"].includes(runtime);
+}
+
+function shouldFallbackFromAgentCanvasLangGraph() {
+  const fallback = String(process.env.AGENT_CANVAS_LANGGRAPH_FALLBACK || "true").trim().toLowerCase();
+  return fallback !== "false" && fallback !== "0" && fallback !== "off";
+}
+
+const storyboardBreakdownCheckpoints = new Map();
+const STORYBOARD_BREAKDOWN_CHECKPOINT_TTL_MS = 2 * 60 * 60 * 1000;
+const STORYBOARD_BREAKDOWN_MAX_SHOTS = 25;
+
+function clampNumber(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(parsed)));
+}
+
+function getStoryboardBreakdownBatchSize() {
+  return clampNumber(process.env.AGENT_CANVAS_STORYBOARD_BATCH_SIZE, 5, 8, 5);
+}
+
+function getStoryboardBreakdownCheckpointKey(sessionId) {
+  const raw = String(sessionId || "").trim();
+  return raw || `storyboard-breakdown-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function pruneStoryboardBreakdownCheckpoints() {
+  const now = Date.now();
+  for (const [key, value] of storyboardBreakdownCheckpoints.entries()) {
+    if (!value?.updatedAtMs || now - value.updatedAtMs > STORYBOARD_BREAKDOWN_CHECKPOINT_TTL_MS) {
+      storyboardBreakdownCheckpoints.delete(key);
+    }
+  }
+}
+
+function stableAgentIdPart(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || Math.random().toString(36).slice(2, 10);
+}
+
+function hasStoryboardSourceText(message) {
+  const text = String(message || "").trim();
+  if (text.length >= 80) return true;
+  if (text.split(/\r?\n/).filter((line) => line.trim()).length >= 3) return true;
+  return /[。！？；：“”「」『』]/.test(text);
+}
+
+function isStoryboardContinueRequest(message) {
+  return /继续|剩余|后续|continue|resume|remaining/i.test(String(message || ""));
+}
+
+function buildHeuristicStoryboardPlan(message) {
+  const text = String(message || "").trim();
+  const lengthScore = Math.ceil(Math.max(text.length, 400) / 650);
+  const totalParts = Math.max(3, Math.min(STORYBOARD_BREAKDOWN_MAX_SHOTS, lengthScore + 2));
+  return {
+    totalParts,
+    parts: Array.from({ length: totalParts }, (_, index) => ({
+      index: index + 1,
+      title: `剧本拆解 - 分镜 ${index + 1}`,
+      sourceScope: `按剧情顺序覆盖第 ${index + 1}/${totalParts} 个分镜头`,
+    })),
+    warnings: ["STORYBOARD_PLAN_USED_HEURISTIC"],
+  };
+}
+
+function normalizeStoryboardPlan(rawPlan, message) {
+  const fallback = buildHeuristicStoryboardPlan(message);
+  const requestedTotalParts = Number(
+    rawPlan?.totalParts || rawPlan?.partCount || rawPlan?.totalShots || rawPlan?.shotCount || fallback.totalParts,
+  );
+  const totalParts = Math.max(
+    1,
+    Math.min(STORYBOARD_BREAKDOWN_MAX_SHOTS, requestedTotalParts || fallback.totalParts),
+  );
+  const rawParts = Array.isArray(rawPlan?.parts)
+    ? rawPlan.parts
+    : (Array.isArray(rawPlan?.shots) ? rawPlan.shots : []);
+  const parts = [];
+  for (let index = 1; index <= totalParts; index += 1) {
+    const raw =
+      rawParts.find((item) => Number(item?.index || item?.shotIndex || item?.shot) === index) ||
+      rawParts[index - 1] ||
+      {};
+    parts.push({
+      index,
+      title: String(raw.title || raw.name || `剧本拆解 - 分镜 ${index}`).slice(0, 120),
+      sourceScope: String(raw.sourceScope || raw.scope || raw.summary || `按剧情顺序覆盖第 ${index}/${totalParts} 个分镜头`).slice(0, 500),
+    });
+  }
+  const warnings = Array.isArray(rawPlan?.warnings) ? rawPlan.warnings.map(String).slice(0, 12) : fallback.warnings;
+  if (requestedTotalParts > STORYBOARD_BREAKDOWN_MAX_SHOTS) {
+    warnings.push(`STORYBOARD_MAX_SHOTS_CLAMPED_${STORYBOARD_BREAKDOWN_MAX_SHOTS}`);
+  }
+  return {
+    totalParts,
+    parts,
+    warnings,
+  };
+}
+
+function buildStoryboardBreakdownBatches(parts, batchSize) {
+  const batches = [];
+  for (let index = 0; index < parts.length; index += batchSize) {
+    batches.push({
+      index: batches.length + 1,
+      startPart: parts[index]?.index || index + 1,
+      endPart: parts[Math.min(index + batchSize, parts.length) - 1]?.index || index + batchSize,
+      parts: parts.slice(index, index + batchSize),
+    });
+  }
+  return batches;
+}
+
+function getStoryboardScriptExcerpt(script, batch, totalParts) {
+  const text = String(script || "");
+  const partCount = Math.max(1, Array.isArray(batch?.parts) ? batch.parts.length : 1);
+  const maxChars = partCount > 1 ? 6500 : 4200;
+  if (text.length <= maxChars) {
+    return {
+      text,
+      coverage: "full",
+      start: 0,
+      end: text.length,
+    };
+  }
+  const safeTotal = Math.max(1, Number(totalParts) || 1);
+  const startRatio = Math.max(0, (Number(batch.startPart || 1) - 1) / safeTotal);
+  const endRatio = Math.min(1, Number(batch.endPart || batch.startPart || 1) / safeTotal);
+  const rawStart = Math.max(0, Math.floor(text.length * startRatio));
+  const rawEnd = Math.min(text.length, Math.ceil(text.length * endRatio));
+  const rawWindow = Math.max(1, rawEnd - rawStart);
+  const extra = Math.max(0, maxChars - rawWindow);
+  let start = Math.max(0, rawStart - Math.floor(extra / 2));
+  let end = Math.min(text.length, rawEnd + Math.ceil(extra / 2));
+  if (end - start > maxChars) {
+    const center = Math.floor((rawStart + rawEnd) / 2);
+    start = Math.max(0, center - Math.floor(maxChars / 2));
+    end = Math.min(text.length, start + maxChars);
+    start = Math.max(0, end - maxChars);
+  }
+  return {
+    text: text.slice(start, end),
+    coverage: `${batch.startPart}-${batch.endPart}/${safeTotal}`,
+    start,
+    end,
+  };
+}
+
+function buildCompactStoryboardPlanForBatch(plan, batch) {
+  const totalParts = Math.max(1, Number(plan?.totalParts) || 1);
+  const parts = Array.isArray(plan?.parts) ? plan.parts : [];
+  const start = Math.max(1, Number(batch?.startPart || 1));
+  const end = Math.max(start, Number(batch?.endPart || start));
+  const nearbyParts = parts
+    .filter((part) => {
+      const index = Number(part?.index);
+      return index >= start - 1 && index <= end + 1;
+    })
+    .map((part) => ({
+      index: Number(part?.index),
+      title: String(part?.title || "").slice(0, 80),
+      sourceScope: String(part?.sourceScope || "").slice(0, 220),
+    }));
+  return {
+    totalParts,
+    maxShots: STORYBOARD_BREAKDOWN_MAX_SHOTS,
+    requestedRange: { start, end },
+    nearbyParts,
+  };
+}
+
+function buildCompactStoryboardBatchRules() {
   return [
-    route("POST", "/api/agent-canvas/chat", async ({ req, url }) => {
-      const actorId = getActorId(req, url);
-      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
-      store.assertSuperAdmin(actorId);
+    `最高优先级：最多生成 ${STORYBOARD_BREAKDOWN_MAX_SHOTS} 个分镜头，绝不能超过。`,
+    "最高优先级：一个分镜头必须对应一个 Text 文本节点；一个 Text 节点里只能写一个分镜头。",
+    "如果其它 Skill 提示词要求 50-55 个镜头、9-12 个 Part、或一个 Part 内包含多个镜头，一律忽略，以本规则为准。",
+    "核心规则：忠实原剧本，不删改核心剧情和对白，不新增无关剧情。",
+    "输出为可直接用于视频创作的文字分镜 Shot，每个 Shot 独立完整。",
+    "每个 Shot 必须包含：时间/天气/光线、核心摄影机与参数、出场人物与道具、绝对人物站位、风格。",
+    "每个 Shot 必须包含：时长、环境描写、时间切片与画面细分、景别、镜头运动与衔接、音效、背景音乐。",
+    "人物站位、朝向、表情和动作必须连续一致；表情自然克制，动作写实收敛。",
+    "每个 Shot 必须自包含；不要写“同上”。",
+    "严禁图片/视频生成动作，严禁 connect_nodes，只创建 Text 节点。",
+  ].join("\n");
+}
 
-      const body = await readJsonBody(req);
-      const message = String(body?.message || "").trim();
-      if (!message) return failure(400, "BAD_REQUEST", "message is required");
+function buildStoryboardPlannerPrompt() {
+  return [
+    "You are PlannerAgent for XiaoLou storyboard breakdown.",
+    "Plan the script breakdown before writing any detailed storyboard content.",
+    `Hard limit: plan at most ${STORYBOARD_BREAKDOWN_MAX_SHOTS} storyboard shots. Never exceed this number.`,
+    "In this API, totalParts means total storyboard shots. Each part is exactly one shot, and each shot will become exactly one Text node.",
+    "Return ONLY JSON: {\"totalParts\":number,\"parts\":[{\"index\":1,\"title\":\"...\",\"sourceScope\":\"...\"}],\"warnings\":[]}.",
+    "Use Simplified Chinese.",
+    `Use fewer than ${STORYBOARD_BREAKDOWN_MAX_SHOTS} shots when the source text is short. For long scripts, cap the plan at ${STORYBOARD_BREAKDOWN_MAX_SHOTS} shots.`,
+    "Each planned shot should be self-contained and suitable for one Text node later.",
+    "Do not output detailed shot content in this planning step.",
+  ].join("\n");
+}
 
-      const tools = normalizeAgentCanvasTools(body?.tools);
-      const toolWarnings = [];
-      const canvasSummary = summarizeAgentCanvas(body?.canvas, { includeFiles: tools.canvasFiles });
-      const attachments = Array.isArray(body?.attachments) ? body.attachments.slice(0, 12) : [];
-      let webSearch = null;
-      if (tools.webSearch) {
-        try {
-          webSearch = await buildAgentCanvasWebSearchContext(message);
-        } catch (error) {
-          toolWarnings.push(error?.code || "WEB_SEARCH_UNAVAILABLE");
-          console.warn("[agent-canvas] web search unavailable", error?.message || error);
-        }
-      }
-      const systemPrompt = [
-        "You are XiaoLou Agent Canvas planner, a Lovart/Jaaz-style deep canvas orchestration agent.",
-        "Return ONLY JSON with this shape: {\"response\":\"short user-facing text\",\"actions\":[],\"warnings\":[]}.",
-        "Default to Simplified Chinese for response, topic, action titles, prompts, and every user-facing text. Only use another language when the user explicitly asks for it.",
-        "Read the current canvas graph, selected nodes, node positions, user message, and attachments before planning.",
-        tools.canvasFiles
-          ? "Canvas file inspection is enabled. Use canvas.files and node resultUrl/inputUrl/lastFrame metadata to understand existing media files."
-          : "Canvas file inspection is disabled. Do not assume access to media file URLs beyond the basic graph summary.",
-        webSearch
-          ? "Web search is enabled. Use the provided webSearch brief as current research context, and mention source titles briefly in response when useful."
-          : "Web search is disabled or unavailable. Do not claim live web facts unless provided by the user.",
-        "You do not call external APIs directly. You only plan canvas actions for the XiaoLou frontend and existing XiaoLou APIs to validate and apply.",
-        "Allowed action types: create_node, update_node, delete_nodes, connect_nodes, move_nodes, layout_nodes, group_nodes, generate_image, generate_video, save_canvas.",
-        "Use existing node types only: Text, Image, Video, Audio, Image Editor, Video Editor, Storyboard Manager, Camera Angle, Local Image Model, Local Video Model.",
-        "If the user gives a clear create/edit/delete/move/layout/connect/group/generate/save command, do not ask a clarifying question. Produce at least one action with reasonable defaults.",
-        "For create_node use fields like {\"type\":\"create_node\",\"nodeType\":\"Text\",\"title\":\"...\",\"content\":\"...\",\"x\":0,\"y\":0}.",
-        "For generate_image or generate_video, include a strong prompt and then layout/connect the resulting node when useful.",
-        "When the user asks for visual creation, produce generate_image or generate_video actions with concrete prompts, referenceNodeIds when relevant, and follow-up layout/connect actions.",
-        "When the user asks to organize, compare, storyboard, or iterate, produce multiple ordered actions that create/update/connect/group/layout nodes.",
-        "For generation actions, include nodeId when targeting an existing node, or include prompt/title/x/y to let the frontend create a node.",
-      ].join("\n");
+function buildStoryboardBatchPrompt() {
+  return [
+    "You are StoryboardBatchAgent for XiaoLou Agent Canvas.",
+    "Generate ONLY the requested storyboard shots for this batch. Do not generate earlier or later shots.",
+    "Each requested part is exactly one storyboard shot. One shot must map to one Text node.",
+    "Return ONLY JSON: {\"response\":\"short Chinese summary\",\"actions\":[...],\"warnings\":[]}.",
+    "Each action must be a Text node action: {\"type\":\"create_node\",\"nodeType\":\"Text\",\"id\":\"shot-id\",\"title\":\"剧本拆解 - 分镜 N\",\"content\":\"Markdown content\"}.",
+    "Produce exactly one create_node action per requested storyboard shot.",
+    "Each Text node content must describe exactly one storyboard shot. Do not put multiple shots in one Text node.",
+    "Do not create image/video nodes. Do not call generate_image/generate_video. Do not connect nodes.",
+    "Keep each Text node content complete and closed. If a shot would be too long, summarize that shot more tightly instead of starting an unfinished node.",
+    "Use the user's original script faithfully: do not delete core plot or dialogue, do not add unrelated plot, and keep the requested storyboard format.",
+  ].join("\n");
+}
 
-      let completion;
-      try {
-        completion = await requestAgentCanvasCompletion(
-          [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: JSON.stringify({
-                message,
-                sessionId: body?.sessionId || null,
-                canvas: canvasSummary,
-                attachments,
-                webSearch,
-                tools,
-              }),
-            },
-          ],
-          {
-            model: body?.model,
-            textModel: getAgentCanvasTextModel(store),
-            useWebSearch: false,
+function normalizeStoryboardBatchTextActions(actions, batch, checkpoint) {
+  const rawActions = Array.isArray(actions) ? actions : [];
+  const byPartIndex = new Map();
+  rawActions.forEach((action, offset) => {
+    if (!isStoryboardTextCreateAction(action)) return;
+    const partIndex = Number(action.partIndex || action.index || action.part || batch.parts[offset]?.index || 0);
+    if (!partIndex || byPartIndex.has(partIndex)) return;
+    byPartIndex.set(partIndex, action);
+  });
+
+  return batch.parts.map((part, offset) => {
+    const raw = byPartIndex.get(part.index) || rawActions[offset] || {};
+    const id = `storyboard-breakdown-${checkpoint.runId}-part-${String(part.index).padStart(2, "0")}`;
+    const content = String(raw.content || raw.prompt || raw.text || "").trim();
+    return {
+      ...raw,
+      id,
+      type: "create_node",
+      nodeType: "Text",
+      partIndex: part.index,
+      shotIndex: part.index,
+      title: String(raw.title || part.title || `剧本拆解 - 分镜 ${part.index}`).slice(0, 120),
+      content: content || `## ${part.title}\n\n本分镜生成内容为空，请重新运行剧本拆解。`,
+      x: 800 + ((part.index - 1) % 4) * 380,
+      y: 200 + Math.floor((part.index - 1) / 4) * 300,
+    };
+  });
+}
+
+function makeStoryboardGroupAction(checkpoint) {
+  return {
+    type: "group_nodes",
+    groupId: `storyboard-breakdown-group-${checkpoint.runId}`,
+    label: "剧本拆解",
+    nodeIds: checkpoint.nodeIds.slice(),
+  };
+}
+
+async function requestStoryboardJsonCompletion(messages, options) {
+  const completion = await requestAgentCanvasCompletion(messages, options);
+  return {
+    completion,
+    parsed: extractAgentJson(completion.text),
+    recoveredActions: extractPartialAgentActions(completion.text),
+  };
+}
+
+async function generateStoryboardBatchActions(batch, context) {
+  const {
+    sourceText,
+    skillInstructionForModel,
+    skillInstruction,
+    plan,
+    checkpoint,
+    model,
+    textModel,
+    maxTokens,
+    signal,
+    onDelta,
+  } = context;
+  throwIfAgentCanvasAborted(signal);
+  const scriptExcerpt = getStoryboardScriptExcerpt(sourceText, batch, plan.totalParts);
+  const batchResult = await requestStoryboardJsonCompletion(
+    [
+      { role: "system", content: buildStoryboardBatchPrompt() },
+      {
+        role: "user",
+        content: JSON.stringify({
+          scriptExcerpt: scriptExcerpt.text,
+          scriptCoverage: scriptExcerpt.coverage,
+          fullScriptLength: String(sourceText || "").length,
+          compactStoryboardRules: buildCompactStoryboardBatchRules(),
+          userSkillInstructionHint: String(skillInstructionForModel || skillInstruction || "").slice(0, 600),
+          plan: buildCompactStoryboardPlanForBatch(plan, batch),
+          currentBatch: batch,
+          checkpoint: {
+            completedParts: checkpoint.completedParts,
+            totalParts: checkpoint.totalParts,
+          },
+        }),
+      },
+    ],
+    {
+      model,
+      textModel,
+      maxTokens: Math.min(batch.parts.length > 1 ? 6500 : 2600, 1800 + batch.parts.length * 950),
+      maxTokenLimit: 7000,
+      useWebSearch: false,
+      signal,
+      onDelta,
+    },
+  );
+
+  const rawActions = Array.isArray(batchResult.parsed?.actions)
+    ? batchResult.parsed.actions
+    : batchResult.recoveredActions;
+  const warnings = [];
+  if (!batchResult.parsed && batchResult.recoveredActions.length > 0) {
+    warnings.push(`BATCH_${batch.index}_RECOVERED_PARTIAL_ACTIONS`);
+  }
+  const textActions = normalizeStoryboardBatchTextActions(rawActions, batch, checkpoint);
+  const missingCount = textActions.filter((action) => /生成内容为空/.test(String(action.content || ""))).length;
+  if (missingCount > 0) warnings.push(`BATCH_${batch.index}_MISSING_${missingCount}_PARTS`);
+
+  return {
+    completion: batchResult.completion,
+    textActions,
+    warnings,
+  };
+}
+
+function splitStoryboardBatchForRetry(batch) {
+  return batch.parts.map((part, index) => ({
+    index: Number(`${batch.index}${index + 1}`),
+    startPart: part.index,
+    endPart: part.index,
+    parts: [part],
+  }));
+}
+
+async function buildStoryboardBreakdownPlan(body, context) {
+  const { message, skillInstruction, model, textModel, signal, onDelta } = context;
+  throwIfAgentCanvasAborted(signal);
+  const promptBudget = 24000;
+  const sourceForPlanning = String(message || "").slice(0, promptBudget);
+  const { completion, parsed } = await requestStoryboardJsonCompletion(
+    [
+      { role: "system", content: buildStoryboardPlannerPrompt() },
+      {
+        role: "user",
+        content: JSON.stringify({
+          script: sourceForPlanning,
+          scriptLength: String(message || "").length,
+          skillInstructionSummary: String(skillInstruction || "").slice(0, 4000),
+          existingCanvas: body?.canvas ? "canvas snapshot provided" : "none",
+        }),
+      },
+    ],
+    {
+      model,
+      textModel,
+      maxTokens: 2200,
+      maxTokenLimit: 3000,
+      useWebSearch: false,
+      signal,
+      onDelta,
+    },
+  );
+  return {
+    completion,
+    plan: normalizeStoryboardPlan(parsed, message),
+  };
+}
+
+async function runBatchedStoryboardBreakdown(store, body, context) {
+  const {
+    emit,
+    message,
+    skillInstruction,
+    skillInstructionForModel,
+    maxTokens,
+    tools,
+    toolWarnings,
+    model,
+    textModel,
+    signal,
+    onDelta,
+  } = context;
+  throwIfAgentCanvasAborted(signal);
+  pruneStoryboardBreakdownCheckpoints();
+  const checkpointKey = getStoryboardBreakdownCheckpointKey(body?.sessionId);
+  const previousCheckpoint = storyboardBreakdownCheckpoints.get(checkpointKey);
+  const wantsContinue = isStoryboardContinueRequest(message);
+  const sourceText = wantsContinue && previousCheckpoint?.sourceText
+    ? previousCheckpoint.sourceText
+    : message;
+
+  if (!hasStoryboardSourceText(sourceText)) {
+    return {
+      sessionId: body?.sessionId || null,
+      response: "请先粘贴需要拆解的剧本正文，我会按批次自动拆解并写入画布。",
+      actions: [],
+      warnings: ["STORYBOARD_SOURCE_REQUIRED", ...toolWarnings],
+      tools,
+    };
+  }
+
+  const runId = stableAgentIdPart(checkpointKey);
+
+  const batchSize = getStoryboardBreakdownBatchSize();
+  let plannerCompletion = null;
+  let plan = null;
+  let checkpoint = null;
+
+  if (
+    wantsContinue &&
+    previousCheckpoint?.plan &&
+    previousCheckpoint.status !== "completed" &&
+    previousCheckpoint.completedParts < previousCheckpoint.totalParts
+  ) {
+    plan = previousCheckpoint.plan;
+    checkpoint = {
+      ...previousCheckpoint,
+      batchSize,
+      status: "running",
+      updatedAt: new Date().toISOString(),
+      updatedAtMs: Date.now(),
+    };
+    emitAgentCanvasStatus(
+      emit,
+      "THINKING",
+      "Storyboard checkpoint resumed",
+      `从第 ${checkpoint.completedParts + 1}/${checkpoint.totalParts} 部分继续`,
+      "done",
+    );
+  } else {
+    emitAgentCanvasStatus(emit, "THINKING", "Storyboard Planner", "正在判断总长度和拆分段数", "active");
+    const plannerResult = await buildStoryboardBreakdownPlan(body, {
+      message: sourceText,
+      skillInstruction,
+      model,
+      textModel,
+      signal,
+      onDelta,
+    });
+    plannerCompletion = plannerResult.completion;
+    plan = plannerResult.plan;
+    checkpoint = {
+      key: checkpointKey,
+      runId,
+      sourceText,
+      plan,
+      totalParts: plan.totalParts,
+      batchSize,
+      completedParts: 0,
+      completedBatches: 0,
+      nodeIds: [],
+      status: "running",
+      updatedAt: new Date().toISOString(),
+      updatedAtMs: Date.now(),
+    };
+  }
+  storyboardBreakdownCheckpoints.set(checkpointKey, checkpoint);
+
+  const remainingParts = plan.parts.filter((part) => part.index > checkpoint.completedParts);
+  const batches = buildStoryboardBreakdownBatches(remainingParts, batchSize);
+
+  emitAgentCanvasStatus(
+    emit,
+    "THINKING",
+    "Storyboard Planner 完成",
+    `共 ${plan.totalParts} 个部分，剩余 ${remainingParts.length} 个，按每批 ${batchSize} 个节点写回`,
+    "done",
+  );
+
+  const allActions = [];
+  const warnings = [...(plan.warnings || []), ...toolWarnings];
+  let latestCompletion = plannerCompletion;
+  const streamActions = typeof emit === "function";
+
+  for (const batch of batches) {
+    throwIfAgentCanvasAborted(signal);
+    emitAgentCanvasStatus(
+      emit,
+      "THINKING",
+      `Storyboard Batch ${batch.index}/${batches.length}`,
+      `生成第 ${batch.startPart}-${batch.endPart} 部分`,
+      "active",
+    );
+
+    let generatedBatches = [];
+    let shouldStop = false;
+    try {
+      const output = await generateStoryboardBatchActions(batch, {
+        sourceText,
+        skillInstructionForModel,
+        skillInstruction,
+        plan,
+        checkpoint,
+        model,
+        textModel,
+        maxTokens,
+        signal,
+        onDelta,
+      });
+      generatedBatches = [{ batch, ...output }];
+    } catch (error) {
+      if (isAgentCanvasAbortError(error)) throw error;
+      warnings.push(`BATCH_${batch.index}_FAILED_RETRYING_SPLIT`);
+      warnings.push(`BATCH_${batch.index}_ERROR:${compactAgentProviderError(error)}`);
+      console.warn("[agent-canvas] storyboard batch failed, retrying split", {
+        batch: batch.index,
+        parts: batch.parts.map((part) => part.index),
+        message: error?.message || error,
+      });
+      if (batch.parts.length > 1) {
+        for (const retryBatch of splitStoryboardBatchForRetry(batch)) {
+          try {
+            emitAgentCanvasStatus(
+              emit,
+              "THINKING",
+              `Storyboard retry Part ${retryBatch.startPart}`,
+              "批次过大，正在拆成单个 Part 重试",
+              "active",
+            );
+            const output = await generateStoryboardBatchActions(retryBatch, {
+              sourceText,
+              skillInstructionForModel,
+              skillInstruction,
+              plan,
+              checkpoint,
+              model,
+              textModel,
+              maxTokens,
+              signal,
+              onDelta,
+            });
+            generatedBatches.push({ batch: retryBatch, ...output });
+          } catch (retryError) {
+            if (isAgentCanvasAbortError(retryError)) throw retryError;
+            warnings.push(`BATCH_${retryBatch.index}_FAILED`);
+            warnings.push(`BATCH_${retryBatch.index}_ERROR:${compactAgentProviderError(retryError)}`);
+            checkpoint.status = "failed";
+            checkpoint.lastError = retryError?.message || "Storyboard batch failed";
+            checkpoint.updatedAt = new Date().toISOString();
+            checkpoint.updatedAtMs = Date.now();
+            storyboardBreakdownCheckpoints.set(checkpointKey, checkpoint);
+            emitAgentCanvasStatus(
+              emit,
+              "ERROR",
+              `Storyboard Part ${retryBatch.startPart} 失败`,
+              retryError?.message || "当前 Part 生成失败，可继续从 checkpoint 恢复",
+              "error",
+            );
+            console.warn("[agent-canvas] storyboard retry batch failed", {
+              batch: retryBatch.index,
+              part: retryBatch.startPart,
+              message: retryError?.message || retryError,
+            });
+            shouldStop = true;
+            break;
           }
+        }
+      } else {
+        warnings.push(`BATCH_${batch.index}_FAILED`);
+        warnings.push(`BATCH_${batch.index}_ERROR:${compactAgentProviderError(error)}`);
+        checkpoint.status = "failed";
+        checkpoint.lastError = error?.message || "Storyboard batch failed";
+        checkpoint.updatedAt = new Date().toISOString();
+        checkpoint.updatedAtMs = Date.now();
+        storyboardBreakdownCheckpoints.set(checkpointKey, checkpoint);
+        emitAgentCanvasStatus(
+          emit,
+          "ERROR",
+          `Storyboard Batch ${batch.index} 失败`,
+          error?.message || "当前批次生成失败，可继续从 checkpoint 恢复",
+          "error",
         );
-      } catch (error) {
-        return failure(
-          error?.statusCode || 503,
-          error?.code || "AGENT_MODEL_ERROR",
-          error?.message || "智能体画布模型调用失败"
-        );
+        shouldStop = true;
       }
+    }
+    if (shouldStop && generatedBatches.length === 0) break;
 
-      const modelText = completion.text;
-      const parsed = extractAgentJson(modelText);
-      if (!parsed || typeof parsed !== "object") {
-        return ok({
-          sessionId: body?.sessionId || null,
-          response: modelText || "我暂时无法生成结构化画布操作。",
-          actions: [],
-          warnings: ["MODEL_RETURNED_UNSTRUCTURED_TEXT", ...toolWarnings],
-          provider: completion.provider,
-          model: completion.model,
-          fallbackFrom: completion.fallbackFrom,
-          groundingSources: completion.groundingSources || webSearch?.sources,
-          tools,
+    for (const generated of generatedBatches) {
+      const effectiveBatch = generated.batch;
+      latestCompletion = generated.completion;
+      warnings.push(...generated.warnings);
+      const textActions = generated.textActions;
+
+      checkpoint.completedParts = Math.max(checkpoint.completedParts, effectiveBatch.endPart);
+      checkpoint.completedBatches = (Number(checkpoint.completedBatches) || 0) + 1;
+      checkpoint.nodeIds = Array.from(new Set([...checkpoint.nodeIds, ...textActions.map((action) => action.id)]));
+      checkpoint.updatedAt = new Date().toISOString();
+      checkpoint.updatedAtMs = Date.now();
+      storyboardBreakdownCheckpoints.set(checkpointKey, checkpoint);
+
+      const batchActions = [...textActions, makeStoryboardGroupAction(checkpoint)];
+      allActions.push(...batchActions);
+      if (streamActions) {
+        emit("actions", {
+          agent: "StoryboardBatchAgent",
+          actions: batchActions,
+          checkpoint: {
+            sessionId: checkpointKey,
+            completedParts: checkpoint.completedParts,
+            totalParts: checkpoint.totalParts,
+            completedBatches: checkpoint.completedBatches,
+            totalBatches: batches.length,
+          },
+          timestamp: new Date().toISOString(),
         });
       }
+      emitAgentCanvasStatus(
+        emit,
+        "USING_TOOLS",
+        `Storyboard Batch ${effectiveBatch.index} 已写回`,
+        `已写入 ${textActions.length} 个 Text 节点，进度 ${checkpoint.completedParts}/${checkpoint.totalParts}`,
+        "done",
+      );
+    }
+    if (shouldStop) break;
+  }
 
-      return ok({
+  const completedAllParts = checkpoint.completedParts >= checkpoint.totalParts;
+  checkpoint.status = completedAllParts ? "completed" : (checkpoint.status === "failed" ? "failed" : "paused");
+  checkpoint.updatedAt = new Date().toISOString();
+  checkpoint.updatedAtMs = Date.now();
+  storyboardBreakdownCheckpoints.set(checkpointKey, checkpoint);
+
+  const finalActions = streamActions ? [] : allActions;
+  return {
+    sessionId: body?.sessionId || checkpointKey,
+    actions: finalActions,
+    response: completedAllParts
+      ? `剧本拆解已按 ${checkpoint.completedBatches} 个批次完成，共写入 ${checkpoint.nodeIds.length} 个文本节点。`
+      : `剧本拆解已写入 ${checkpoint.nodeIds.length} 个文本节点，当前进度 ${checkpoint.completedParts}/${checkpoint.totalParts}。同一会话再次发送“继续”会从 checkpoint 接着生成。`,
+    warnings: Array.from(new Set([
+      "STORYBOARD_BATCHED_RUN",
+      ...(completedAllParts ? [] : ["STORYBOARD_BATCHED_RUN_INCOMPLETE"]),
+      ...warnings,
+    ])).slice(0, 30),
+    topic: "剧本拆解",
+    provider: latestCompletion?.provider,
+    model: latestCompletion?.model,
+    fallbackFrom: latestCompletion?.fallbackFrom,
+    groundingSources: latestCompletion?.groundingSources,
+    tools,
+    runtime: {
+      type: "storyboard-batched",
+      checkpoint: {
+        sessionId: checkpointKey,
+        completedParts: checkpoint.completedParts,
+        totalParts: checkpoint.totalParts,
+        completedBatches: checkpoint.completedBatches,
+        totalBatches: batches.length,
+        batchSize,
+      },
+    },
+  };
+}
+
+async function buildAgentCanvasChatResponse(store, req, url, body = {}, emit, runOptions = {}) {
+  const signal = runOptions?.signal;
+  throwIfAgentCanvasAborted(signal);
+  const actorId = getActorId(req, url);
+  if (!actorId) throw agentCanvasHttpError(401, "UNAUTHORIZED", "Login required");
+  store.assertSuperAdmin(actorId);
+
+  const message = String(body?.message || "").trim();
+  if (!message) throw agentCanvasHttpError(400, "BAD_REQUEST", "message is required");
+  const instruction = String(body?.instruction || "").trim();
+  const skillId = String(body?.skillId || "").trim();
+  const skillInstruction = String(body?.skillInstruction || "").trim();
+  const maxTokens = skillId === "storyboard-breakdown"
+    ? normalizeAgentCanvasMaxTokens(body?.maxTokens, 16000, 16000)
+    : 4096;
+
+  const tools = normalizeAgentCanvasTools(body?.tools);
+  const agentOptions = {
+    mode: body?.mode || "agent",
+    skillId: skillId || null,
+    toolId: body?.toolId || null,
+    toolType: body?.toolType || null,
+    preferredImageToolId: body?.preferredImageToolId || null,
+    preferredVideoToolId: body?.preferredVideoToolId || null,
+    allowedImageToolIds: Array.isArray(body?.allowedImageToolIds) ? body.allowedImageToolIds.slice(0, 20) : [],
+    allowedVideoToolIds: Array.isArray(body?.allowedVideoToolIds) ? body.allowedVideoToolIds.slice(0, 20) : [],
+    autoModelPreference: body?.autoModelPreference !== false,
+    maxTokens,
+  };
+  const toolWarnings = [];
+  const canvasSummary = summarizeAgentCanvas(body?.canvas, { includeFiles: tools.canvasFiles });
+  const attachments = Array.isArray(body?.attachments) ? body.attachments.slice(0, 12) : [];
+  const contextDetail = getAgentCanvasRequestContextDetail(body, canvasSummary, attachments);
+  const emitDelta = (delta) => emitAgentCanvasDelta(emit, delta?.kind, delta?.text, {
+    provider: delta?.provider,
+    model: delta?.model,
+  });
+  emitAgentCanvasStatus(emit, "THINKING", "读取画布上下文", contextDetail, "done");
+  throwIfAgentCanvasAborted(signal);
+
+  let webSearch = null;
+  if (tools.webSearch) {
+    emitAgentCanvasStatus(emit, "THINKING", "执行网络检索", "正在整理当前资料", "active");
+    try {
+      webSearch = await buildAgentCanvasWebSearchContext(message);
+      throwIfAgentCanvasAborted(signal);
+      const sourceCount = Array.isArray(webSearch?.sources) ? webSearch.sources.length : 0;
+      emitAgentCanvasStatus(emit, "THINKING", "网络检索完成", sourceCount > 0 ? `获得 ${sourceCount} 条来源` : "已获得检索摘要", "done");
+    } catch (error) {
+      if (isAgentCanvasAbortError(error)) throw error;
+      toolWarnings.push(error?.code || "WEB_SEARCH_UNAVAILABLE");
+      emitAgentCanvasStatus(emit, "THINKING", "网络检索跳过", error?.message || "检索服务暂不可用", "done");
+      console.warn("[agent-canvas] web search unavailable", error?.message || error);
+    }
+  }
+
+  if (skillId === "storyboard-breakdown") {
+    try {
+      return await runBatchedStoryboardBreakdown(store, body, {
+        emit,
+        message,
+        skillInstruction,
+        skillInstructionForModel: `${instruction}\n\n${skillInstruction}`.trim(),
+        maxTokens,
+        tools,
+        toolWarnings,
+        model: body?.model,
+        textModel: getAgentCanvasTextModel(store),
+        onDelta: emitDelta,
+        signal,
+      });
+    } catch (error) {
+      if (isAgentCanvasAbortError(error)) throw error;
+      emitAgentCanvasStatus(emit, "ERROR", "Storyboard batched run failed", error?.message || "剧本拆解失败", "error");
+      throw agentCanvasHttpError(
+        error?.statusCode || 503,
+        error?.code || "STORYBOARD_BATCHED_RUN_FAILED",
+        error?.message || "剧本拆解失败",
+      );
+    }
+  }
+
+  if (shouldUseAgentCanvasLangGraph(body, skillId)) {
+    try {
+      emitAgentCanvasStatus(emit, "THINKING", "LangGraph.js runtime", "Loading multi-agent runtime", "active");
+      const { runAgentCanvasLangGraph } = await getAgentCanvasLangGraphRuntime();
+      return await runAgentCanvasLangGraph(
+        {
+          sessionId: body?.sessionId || null,
+          message,
+          instruction,
+          canvas: canvasSummary,
+          attachments,
+          webSearch,
+          tools,
+          toolWarnings,
+          maxTokens,
+          agentOptions,
+          skill: {
+            id: skillId || null,
+            instruction: skillInstruction || null,
+          },
+        },
+        {
+          emit,
+          requestCompletion: (messages, options = {}) => requestAgentCanvasCompletion(
+            messages,
+            {
+              model: body?.model,
+              textModel: getAgentCanvasTextModel(store),
+              maxTokens: options.maxTokens || maxTokens,
+              maxTokenLimit: skillId === "storyboard-breakdown" ? 16000 : 8000,
+              useWebSearch: false,
+              signal,
+              onDelta: emitDelta,
+            },
+          ),
+          signal,
+        },
+      );
+    } catch (error) {
+      if (isAgentCanvasAbortError(error)) throw error;
+      if (!shouldFallbackFromAgentCanvasLangGraph()) {
+        emitAgentCanvasStatus(emit, "ERROR", "LangGraph.js runtime failed", error?.message || "Runtime error", "error");
+        throw agentCanvasHttpError(
+          error?.statusCode || 503,
+          error?.code || "AGENT_LANGGRAPH_ERROR",
+          error?.message || "Agent Canvas LangGraph runtime failed",
+        );
+      }
+      emitAgentCanvasStatus(emit, "THINKING", "LangGraph.js fallback", error?.message || "Falling back to legacy planner", "done");
+      console.warn("[agent-canvas] LangGraph runtime fallback", error?.message || error);
+    }
+  }
+
+  const systemPrompt = [
+    "You are XiaoLou Agent Canvas native planner, a deep canvas orchestration agent for the XiaoLou smart canvas.",
+    "Return ONLY JSON with this shape: {\"response\":\"short user-facing text\",\"actions\":[],\"warnings\":[]}.",
+    "Default to Simplified Chinese for response, topic, action titles, prompts, and every user-facing text. Only use another language when the user explicitly asks for it.",
+    "Read the current canvas graph, selected nodes, node positions, user message, and attachments before planning.",
+    tools.canvasFiles
+      ? "Canvas file inspection is enabled. Use canvas.files and node resultUrl/inputUrl/lastFrame metadata to understand existing media files."
+      : "Canvas file inspection is disabled. Do not assume access to media file URLs beyond the basic graph summary.",
+    webSearch
+      ? "Web search is enabled. Use the provided webSearch brief as current research context, and mention source titles briefly in response when useful."
+      : "Web search is disabled or unavailable. Do not claim live web facts unless provided by the user.",
+    "You do not call external APIs directly. You only plan canvas actions for the XiaoLou frontend and existing XiaoLou APIs to validate and apply.",
+    "Never mention Jaaz or assume a Jaaz runtime. Use the provided agentOptions model and tool preferences when setting imageModel, videoModel, toolId, or related action fields.",
+    "If the user payload includes instruction or skill.instruction, treat it as additional composer guidance below these system rules.",
+    "Allowed action types: create_node, update_node, delete_nodes, connect_nodes, move_nodes, layout_nodes, group_nodes, generate_image, generate_video, save_canvas.",
+    "Use existing node types only: Text, Image, Video, Audio, Image Editor, Video Editor, Storyboard Manager, Camera Angle, Local Image Model, Local Video Model.",
+    "If the user gives a clear create/edit/delete/move/layout/connect/group/generate/save command, do not ask a clarifying question. Produce at least one action with reasonable defaults.",
+    "For create_node use fields like {\"type\":\"create_node\",\"nodeType\":\"Text\",\"title\":\"...\",\"content\":\"...\",\"x\":0,\"y\":0}.",
+    "For standalone generate_image or generate_video requests, create the generated node as an independent node. Do not include referenceNodeIds/parentIds and do not connect it to existing nodes.",
+    "Selected nodes and nearby canvas media are context only. Never treat selection, proximity, or an existing canvas image/video as a reference request by itself.",
+    "Only use referenceNodeIds, parentIds, connect_nodes, image_to_video, start_end_frame, multi_param, video_edit, motion_control, or video_extend when the user explicitly asks to use, reference, animate, continue, edit, connect, or derive from a current/selected/existing canvas node, a provided attachment, or a reference image/video/audio. In those cases set useCanvasReference:true on the generation action.",
+    "When the user asks for visual creation, produce generate_image or generate_video actions with concrete prompts; layout the result near the current viewport without connecting it unless the explicit reference rule above is satisfied.",
+    "When the user asks to organize, compare, storyboard, or iterate, produce multiple ordered actions that create/update/connect/group/layout nodes.",
+    "For generation actions, include nodeId when targeting an existing node, or include prompt/title/x/y to let the frontend create a node.",
+    ...(skillId === "storyboard-breakdown" ? [
+      "Storyboard breakdown skill is active. Apply the provided skillInstruction as strict production rules, but still return ONLY the JSON shape required above.",
+      "If the user message does not include actual script/story text to break down, respond in Chinese with a request to paste the script and return actions: [].",
+      "When script text is present, create Text nodes only. Use titles like 剧本拆解 - 第 1 部分, put Markdown breakdown content in content/prompt, then group those Text nodes with group_nodes using label 剧本拆解.",
+      "For storyboard breakdown skill, do not create image/video nodes, do not call generate_image/generate_video, do not use referenceNodeIds/parentIds, and do not connect_nodes unless the user explicitly asks for those extra actions.",
+    ] : []),
+  ].join("\n");
+
+  let completion;
+  emitAgentCanvasStatus(emit, "THINKING", "Planner 正在规划画布动作", contextDetail, "active");
+  try {
+    completion = await requestAgentCanvasCompletion(
+      [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: JSON.stringify({
+            message,
+            instruction,
+            sessionId: body?.sessionId || null,
+            canvas: canvasSummary,
+            attachments,
+            webSearch,
+            tools,
+            agentOptions,
+            skill: {
+              id: skillId || null,
+              instruction: skillInstruction || null,
+            },
+          }),
+        },
+      ],
+      {
+        model: body?.model,
+        textModel: getAgentCanvasTextModel(store),
+        maxTokens,
+        maxTokenLimit: skillId === "storyboard-breakdown" ? 16000 : 8000,
+        useWebSearch: false,
+        signal,
+        onDelta: emitDelta,
+      }
+    );
+  } catch (error) {
+    if (isAgentCanvasAbortError(error)) throw error;
+    emitAgentCanvasStatus(emit, "ERROR", "Planner 调用失败", error?.message || "智能体画布模型调用失败", "error");
+    throw agentCanvasHttpError(
+      error?.statusCode || 503,
+      error?.code || "AGENT_MODEL_ERROR",
+      error?.message || "智能体画布模型调用失败"
+    );
+  }
+
+  emitAgentCanvasStatus(emit, "THINKING", "Planner 已返回模型结果", `模型：${completion.model || completion.provider || "unknown"}`, "done");
+  const modelText = completion.text;
+  const parsed = extractAgentJson(modelText);
+  if (!parsed || typeof parsed !== "object") {
+    const recoveredStoryboardActions = skillId === "storyboard-breakdown"
+      ? normalizeStoryboardBreakdownActions(extractPartialAgentActions(modelText)).slice(0, 50)
+      : [];
+    if (recoveredStoryboardActions.length > 0) {
+      const recoveredTextNodeCount = recoveredStoryboardActions.filter((action) => getAgentActionTypeForServer(action) === "create_node").length;
+      emitAgentCanvasParsedActions(emit, recoveredStoryboardActions);
+      return {
         sessionId: body?.sessionId || null,
-        response: String(parsed.response || "完成。"),
-        actions: Array.isArray(parsed.actions) ? parsed.actions.slice(0, 50) : [],
-        warnings: [
-          ...(Array.isArray(parsed.warnings) ? parsed.warnings.map(String).slice(0, 20) : []),
-          ...toolWarnings,
-        ].slice(0, 30),
-        topic: typeof parsed.topic === "string" ? parsed.topic.slice(0, 80) : undefined,
+        response: `模型返回的剧本拆解 JSON 过长或被截断，我已恢复 ${recoveredTextNodeCount} 个完整文本节点并放入画布。若还缺后续部分，请继续发送“继续拆解剩余部分”。`,
+        actions: recoveredStoryboardActions,
+        warnings: ["MODEL_RETURNED_PARTIAL_ACTIONS", ...toolWarnings],
         provider: completion.provider,
         model: completion.model,
         fallbackFrom: completion.fallbackFrom,
         groundingSources: completion.groundingSources || webSearch?.sources,
         tools,
-      });
+      };
+    }
+
+    emitAgentCanvasParsedActions(emit, []);
+    return {
+      sessionId: body?.sessionId || null,
+      response: modelText || "我暂时无法生成结构化画布操作。",
+      actions: [],
+      warnings: ["MODEL_RETURNED_UNSTRUCTURED_TEXT", ...toolWarnings],
+      provider: completion.provider,
+      model: completion.model,
+      fallbackFrom: completion.fallbackFrom,
+      groundingSources: completion.groundingSources || webSearch?.sources,
+      tools,
+    };
+  }
+
+  const parsedActions = skillId === "storyboard-breakdown"
+    ? normalizeStoryboardBreakdownActions(parsed.actions).slice(0, 50)
+    : (Array.isArray(parsed.actions) ? parsed.actions.slice(0, 50) : []);
+  emitAgentCanvasParsedActions(emit, parsedActions);
+
+  return {
+    sessionId: body?.sessionId || null,
+    response: String(parsed.response || "完成。"),
+    actions: parsedActions,
+    warnings: [
+      ...(Array.isArray(parsed.warnings) ? parsed.warnings.map(String).slice(0, 20) : []),
+      ...toolWarnings,
+    ].slice(0, 30),
+    topic: typeof parsed.topic === "string" ? parsed.topic.slice(0, 80) : undefined,
+    provider: completion.provider,
+    model: completion.model,
+    fallbackFrom: completion.fallbackFrom,
+    groundingSources: completion.groundingSources || webSearch?.sources,
+    tools,
+  };
+}
+
+function buildAgentCanvasRoutes(store) {
+  return [
+    route("POST", "/api/agent-canvas/chat", async ({ req, res, url }) => {
+      const body = await readJsonBody(req);
+      const abortScope = createAgentCanvasAbortScope(res);
+      try {
+        return ok(await buildAgentCanvasChatResponse(store, req, url, body, undefined, {
+          signal: abortScope.signal,
+        }));
+      } catch (error) {
+        if (isAgentCanvasAbortError(error) || abortScope.signal.aborted) {
+          return undefined;
+        }
+        return failure(
+          error?.statusCode || 503,
+          error?.code || "AGENT_MODEL_ERROR",
+          error?.message || "智能体画布模型调用失败"
+        );
+      } finally {
+        abortScope.finish();
+      }
+    }),
+    route("POST", "/api/agent-canvas/chat/stream", async ({ req, res, url }) => {
+      const body = await readJsonBody(req);
+      const abortScope = createAgentCanvasAbortScope(res);
+      writeAgentCanvasStreamHeaders(res);
+      const emit = (eventName, data) => {
+        if (abortScope.signal.aborted || res.writableEnded || res.destroyed) return;
+        writeAgentCanvasEvent(res, eventName, data);
+      };
+
+      emit("ready", { connectedAt: new Date().toISOString() });
+      try {
+        const payload = await buildAgentCanvasChatResponse(store, req, url, body, emit, {
+          signal: abortScope.signal,
+        });
+        if (abortScope.signal.aborted) return undefined;
+        emit("result", payload);
+        emit("done", { ok: true, timestamp: new Date().toISOString() });
+      } catch (error) {
+        if (isAgentCanvasAbortError(error) || abortScope.signal.aborted) {
+          return undefined;
+        }
+        emit("error", {
+          code: error?.code || "AGENT_MODEL_ERROR",
+          message: error?.message || "智能体画布模型调用失败",
+          statusCode: error?.statusCode || 503,
+        });
+      } finally {
+        abortScope.finish();
+        if (!res.writableEnded && !res.destroyed) res.end();
+      }
+      return undefined;
     }),
   ];
 }
@@ -2574,6 +3748,48 @@ function buildCanvasProjectRoutes(store) {
       if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
       const removed = store.deleteCanvasProject(actorId, params.projectId);
       if (!removed) return failure(404, "NOT_FOUND", "Canvas project not found");
+      return ok({ deleted: true, projectId: params.projectId });
+    }),
+  ];
+}
+
+function buildAgentCanvasProjectRoutes(store) {
+  return [
+    route("GET", "/api/agent-canvas/projects", ({ req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      return ok({ items: store.listAgentCanvasProjectSummaries(actorId) });
+    }),
+
+    route("GET", "/api/agent-canvas/projects/:projectId", ({ params, req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      const project = store.getAgentCanvasProject(actorId, params.projectId);
+      if (!project) return failure(404, "NOT_FOUND", "Agent canvas project not found");
+      return ok(project);
+    }),
+
+    routeWithStatus("POST", "/api/agent-canvas/projects", 201, async ({ req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      const body = await readJsonBody(req);
+      const project = store.saveAgentCanvasProject(actorId, body || {});
+      return ok(project);
+    }),
+
+    route("PUT", "/api/agent-canvas/projects/:projectId", async ({ params, req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      const body = await readJsonBody(req);
+      const project = store.saveAgentCanvasProject(actorId, { ...(body || {}), id: params.projectId });
+      return ok(project);
+    }),
+
+    routeWithStatus("DELETE", "/api/agent-canvas/projects/:projectId", 200, ({ params, req, url }) => {
+      const actorId = getActorId(req, url);
+      if (!actorId) return failure(401, "UNAUTHORIZED", "Login required");
+      const removed = store.deleteAgentCanvasProject(actorId, params.projectId);
+      if (!removed) return failure(404, "NOT_FOUND", "Agent canvas project not found");
       return ok({ deleted: true, projectId: params.projectId });
     }),
   ];

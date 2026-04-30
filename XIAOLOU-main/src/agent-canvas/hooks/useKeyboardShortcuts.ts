@@ -21,6 +21,7 @@ interface UseKeyboardShortcutsOptions {
     clearSelectionBox: () => void;
     undo: () => void;
     redo: () => void;
+    save?: () => void | Promise<void>;
     onToolChange?: (tool: CanvasTool) => void;
     onQuickAddText?: () => void;
     onQuickAddImage?: () => void;
@@ -54,6 +55,7 @@ export const useKeyboardShortcuts = ({
     clearSelectionBox,
     undo,
     redo,
+    save,
     onToolChange,
     onQuickAddText,
     onQuickAddImage
@@ -141,6 +143,13 @@ export const useKeyboardShortcuts = ({
                 return;
             }
 
+            // Save: Ctrl/Cmd+S
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                void save?.();
+                return;
+            }
+
             // Copy: Ctrl+C
             if (e.ctrlKey && e.key === 'c') {
                 handleCopy();
@@ -209,6 +218,7 @@ export const useKeyboardShortcuts = ({
         clearSelectionBox,
         undo,
         redo,
+        save,
         handlePaste,
         handleCopy,
         setNodes,

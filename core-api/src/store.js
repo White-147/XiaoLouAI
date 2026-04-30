@@ -11928,6 +11928,264 @@ MockStore.prototype.deleteCanvasProject = function deleteCanvasProject(actorId, 
   return true;
 };
 
+function ensureAgentCanvasProjectBucket(state, actorId) {
+  if (!state.agentCanvasProjectsByActorId || typeof state.agentCanvasProjectsByActorId !== "object") {
+    state.agentCanvasProjectsByActorId = {};
+  }
+  if (!Array.isArray(state.agentCanvasProjectsByActorId[actorId])) {
+    state.agentCanvasProjectsByActorId[actorId] = [];
+  }
+  return state.agentCanvasProjectsByActorId[actorId];
+}
+
+function normalizeAgentCanvasContext(value) {
+  if (!value || typeof value !== "object") return null;
+  try {
+    return clone(value);
+  } catch {
+    return { ...value };
+  }
+}
+
+MockStore.prototype.sanitizeAgentCanvasProjectData = function sanitizeAgentCanvasProjectData(canvasData) {
+  if (!canvasData || typeof canvasData !== "object") return canvasData;
+
+  const nodeFieldsNullable = [
+    "resultUrl",
+    "lastFrame",
+    "editorBackgroundUrl",
+    "editorCanvasData",
+    "inputUrl",
+  ];
+
+  const nextNodes = Array.isArray(canvasData.nodes)
+    ? canvasData.nodes.map((node) => {
+        if (!node || typeof node !== "object") return node;
+        const copy = { ...node };
+        for (const field of nodeFieldsNullable) {
+          if (!(field in copy)) continue;
+          const original = copy[field];
+          if (original == null) continue;
+          const safe = this.sanitizeDisplayUrlForPersist(original);
+          if (safe !== original) {
+            copy[field] = safe;
+          }
+        }
+        if (Array.isArray(copy.characterReferenceUrls)) {
+          copy.characterReferenceUrls = copy.characterReferenceUrls
+            .map((item) => this.sanitizeDisplayUrlForPersist(item))
+            .filter(Boolean);
+        }
+        if (
+          node.status === "success" &&
+          node.resultUrl != null &&
+          copy.resultUrl == null
+        ) {
+          copy.status = "idle";
+        }
+        return copy;
+      })
+    : canvasData.nodes;
+
+  const nextGroups = Array.isArray(canvasData.groups)
+    ? canvasData.groups.map((group) => {
+        if (!group || !group.storyContext || typeof group.storyContext !== "object") {
+          return group;
+        }
+        if (!("compositeImageUrl" in group.storyContext)) return group;
+        const original = group.storyContext.compositeImageUrl;
+        if (original == null) return group;
+        const safe = this.sanitizeDisplayUrlForPersist(original);
+        if (safe === original) return group;
+        return {
+          ...group,
+          storyContext: { ...group.storyContext, compositeImageUrl: safe },
+        };
+      })
+    : canvasData.groups;
+
+  return { ...canvasData, nodes: nextNodes, groups: nextGroups };
+};
+
+MockStore.prototype.dedupeAgentCanvasProjectBucket = function dedupeAgentCanvasProjectBucket(actorId) {
+  const items = ensureAgentCanvasProjectBucket(this.state, actorId);
+  if (items.length < 2) return items;
+
+  const byId = new Map();
+  const withoutStableId = [];
+  for (const item of items) {
+    const id = typeof item?.id === "string" ? item.id.trim() : "";
+    if (!id) {
+      withoutStableId.push(item);
+      continue;
+    }
+    if (item.id !== id) item.id = id;
+    const existing = byId.get(id);
+    if (!existing || compareCanvasProjectFreshness(item, existing) < 0) {
+      byId.set(id, item);
+    }
+  }
+
+  const next = [...withoutStableId, ...byId.values()].sort(compareCanvasProjectFreshness);
+  const changed = next.length !== items.length || next.some((item, index) => item !== items[index]);
+  if (changed) {
+    this.state.agentCanvasProjectsByActorId[actorId] = next;
+  }
+  return this.state.agentCanvasProjectsByActorId[actorId];
+};
+
+MockStore.prototype.findAgentCanvasProjectEntry = function findAgentCanvasProjectEntry(projectId) {
+  if (!this.state.agentCanvasProjectsByActorId || typeof this.state.agentCanvasProjectsByActorId !== "object") {
+    this.state.agentCanvasProjectsByActorId = {};
+  }
+  for (const actorId of Object.keys(this.state.agentCanvasProjectsByActorId)) {
+    this.dedupeAgentCanvasProjectBucket(actorId);
+  }
+  for (const [bucketActorId, items] of Object.entries(this.state.agentCanvasProjectsByActorId || {})) {
+    const entry = (items || []).find((item) => item.id === projectId);
+    if (entry) {
+      return { bucketActorId, items, project: entry };
+    }
+  }
+  return null;
+};
+
+MockStore.prototype.listAgentCanvasProjects = function listAgentCanvasProjects(actorId) {
+  const actor = this.resolveActor(actorId);
+  const items = ensureAgentCanvasProjectBucket(this.state, actor.id);
+  this.dedupeAgentCanvasProjectBucket(actor.id);
+  return clone(items);
+};
+
+MockStore.prototype.listAgentCanvasProjectSummaries = function listAgentCanvasProjectSummaries(actorId) {
+  const actor = this.resolveActor(actorId);
+  const items = ensureAgentCanvasProjectBucket(this.state, actor.id);
+  this.dedupeAgentCanvasProjectBucket(actor.id);
+  return clone(
+    items.map((item) => ({
+      id: item.id,
+      actorId: item.actorId,
+      title: item.title,
+      thumbnailUrl: item.thumbnailUrl,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      kind: "agent_canvas",
+    })),
+  );
+};
+
+MockStore.prototype.getAgentCanvasProject = function getAgentCanvasProject(actorId, projectId) {
+  const actor = this.resolveActor(actorId);
+  const entry = this.findAgentCanvasProjectEntry(projectId);
+  if (!entry || entry.bucketActorId !== actor.id) return null;
+  return clone(entry.project);
+};
+
+MockStore.prototype.saveAgentCanvasProject = function saveAgentCanvasProject(actorId, input) {
+  const actor = this.resolveActor(actorId);
+  let items = ensureAgentCanvasProjectBucket(this.state, actor.id);
+  this.dedupeAgentCanvasProjectBucket(actor.id);
+  items = this.state.agentCanvasProjectsByActorId[actor.id];
+
+  if (input && typeof input === "object") {
+    input = {
+      ...input,
+      thumbnailUrl:
+        input.thumbnailUrl != null
+          ? this.sanitizeDisplayUrlForPersist(input.thumbnailUrl)
+          : input.thumbnailUrl,
+      canvasData: this.sanitizeAgentCanvasProjectData(input.canvasData),
+      baseCanvasData: this.sanitizeAgentCanvasProjectData(input.baseCanvasData),
+      agentContext: input.agentContext !== undefined
+        ? normalizeAgentCanvasContext(input.agentContext)
+        : input.agentContext,
+    };
+  } else {
+    input = {};
+  }
+
+  const now = new Date().toISOString();
+  const inputId = typeof input.id === "string" ? input.id.trim() : "";
+
+  if (inputId) {
+    const foreignEntry = this.findAgentCanvasProjectEntry(inputId);
+    if (foreignEntry && foreignEntry.bucketActorId !== actor.id) {
+      throw apiError(403, "FORBIDDEN", "You do not have access to this agent canvas project.");
+    }
+
+    const existing = items.find((item) => item.id === inputId);
+    if (existing) {
+      const expectedUpdatedAt =
+        typeof input.expectedUpdatedAt === "string" && input.expectedUpdatedAt.trim()
+          ? input.expectedUpdatedAt.trim()
+          : null;
+
+      if (expectedUpdatedAt && existing.updatedAt && existing.updatedAt !== expectedUpdatedAt && input.canvasData) {
+        const merged = tryMergeCanvasProject(existing, input);
+        if (!merged.ok) {
+          const reason = merged.conflict || "canvasData";
+          throw apiError(
+            409,
+            "CONFLICT",
+            `Agent canvas project was updated elsewhere and could not be auto-merged safely (${reason}). Please reload the latest version before saving again.`,
+          );
+        }
+
+        Object.assign(existing, {
+          title: merged.value.title || existing.title,
+          thumbnailUrl:
+            merged.value.thumbnailUrl !== undefined
+              ? merged.value.thumbnailUrl
+              : existing.thumbnailUrl,
+          canvasData: merged.value.canvasData,
+          agentContext:
+            input.agentContext !== undefined ? input.agentContext : existing.agentContext ?? null,
+          updatedAt: now,
+          kind: "agent_canvas",
+        });
+        this.dedupeAgentCanvasProjectBucket(actor.id);
+        return clone(existing);
+      }
+
+      Object.assign(existing, {
+        title: input.title || existing.title,
+        thumbnailUrl: input.thumbnailUrl !== undefined ? input.thumbnailUrl : existing.thumbnailUrl,
+        canvasData: input.canvasData !== undefined ? input.canvasData : existing.canvasData,
+        agentContext: input.agentContext !== undefined ? input.agentContext : existing.agentContext ?? null,
+        updatedAt: now,
+        kind: "agent_canvas",
+      });
+      this.dedupeAgentCanvasProjectBucket(actor.id);
+      return clone(existing);
+    }
+  }
+
+  const project = {
+    id: inputId || `agent_canvas_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    actorId: actor.id,
+    kind: "agent_canvas",
+    title: input.title || "未命名智能画布项目",
+    thumbnailUrl: input.thumbnailUrl || null,
+    canvasData: input.canvasData || null,
+    agentContext: input.agentContext !== undefined ? input.agentContext : null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  items.unshift(project);
+  this.dedupeAgentCanvasProjectBucket(actor.id);
+  return clone(project);
+};
+
+MockStore.prototype.deleteAgentCanvasProject = function deleteAgentCanvasProject(actorId, projectId) {
+  const actor = this.resolveActor(actorId);
+  const items = ensureAgentCanvasProjectBucket(this.state, actor.id);
+  const next = items.filter((item) => item.id !== projectId);
+  if (next.length === items.length) return false;
+  this.state.agentCanvasProjectsByActorId[actor.id] = next;
+  return true;
+};
+
 function normalizePlaygroundString(value, maxLength = 12000) {
   return String(value || "").trim().slice(0, maxLength);
 }

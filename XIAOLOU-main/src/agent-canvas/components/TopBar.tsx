@@ -9,6 +9,7 @@ interface TopBarProps {
   setIsEditingTitle: (editing: boolean) => void;
   setEditingTitleValue: (value: string) => void;
   onNew: () => void;
+  onSaveCurrentProject: () => void | Promise<void>;
   hasUnsavedChanges: boolean;
   onNavigateHome: () => void;
   onOpenProjectLibrary: () => void;
@@ -84,6 +85,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   setIsEditingTitle,
   setEditingTitleValue,
   onNew,
+  onSaveCurrentProject,
   hasUnsavedChanges,
   onNavigateHome,
   onOpenProjectLibrary,
@@ -104,6 +106,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   const menuRootRef = React.useRef<HTMLDivElement>(null);
   const importInputRef = React.useRef<HTMLInputElement | null>(null);
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const [isSavingProject, setIsSavingProject] = React.useState(false);
   const [isDeletingProject, setIsDeletingProject] = React.useState(false);
   const isDark = canvasTheme === 'dark';
   const logoButtonClassName = isDark
@@ -200,6 +203,21 @@ export const TopBar: React.FC<TopBarProps> = ({
     onNew();
   }, [confirmDiscardChanges, onNew]);
 
+  const handleSaveProject = React.useCallback(async () => {
+    if (isSavingProject) {
+      return;
+    }
+    try {
+      setIsSavingProject(true);
+      await onSaveCurrentProject();
+    } catch (error) {
+      console.error('[TopBar] Failed to save current canvas project:', error);
+      window.alert(error instanceof Error ? error.message : '保存智能画布项目失败，请稍后重试。');
+    } finally {
+      setIsSavingProject(false);
+    }
+  }, [isSavingProject, onSaveCurrentProject]);
+
   const handleDeleteProject = React.useCallback(async () => {
     if (!canDeleteCurrentProject || isDeletingProject) {
       return;
@@ -295,6 +313,13 @@ export const TopBar: React.FC<TopBarProps> = ({
             <div className={`my-2 h-px ${dividerClassName}`} />
 
             <DropdownItem isDark={isDark} label="新建项目" onClick={() => runMenuAction(handleNewProject)} />
+            <DropdownItem
+              isDark={isDark}
+              label={isSavingProject ? '保存中...' : '保存智能画布项目'}
+              shortcut="⌘ S"
+              disabled={isSavingProject}
+              onClick={() => runMenuAction(handleSaveProject)}
+            />
             <DropdownItem
               isDark={isDark}
               label={isDeletingProject ? '删除中...' : '删除当前项目'}

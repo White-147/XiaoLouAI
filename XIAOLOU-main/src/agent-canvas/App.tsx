@@ -45,6 +45,7 @@ import { DEFAULT_XIAOLOU_IMAGE_TO_VIDEO_MODEL_ID } from './config/canvasVideoMod
 import { WorkflowPanel } from './components/WorkflowPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { ChatPanel, ChatBubble } from './components/ChatPanel';
+import type { AgentCanvasProjectChatContext, AgentCanvasSnapshot, CanvasAgentAction } from './hooks/useChatAgent';
 import { ImageEditorModal } from './components/modals/ImageEditorModal';
 import { VideoEditorModal } from './components/modals/VideoEditorModal';
 import { ExpandedMediaModal } from './components/modals/ExpandedMediaModal';
@@ -386,6 +387,286 @@ function buildProjectAssetSyncDraft(node: NodeData): CanvasProjectAssetSyncDraft
   };
 }
 
+type AgentActionRecord = Record<string, unknown>;
+
+function asAgentActionRecord(value: unknown): AgentActionRecord {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as AgentActionRecord
+    : {};
+}
+
+function readAgentString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return '';
+}
+
+function readAgentNumber(value: unknown, fallback: number) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function readAgentStringList(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((item) => readAgentString(item)).filter(Boolean);
+  }
+  const single = readAgentString(value);
+  return single ? [single] : [];
+}
+
+function getAgentActionType(action: CanvasAgentAction) {
+  return readAgentString(action.type, action.action).toLowerCase().replace(/[-\s]+/g, '_');
+}
+
+function getAgentNodePayload(action: AgentActionRecord) {
+  return {
+    ...action,
+    ...asAgentActionRecord(action.node),
+    ...asAgentActionRecord(action.data),
+  };
+}
+
+function mapAgentNodeType(value: unknown, fallback = NodeType.TEXT): NodeType {
+  const normalized = readAgentString(value).toLowerCase().replace(/[_-]+/g, ' ');
+  if (!normalized) return fallback;
+  if (normalized.includes('video editor')) return NodeType.VIDEO_EDITOR;
+  if (normalized.includes('image editor')) return NodeType.IMAGE_EDITOR;
+  if (normalized.includes('storyboard')) return NodeType.STORYBOARD;
+  if (normalized.includes('camera')) return NodeType.CAMERA_ANGLE;
+  if (normalized.includes('local video')) return NodeType.LOCAL_VIDEO_MODEL;
+  if (normalized.includes('local image')) return NodeType.LOCAL_IMAGE_MODEL;
+  if (normalized.includes('video')) return NodeType.VIDEO;
+  if (normalized.includes('audio') || normalized.includes('sound')) return NodeType.AUDIO;
+  if (normalized.includes('image') || normalized.includes('picture')) return NodeType.IMAGE;
+  return NodeType.TEXT;
+}
+
+function mapAgentNodeStatus(value: unknown, fallback = NodeStatus.IDLE): NodeStatus {
+  const normalized = readAgentString(value).toLowerCase();
+  if (normalized === NodeStatus.LOADING || normalized === 'generating') return NodeStatus.LOADING;
+  if (normalized === NodeStatus.SUCCESS || normalized === 'done' || normalized === 'completed') return NodeStatus.SUCCESS;
+  if (normalized === NodeStatus.ERROR || normalized === 'failed') return NodeStatus.ERROR;
+  if (normalized === NodeStatus.IDLE || normalized === 'pending') return NodeStatus.IDLE;
+  return fallback;
+}
+
+function mapAgentVideoMode(value: unknown): NodeData['videoMode'] | undefined {
+  const normalized = readAgentString(value).toLowerCase().replace(/[_\s]+/g, '-');
+  if (normalized === 'start-end-frame' || normalized === 'frame-to-frame') return 'frame-to-frame';
+  if (normalized === 'multi-param' || normalized === 'multi-reference') return 'multi-reference';
+  if (normalized === 'motion-control') return 'motion-control';
+  if (normalized === 'video-edit') return 'video-edit';
+  if (normalized === 'video-extend') return 'video-extend';
+  if (normalized === 'image-to-video' || normalized === 'standard' || normalized === 'reference') return 'standard';
+  return undefined;
+}
+
+function readAgentBoolean(...values: unknown[]) {
+  return values.some((value) => {
+    if (value === true) return true;
+    if (typeof value !== 'string') return false;
+    return ['1', 'true', 'yes', 'explicit', 'user_requested'].includes(value.trim().toLowerCase());
+  });
+}
+
+function hasAgentStringListValue(...values: unknown[]) {
+  return values.some((value) => readAgentStringList(value).length > 0);
+}
+
+function hasExplicitAgentReferenceIntent(value: unknown): boolean {
+  const payload = getAgentNodePayload(asAgentActionRecord(value));
+  const intent = readAgentString(
+    payload.referenceIntent,
+    payload.connectIntent,
+    payload.intent,
+    payload.reason,
+  ).toLowerCase().replace(/[-\s]+/g, '_');
+  if (['explicit', 'user_requested', 'use_reference', 'canvas_reference', 'connect_requested'].includes(intent)) {
+    return true;
+  }
+  if (readAgentBoolean(
+    payload.useCanvasReference,
+    payload.useReference,
+    payload.usesReference,
+    payload.referenceRequired,
+    payload.connectToCanvas,
+  )) {
+    return true;
+  }
+
+  const rawMode = readAgentString(payload.videoMode, payload.mode, payload.generationMode, payload.apiMode)
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-');
+  if ([
+    'image-to-video',
+    'start-end-frame',
+    'frame-to-frame',
+    'multi-param',
+    'multi-reference',
+    'video-edit',
+    'motion-control',
+    'video-extend',
+  ].includes(rawMode)) {
+    return true;
+  }
+
+  return Boolean(
+    readAgentString(
+      payload.inputUrl,
+      payload.referenceImageUrl,
+      payload.firstFrameUrl,
+      payload.lastFrameUrl,
+      payload.motionReferenceVideoUrl,
+      payload.characterReferenceImageUrl,
+    ) ||
+    hasAgentStringListValue(
+      payload.referenceVideoUrls,
+      payload.referenceAudioUrls,
+      payload.multiReferenceImageUrls,
+      payload.referenceImageUrls,
+    )
+  );
+}
+
+function clearImplicitAgentReferences<T extends Partial<NodeData>>(updates: T): T {
+  const next: T = { ...updates };
+  delete next.parentIds;
+  delete next.inputUrl;
+  delete next.referenceVideoUrls;
+  delete next.referenceAudioUrls;
+  delete next.motionReferenceVideoUrl;
+  delete next.characterReferenceImageUrl;
+  return next;
+}
+
+function buildAgentNodeDefaults(
+  action: AgentActionRecord,
+  fallbackX: number,
+  fallbackY: number,
+  fallbackType?: NodeType,
+): NodeData {
+  const payload = getAgentNodePayload(action);
+  const type = fallbackType || mapAgentNodeType(
+    payload.nodeType ?? payload.type ?? payload.kind,
+    NodeType.TEXT,
+  );
+  const id = readAgentString(payload.id, action.nodeId, action.targetNodeId) || generateUUID();
+  const imageModel = normalizeCanvasImageModelId(readAgentString(
+    payload.imageModel,
+    payload.model,
+    action.imageModel,
+    action.model,
+  ) || DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID);
+  const videoModel = readAgentString(
+    payload.videoModel,
+    payload.model,
+    action.videoModel,
+    action.model,
+  ) || DEFAULT_XIAOLOU_IMAGE_TO_VIDEO_MODEL_ID;
+  const model = type === NodeType.VIDEO || type === NodeType.VIDEO_EDITOR || type === NodeType.LOCAL_VIDEO_MODEL
+    ? videoModel
+    : imageModel;
+
+  const node: NodeData = {
+    id,
+    type,
+    title: readAgentString(payload.title, payload.label, action.title),
+    x: readAgentNumber(payload.x, fallbackX),
+    y: readAgentNumber(payload.y, fallbackY),
+    width: readAgentNumber(payload.width, NaN) || undefined,
+    prompt: readAgentString(payload.prompt, payload.content, payload.text, action.prompt, action.content),
+    status: mapAgentNodeStatus(payload.status, NodeStatus.IDLE),
+    resultUrl: readAgentString(payload.resultUrl, payload.url, payload.mediaUrl) || undefined,
+    lastFrame: readAgentString(payload.lastFrame, payload.thumbnailUrl) || undefined,
+    parentIds: readAgentStringList(payload.parentIds).concat(readAgentStringList(payload.referenceNodeIds)),
+    groupId: readAgentString(payload.groupId) || undefined,
+    errorMessage: readAgentString(payload.errorMessage, payload.error) || undefined,
+    model,
+    imageModel,
+    videoModel,
+    aspectRatio: normalizeCanvasImageAspectRatio(imageModel, readAgentString(payload.aspectRatio) || getDefaultCanvasImageAspectRatio(imageModel)),
+    resolution: normalizeCanvasImageResolution(imageModel, readAgentString(payload.resolution) || getDefaultCanvasImageResolution(imageModel)),
+    batchCount: Math.max(1, Math.min(10, readAgentNumber(payload.batchCount ?? payload.count, 1))),
+    videoDuration: readAgentNumber(payload.videoDuration ?? payload.duration, 5),
+    generateAudio: payload.generateAudio === true,
+    networkSearch: payload.networkSearch === true,
+    inputUrl: readAgentString(payload.inputUrl) || undefined,
+    referenceVideoUrls: readAgentStringList(payload.referenceVideoUrls),
+    referenceAudioUrls: readAgentStringList(payload.referenceAudioUrls),
+    editMode: readAgentString(payload.editMode) || undefined,
+    editPresetId: readAgentString(payload.editPresetId) || undefined,
+    motionReferenceVideoUrl: readAgentString(payload.motionReferenceVideoUrl) || undefined,
+    characterReferenceImageUrl: readAgentString(payload.characterReferenceImageUrl) || undefined,
+    qualityMode: readAgentString(payload.qualityMode) || undefined,
+  };
+
+  const videoMode = mapAgentVideoMode(payload.videoMode ?? payload.mode);
+  if (node.type === NodeType.TEXT) {
+    node.textMode = 'editing';
+    node.isPromptExpanded = true;
+  }
+  if (videoMode) node.videoMode = videoMode;
+  if (node.parentIds?.length === 0) node.parentIds = undefined;
+  if (node.referenceVideoUrls?.length === 0) node.referenceVideoUrls = undefined;
+  if (node.referenceAudioUrls?.length === 0) node.referenceAudioUrls = undefined;
+  return node;
+}
+
+function sanitizeAgentNodeUpdates(rawUpdates: unknown): Partial<NodeData> {
+  const updates = asAgentActionRecord(rawUpdates);
+  const next: Partial<NodeData> = {};
+  const stringKeys: Array<keyof NodeData> = [
+    'title',
+    'prompt',
+    'resultUrl',
+    'lastFrame',
+    'groupId',
+    'errorMessage',
+    'model',
+    'imageModel',
+    'videoModel',
+    'aspectRatio',
+    'resolution',
+    'inputUrl',
+    'editMode',
+    'editPresetId',
+    'motionReferenceVideoUrl',
+    'characterReferenceImageUrl',
+    'qualityMode',
+  ];
+  stringKeys.forEach((key) => {
+    if (key in updates) {
+      const value = updates[key];
+      (next as Record<string, unknown>)[key] = typeof value === 'string' ? value : value == null ? undefined : String(value);
+    }
+  });
+  if ('x' in updates) next.x = readAgentNumber(updates.x, 0);
+  if ('y' in updates) next.y = readAgentNumber(updates.y, 0);
+  if ('width' in updates) next.width = readAgentNumber(updates.width, 0) || undefined;
+  if ('status' in updates) next.status = mapAgentNodeStatus(updates.status);
+  if ('nodeType' in updates || 'type' in updates) next.type = mapAgentNodeType(updates.nodeType ?? updates.type);
+  if ('videoMode' in updates || 'mode' in updates) next.videoMode = mapAgentVideoMode(updates.videoMode ?? updates.mode);
+  if ('parentIds' in updates) next.parentIds = readAgentStringList(updates.parentIds);
+  if ('referenceNodeIds' in updates) next.parentIds = readAgentStringList(updates.referenceNodeIds);
+  if ('referenceVideoUrls' in updates) next.referenceVideoUrls = readAgentStringList(updates.referenceVideoUrls);
+  if ('referenceAudioUrls' in updates) next.referenceAudioUrls = readAgentStringList(updates.referenceAudioUrls);
+  if ('batchCount' in updates || 'count' in updates) {
+    next.batchCount = Math.max(1, Math.min(10, readAgentNumber(updates.batchCount ?? updates.count, 1)));
+  }
+  if ('videoDuration' in updates || 'duration' in updates) {
+    next.videoDuration = readAgentNumber(updates.videoDuration ?? updates.duration, 5);
+  }
+  if ('generateAudio' in updates) next.generateAudio = updates.generateAudio === true;
+  if ('networkSearch' in updates) next.networkSearch = updates.networkSearch === true;
+  return next;
+}
+
 function getReferenceChoicePreviewUrl(node?: NodeData) {
   if (!node) return undefined;
   return node.type === NodeType.VIDEO ? (node.lastFrame || node.resultUrl) : node.resultUrl;
@@ -577,6 +858,11 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
     canRedo
   } = useHistory({ nodes, groups }, 50);
 
+  const agentProjectContextRef = React.useRef<AgentCanvasProjectChatContext | null>(null);
+  const [restoreAgentProjectContext, setRestoreAgentProjectContext] =
+    React.useState<AgentCanvasProjectChatContext | null>(null);
+  const agentProjectContextSaveTimerRef = React.useRef<number | null>(null);
+
   // Workflow management
   const {
     workflowId,
@@ -597,6 +883,7 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
     setSelectedNodeIds,
     setCanvasTitle,
     setEditingTitleValue,
+    getAgentContext: () => agentProjectContextRef.current,
     onPanelOpen: () => {
       closeHistoryPanel();
       closeAssetLibrary();
@@ -609,7 +896,8 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
   const locationSearch = typeof window !== 'undefined' ? window.location.search : '';
   const queryCanvasProjectId = React.useMemo(() => {
     try {
-      const value = new URLSearchParams(locationSearch).get('canvasProjectId');
+      const params = new URLSearchParams(locationSearch);
+      const value = params.get('agentCanvasProjectId') || params.get('canvasProjectId');
       return typeof value === 'string' && value.trim() ? value.trim() : null;
     } catch {
       return null;
@@ -620,10 +908,11 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
       return;
     }
     const url = new URL(window.location.href);
-    if (!url.searchParams.has('canvasProjectId')) {
+    if (!url.searchParams.has('canvasProjectId') && !url.searchParams.has('agentCanvasProjectId')) {
       return;
     }
     url.searchParams.delete('canvasProjectId');
+    url.searchParams.delete('agentCanvasProjectId');
     const nextUrl = `${url.pathname}${url.search}${url.hash}`;
     window.history.replaceState(window.history.state, '', nextUrl);
   }, []);
@@ -718,12 +1007,47 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
     setIsDirty(false);
   };
 
+  const handleManualSaveProject = React.useCallback(async () => {
+    if (agentProjectContextSaveTimerRef.current !== null) {
+      window.clearTimeout(agentProjectContextSaveTimerRef.current);
+      agentProjectContextSaveTimerRef.current = null;
+    }
+    await handleSaveWithTracking();
+  }, [handleSaveWithTracking]);
+
   // Load workflow and update tracking
   const handleLoadWithTracking = async (id: string) => {
     ignoreNextChange.current = true;
     await handleLoadWorkflow(id);
     setIsDirty(false);
   };
+
+  const handleAgentProjectContextChange = React.useCallback((context: AgentCanvasProjectChatContext) => {
+    agentProjectContextRef.current = context;
+    const hasChatContext = Array.isArray(context.messages) && context.messages.length > 0;
+    const hasCanvasContext = hasMeaningfulCanvasContent({
+      nodes: latestNodesRef.current,
+      groups: latestGroupsRef.current,
+      title: latestCanvasTitleRef.current,
+    });
+    if (!hasChatContext && !hasCanvasContext) {
+      return;
+    }
+    if (agentProjectContextSaveTimerRef.current !== null) {
+      window.clearTimeout(agentProjectContextSaveTimerRef.current);
+    }
+    agentProjectContextSaveTimerRef.current = window.setTimeout(() => {
+      agentProjectContextSaveTimerRef.current = null;
+      void handleSaveWithTracking();
+    }, 600);
+  }, [handleSaveWithTracking]);
+
+  React.useEffect(() => () => {
+    if (agentProjectContextSaveTimerRef.current !== null) {
+      window.clearTimeout(agentProjectContextSaveTimerRef.current);
+      agentProjectContextSaveTimerRef.current = null;
+    }
+  }, []);
 
   React.useEffect(() => {
     try {
@@ -903,6 +1227,17 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
           hasUnsavedChanges: false,
           savedAt: project.updatedAt || null,
         };
+        const nextAgentContext =
+          project.agentContext && typeof project.agentContext === 'object'
+            ? (project.agentContext as AgentCanvasProjectChatContext)
+            : {
+                sessionId: null,
+                topic: null,
+                messages: [],
+                updatedAt: project.updatedAt || new Date().toISOString(),
+              };
+        agentProjectContextRef.current = nextAgentContext;
+        setRestoreAgentProjectContext(nextAgentContext);
         setIsDirty(false);
       },
       {
@@ -1008,6 +1343,21 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
     setViewport({ x: 0, y: 0, zoom: 1 });
     setCanvasTitle(DEFAULT_CANVAS_TITLE);
     setEditingTitleValue(DEFAULT_CANVAS_TITLE);
+    latestNodesRef.current = [];
+    latestGroupsRef.current = [];
+    latestCanvasTitleRef.current = DEFAULT_CANVAS_TITLE;
+    const emptyAgentContext = {
+      sessionId: null,
+      topic: null,
+      messages: [],
+      updatedAt: new Date().toISOString(),
+    };
+    agentProjectContextRef.current = emptyAgentContext;
+    setRestoreAgentProjectContext(emptyAgentContext);
+    if (agentProjectContextSaveTimerRef.current !== null) {
+      window.clearTimeout(agentProjectContextSaveTimerRef.current);
+      agentProjectContextSaveTimerRef.current = null;
+    }
     resetWorkflowId();
     setIsDirty(false);
     try {
@@ -1174,6 +1524,7 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
     clearSelectionBox,
     undo,
     redo,
+    save: handleManualSaveProject,
     onToolChange: setActiveTool,
     onQuickAddText: () => handleToolbarQuickAdd(NodeType.TEXT),
     onQuickAddImage: () => handleToolbarQuickAdd(NodeType.IMAGE)
@@ -2632,6 +2983,288 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
   const tiktokModalActive = features.tiktokImport && isTikTokModalOpen;
   const shouldHideGlobalChrome = storyboardModalActive || tiktokModalActive;
 
+  const getCanvasSnapshotForAgent = React.useCallback<() => AgentCanvasSnapshot>(() => ({
+    title: latestCanvasTitleRef.current,
+    nodes: latestNodesRef.current,
+    groups: latestGroupsRef.current,
+    viewport,
+    selectedNodeIds,
+  }), [selectedNodeIds, viewport]);
+
+  const applyAgentCanvasActions = React.useCallback(async (actions: CanvasAgentAction[]) => {
+    if (!Array.isArray(actions) || actions.length === 0) return;
+
+    const safePoint = getSafeCanvasScreenPoint();
+    const baseX = (safePoint.x - viewport.x) / viewport.zoom - 170;
+    const baseY = (safePoint.y - viewport.y) / viewport.zoom - 120;
+    let nextNodes = latestNodesRef.current.map((node) => ({ ...node }));
+    let nextGroups = latestGroupsRef.current.map((group) => ({ ...group, nodeIds: [...group.nodeIds] }));
+    let selectedIds: string[] = [];
+    const generationQueue: string[] = [];
+    const standaloneGeneratedNodeIds = new Set<string>();
+    let shouldSave = false;
+
+    const getNodeIds = (value: unknown, fallback?: string[]) => {
+      const ids = readAgentStringList(value);
+      return ids.length > 0 ? ids : fallback || [];
+    };
+
+    const inlineUpdatesFromAction = (record: AgentActionRecord) => {
+      const updates = { ...record };
+      [
+        'type',
+        'action',
+        'node',
+        'data',
+        'updates',
+        'nodeId',
+        'targetNodeId',
+        'id',
+        'ids',
+        'nodeIds',
+        'sourceId',
+        'sourceNodeId',
+        'from',
+        'parentId',
+        'targetId',
+        'targetNodeId',
+        'to',
+        'childId',
+      ].forEach((key) => delete updates[key]);
+      return updates;
+    };
+
+    const upsertNode = (node: NodeData) => {
+      const existingIndex = nextNodes.findIndex((item) => item.id === node.id);
+      if (existingIndex >= 0) {
+        nextNodes[existingIndex] = {
+          ...nextNodes[existingIndex],
+          ...node,
+          parentIds: node.parentIds?.length ? node.parentIds : nextNodes[existingIndex].parentIds,
+        };
+      } else {
+        nextNodes.push(node);
+      }
+      selectedIds = [node.id];
+    };
+
+    const patchNode = (nodeId: string, updates: Partial<NodeData>) => {
+      if (!nodeId || Object.keys(updates).length === 0) return;
+      nextNodes = nextNodes.map((node) => {
+        if (node.id !== nodeId) return node;
+        const normalizedUpdates =
+          node.type === NodeType.TEXT || updates.type === NodeType.TEXT
+            ? { ...updates, textMode: 'editing' as const, isPromptExpanded: true }
+            : updates;
+        return { ...node, ...normalizedUpdates };
+      });
+      selectedIds = [nodeId];
+    };
+
+    actions.forEach((rawAction, index) => {
+      const action = asAgentActionRecord(rawAction);
+      const actionType = getAgentActionType(rawAction);
+      const fallbackX = baseX + ((index % 4) * 380);
+      const fallbackY = baseY + (Math.floor(index / 4) * 280);
+
+      if (actionType === 'create_node') {
+        let node = buildAgentNodeDefaults(action, fallbackX, fallbackY);
+        const isMediaNode = node.type === NodeType.IMAGE || node.type === NodeType.VIDEO;
+        if (isMediaNode && !hasExplicitAgentReferenceIntent(action)) {
+          node = clearImplicitAgentReferences(node);
+          standaloneGeneratedNodeIds.add(node.id);
+        }
+        upsertNode(node);
+        return;
+      }
+
+      if (actionType === 'update_node') {
+        const nodeId = readAgentString(action.nodeId, action.targetNodeId, action.id);
+        const rawUpdates = action.updates ?? action.node ?? action.data ?? inlineUpdatesFromAction(action);
+        patchNode(nodeId, sanitizeAgentNodeUpdates(rawUpdates));
+        return;
+      }
+
+      if (actionType === 'delete_nodes' || actionType === 'delete_node') {
+        const nodeIds = getNodeIds(action.nodeIds ?? action.ids ?? action.nodeId ?? action.id);
+        const nodeIdSet = new Set(nodeIds);
+        nextNodes = nextNodes.filter((node) => !nodeIdSet.has(node.id));
+        nextGroups = nextGroups
+          .map((group) => ({ ...group, nodeIds: group.nodeIds.filter((id) => !nodeIdSet.has(id)) }))
+          .filter((group) => group.nodeIds.length > 0);
+        selectedIds = [];
+        return;
+      }
+
+      if (actionType === 'connect_nodes' || actionType === 'connect_node') {
+        const parentId = readAgentString(action.parentId, action.sourceId, action.sourceNodeId, action.from);
+        const childId = readAgentString(action.childId, action.targetId, action.targetNodeId, action.to);
+        if (!parentId || !childId || parentId === childId) return;
+        if (standaloneGeneratedNodeIds.has(childId) && !hasExplicitAgentReferenceIntent(action)) return;
+        nextNodes = nextNodes.map((node) => {
+          if (node.id !== childId) return node;
+          const parentIds = Array.from(new Set([...(node.parentIds || []), parentId]));
+          return { ...node, parentIds };
+        });
+        selectedIds = [childId];
+        return;
+      }
+
+      if (actionType === 'move_nodes' || actionType === 'move_node') {
+        const nodeIds = getNodeIds(action.nodeIds ?? action.ids ?? action.nodeId ?? action.id, selectedIds);
+        const nodeIdSet = new Set(nodeIds);
+        const positions = asAgentActionRecord(action.positions);
+        const dx = readAgentNumber(action.dx, 0);
+        const dy = readAgentNumber(action.dy, 0);
+        nextNodes = nextNodes.map((node) => {
+          if (!nodeIdSet.has(node.id)) return node;
+          const position = asAgentActionRecord(positions[node.id]);
+          return {
+            ...node,
+            x: 'x' in position ? readAgentNumber(position.x, node.x) : node.x + dx,
+            y: 'y' in position ? readAgentNumber(position.y, node.y) : node.y + dy,
+          };
+        });
+        selectedIds = nodeIds;
+        return;
+      }
+
+      if (actionType === 'layout_nodes' || actionType === 'layout') {
+        const nodeIds = getNodeIds(action.nodeIds ?? action.ids, selectedNodeIds.length ? selectedNodeIds : nextNodes.map((node) => node.id));
+        const nodeIdSet = new Set(nodeIds);
+        const columns = Math.max(1, Math.min(6, Math.round(readAgentNumber(action.columns, 3))));
+        const gapX = Math.max(220, readAgentNumber(action.gapX, 380));
+        const gapY = Math.max(180, readAgentNumber(action.gapY, 300));
+        let order = 0;
+        nextNodes = nextNodes.map((node) => {
+          if (!nodeIdSet.has(node.id)) return node;
+          const x = baseX + ((order % columns) * gapX);
+          const y = baseY + (Math.floor(order / columns) * gapY);
+          order += 1;
+          return { ...node, x, y };
+        });
+        selectedIds = nodeIds;
+        return;
+      }
+
+      if (actionType === 'group_nodes' || actionType === 'group_node') {
+        const nodeIds = getNodeIds(action.nodeIds ?? action.ids, selectedNodeIds);
+        if (nodeIds.length === 0) return;
+        const groupId = readAgentString(action.groupId, action.id) || generateUUID();
+        const label = readAgentString(action.label, action.title, action.name) || 'Agent Group';
+        nextGroups = [
+          ...nextGroups.filter((group) => group.id !== groupId),
+          { id: groupId, nodeIds, label },
+        ];
+        nextNodes = nextNodes.map((node) => nodeIds.includes(node.id) ? { ...node, groupId } : node);
+        selectedIds = nodeIds;
+        return;
+      }
+
+      if (actionType === 'generate_image' || actionType === 'generate_video') {
+        const nodeType = actionType === 'generate_video' ? NodeType.VIDEO : NodeType.IMAGE;
+        const nodeId = readAgentString(action.nodeId, action.targetNodeId, action.id);
+        const existingNode = nodeId ? nextNodes.find((node) => node.id === nodeId) : undefined;
+        const rawUpdates = action.updates ?? action.node ?? action.data ?? inlineUpdatesFromAction(action);
+        const hasExplicitReferenceIntent =
+          hasExplicitAgentReferenceIntent(action) ||
+          hasExplicitAgentReferenceIntent(rawUpdates);
+        let updates: Partial<NodeData> = {
+          ...sanitizeAgentNodeUpdates(rawUpdates),
+          type: nodeType,
+          status: NodeStatus.IDLE,
+          errorMessage: undefined,
+        };
+        if (!hasExplicitReferenceIntent) {
+          updates = clearImplicitAgentReferences(updates);
+        }
+        if (actionType === 'generate_image') {
+          const imageModel = normalizeCanvasImageModelId(readAgentString(updates.imageModel, updates.model, action.imageModel, action.model) || DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID);
+          updates.imageModel = imageModel;
+          updates.model = imageModel;
+          updates.aspectRatio = normalizeCanvasImageAspectRatio(imageModel, updates.aspectRatio || getDefaultCanvasImageAspectRatio(imageModel));
+          updates.resolution = normalizeCanvasImageResolution(imageModel, updates.resolution || getDefaultCanvasImageResolution(imageModel));
+        } else {
+          const videoModel = readAgentString(updates.videoModel, updates.model, action.videoModel, action.model) || DEFAULT_XIAOLOU_IMAGE_TO_VIDEO_MODEL_ID;
+          updates.videoModel = videoModel;
+          updates.model = videoModel;
+          updates.videoMode = updates.videoMode || mapAgentVideoMode(action.videoMode ?? action.mode) || 'standard';
+          if (!hasExplicitReferenceIntent) updates.videoMode = 'standard';
+        }
+
+        const targetNode = existingNode || buildAgentNodeDefaults(
+          {
+            ...action,
+            node: {
+              ...asAgentActionRecord(action.node),
+              id: nodeId || undefined,
+              nodeType,
+            },
+          },
+          fallbackX,
+          fallbackY,
+          nodeType,
+        );
+        if (!hasExplicitReferenceIntent && !existingNode) {
+          standaloneGeneratedNodeIds.add(targetNode.id);
+        } else if (hasExplicitReferenceIntent) {
+          standaloneGeneratedNodeIds.delete(targetNode.id);
+        }
+        upsertNode({ ...targetNode, ...updates, id: targetNode.id, type: nodeType });
+        generationQueue.push(targetNode.id);
+        return;
+      }
+
+      if (actionType === 'save_canvas' || actionType === 'save') {
+        shouldSave = true;
+      }
+    });
+
+    nextNodes = nextNodes.map((node) => {
+      const normalizedNode: NodeData = {
+        ...node,
+        parentIds: node.parentIds
+          ? Array.from(new Set(node.parentIds)).filter((id) => id && id !== node.id)
+          : undefined,
+      };
+      if (!standaloneGeneratedNodeIds.has(node.id)) return normalizedNode;
+      const standaloneNode = clearImplicitAgentReferences(normalizedNode);
+      return standaloneNode.type === NodeType.VIDEO
+        ? { ...standaloneNode, videoMode: 'standard' }
+        : standaloneNode;
+    });
+
+    latestNodesRef.current = nextNodes;
+    latestGroupsRef.current = nextGroups;
+    setNodes(nextNodes);
+    setGroups(nextGroups);
+    if (selectedIds.length > 0 || actions.some((action) => getAgentActionType(action) === 'delete_nodes')) {
+      setSelectedNodeIds(selectedIds);
+    }
+
+    generationQueue.forEach((nodeId, index) => {
+      window.setTimeout(() => {
+        void handleGenerateRef.current(nodeId);
+      }, 250 + (index * 350));
+    });
+
+    if (shouldSave) {
+      window.setTimeout(() => {
+        void handleSaveWithTracking();
+      }, 100);
+    }
+  }, [
+    getSafeCanvasScreenPoint,
+    handleSaveWithTracking,
+    selectedNodeIds,
+    setGroups,
+    setNodes,
+    setSelectedNodeIds,
+    viewport.x,
+    viewport.y,
+    viewport.zoom,
+  ]);
+
   // Context menu handlers provided by useContextMenuHandlers hook
   // handleDoubleClick, handleGlobalContextMenu, handleAddNext, handleNodeContextMenu,
   // handleContextMenuCreateAsset, handleContextMenuSelect, handleToolbarAdd
@@ -2868,7 +3501,16 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
       {features.chat && !shouldHideGlobalChrome && (
         <>
           <ChatBubble onClick={toggleChat} isOpen={isChatOpen} />
-          <ChatPanel isOpen={isChatOpen} onClose={closeChat} isDraggingNode={isDraggingNodeToChat} canvasTheme={canvasTheme} />
+          <ChatPanel
+            isOpen={isChatOpen}
+            onClose={closeChat}
+            isDraggingNode={isDraggingNodeToChat}
+            canvasTheme={canvasTheme}
+            getCanvasSnapshot={getCanvasSnapshotForAgent}
+            onApplyActions={applyAgentCanvasActions}
+            restoreProjectContext={restoreAgentProjectContext}
+            onProjectContextChange={handleAgentProjectContextChange}
+          />
         </>
       )}
 
@@ -2884,6 +3526,7 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
           setIsEditingTitle={setIsEditingTitle}
           setEditingTitleValue={setEditingTitleValue}
           onNew={handleNewCanvas}
+          onSaveCurrentProject={handleManualSaveProject}
           hasUnsavedChanges={hasUnsavedChanges}
           onNavigateHome={handleNavigateHomeFromMenu}
           onOpenProjectLibrary={handleOpenProjectLibraryFromMenu}

@@ -38,6 +38,12 @@ function getDefaultNodeTitleZh(type: NodeType): string | undefined {
   }
 }
 
+function getDefaultTextNodeState(type: NodeType): Partial<NodeData> {
+    return type === NodeType.TEXT
+        ? { textMode: 'editing', isPromptExpanded: true }
+        : {};
+}
+
 export const useNodeManagement = () => {
     // ============================================================================
     // STATE
@@ -85,6 +91,7 @@ export const useNodeManagement = () => {
             aspectRatio: 'Auto',
             resolution: 'Auto',
             parentIds: parentId ? [parentId] : [],
+            ...getDefaultTextNodeState(type),
             ...(titleZh ? { title: titleZh } : {}),
         };
 
@@ -176,6 +183,7 @@ export const useNodeManagement = () => {
                         aspectRatio: 'Auto',
                         resolution: 'Auto',
                         parentIds: contextMenu.sourceNodeId ? [contextMenu.sourceNodeId] : [],
+                        ...getDefaultTextNodeState(type),
                         ...(titleZh ? { title: titleZh } : {}),
                     };
                 } else {
@@ -196,6 +204,7 @@ export const useNodeManagement = () => {
                         aspectRatio: 'Auto',
                         resolution: 'Auto',
                         parentIds: [],
+                        ...getDefaultTextNodeState(type),
                         ...(titleZh ? { title: titleZh } : {}),
                     };
                     // Update source to add new node as parent
