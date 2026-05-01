@@ -2,6 +2,13 @@
 setlocal
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 
+set "XDG_CACHE_HOME=%ROOT%\.cache"
+set "PIP_CACHE_DIR=%ROOT%\.cache\pip"
+set "HF_HOME=%ROOT%\.cache\huggingface"
+set "HUGGINGFACE_HUB_CACHE=%ROOT%\.cache\huggingface\hub"
+set "TRANSFORMERS_CACHE=%ROOT%\.cache\huggingface\transformers"
+set "TORCH_HOME=%ROOT%\.cache\torch"
+
 set "NODE_BIN="
 for /f "delims=" %%I in ('where node 2^>nul') do (
     if not defined NODE_BIN set "NODE_BIN=%%I"

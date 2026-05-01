@@ -7,6 +7,15 @@
 $ErrorActionPreference = "Continue"
 
 $ROOT = (Split-Path $PSScriptRoot -Parent)
+$CACHE_ROOT = Join-Path $ROOT ".cache"
+$HF_ROOT = Join-Path $CACHE_ROOT "huggingface"
+
+$env:XDG_CACHE_HOME = $CACHE_ROOT
+$env:PIP_CACHE_DIR = Join-Path $CACHE_ROOT "pip"
+$env:HF_HOME = $HF_ROOT
+$env:HUGGINGFACE_HUB_CACHE = Join-Path $HF_ROOT "hub"
+$env:TRANSFORMERS_CACHE = Join-Path $HF_ROOT "transformers"
+$env:TORCH_HOME = Join-Path $CACHE_ROOT "torch"
 
 function Test-Port($port) {
     $out = netstat -ano 2>$null | Select-String ":$port\s+\S+\s+LISTENING"

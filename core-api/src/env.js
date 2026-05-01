@@ -51,6 +51,27 @@ function defaultEnvFiles() {
   return Array.from(new Set(candidates));
 }
 
+function applyProjectRuntimeDirs() {
+  const repoRoot = resolve(__dirname, "..", "..");
+  const cacheRoot = resolve(repoRoot, ".cache");
+  const huggingFaceRoot = resolve(cacheRoot, "huggingface");
+
+  const runtimeDirs = {
+    XDG_CACHE_HOME: cacheRoot,
+    PIP_CACHE_DIR: resolve(cacheRoot, "pip"),
+    HF_HOME: huggingFaceRoot,
+    HUGGINGFACE_HUB_CACHE: resolve(huggingFaceRoot, "hub"),
+    TRANSFORMERS_CACHE: resolve(huggingFaceRoot, "transformers"),
+    TORCH_HOME: resolve(cacheRoot, "torch"),
+  };
+
+  for (const [key, value] of Object.entries(runtimeDirs)) {
+    // Keep Python/ML caches inside this project even when the parent shell has
+    // stale global cache variables pointing at a sibling checkout.
+    process.env[key] = value;
+  }
+}
+
 function loadEnvFiles() {
   const loadedFiles = [];
 
@@ -66,6 +87,8 @@ function loadEnvFiles() {
 
     loadedFiles.push(filePath);
   }
+
+  applyProjectRuntimeDirs();
 
   return loadedFiles;
 }
