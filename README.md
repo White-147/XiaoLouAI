@@ -20,12 +20,24 @@
 ## 项目结构
 
 ```text
-XIAOLOU-main/    前端 React + Vite
-core-api/        后端 Node.js + PostgreSQL
+XIAOLOU-main/    前端 React + Vite SPA
+core-api/        Node.js 过渡兼容 API（当前 PostgreSQL runtime）
+services/api/    Python FastAPI 生产主后端（重构目标）
 jaaz/            Jaaz Agent Studio 外置源码与运行服务
 scripts/         本地启动与维护脚本
-docs/            部署说明
+docs/            本地接力/部署说明（当前被 .gitignore 忽略）
 ```
+
+## 重构状态
+
+当前仓库以代码真实行为为准：`core-api/src/server.js` 已经通过
+`store-factory.js` 创建 `PostgresStore`，不再直接实例化旧的
+`SqliteStore`。但 Node `core-api` 仍是过渡兼容层；新的生产主后端正在
+`services/api` 下按 FastAPI + SQLAlchemy + Alembic + Celery 方向补齐。
+
+SQLite 相关脚本仅保留为迁移/备份工具，`CORE_API_DB_PATH` 只允许作为
+migration-only 输入，不应作为运行时配置。视频替换链路仍有进程内 GPU
+队列状态，后续会迁移到 PostgreSQL 持久化 + RabbitMQ/Celery worker。
 
 ## 快速开始
 
@@ -75,14 +87,22 @@ cd ../XIAOLOU-main && npm install
 cd ../jaaz/react && npm install
 ```
 
-生产或公网单域名部署时，先启动这些服务：
+本地开发可继续用 Vite dev server。生产或公网部署不要用 `npm run dev`
+或 `vite preview` 承担线上流量；正确方式是构建前端静态产物，再由
+Caddy/Nginx/Ingress 托管 `dist`：
+
+```bash
+cd XIAOLOU-main && npm run build
+# 发布 XIAOLOU-main/dist，由 Caddy/Nginx/Ingress 托管
+```
+
+过渡期如果仍运行 Node 兼容 API：
 
 ```bash
 cd core-api && npm run start      # 4100
-cd XIAOLOU-main && npm run dev    # 3000，或 npm run build && npm run preview
 ```
 
-Caddy 用于统一反向代理入口：
+Caddy/Nginx 用于统一反向代理入口：
 
 - `/api/*`、`/uploads/*`、`/jaaz*`、`/jaaz-api*`、`/socket.io/*` 转发到 `4100`
 - 其他页面转发到前端 `3000`
@@ -103,6 +123,37 @@ scripts\start_caddy.cmd
 
 部署前请根据实际域名修改 `caddy/Caddyfile` 中的站点块，并把真实密钥只写入
 `.env.local`，不要提交到仓库。
+
+## Local Docker Compose infrastructure
+
+The root `docker-compose.yml` starts the local infrastructure required by the
+Python API and Celery workers. By default it starts RabbitMQ and Redis only;
+PostgreSQL is kept behind the optional `postgres` profile for isolated/new
+machine testing:
+
+```text
+PostgreSQL  postgres:18.3-trixie
+RabbitMQ    rabbitmq:4.2.6-management
+Redis       redis:8.6.2-trixie
+```
+
+For local development the initial credentials are `root` / `root`. Do not use
+these passwords for a shared or internet-facing production deployment.
+
+```powershell
+Copy-Item .env.compose.example .env
+.\scripts\pull-local-compose-images.ps1
+docker compose up -d rabbitmq redis
+```
+
+RabbitMQ management UI is exposed at `http://127.0.0.1:15672`.
+
+To start the isolated compose PostgreSQL as well:
+
+```powershell
+.\scripts\pull-local-compose-images.ps1 -IncludePostgres
+docker compose --profile postgres up -d postgres rabbitmq redis
+```
 
 ## License
 

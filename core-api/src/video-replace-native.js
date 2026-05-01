@@ -58,6 +58,9 @@ const VR_DATA_DIR = resolve(
   process.env.VR_DATA_ROOT || join(VR_SERVICE_DIR, "data")
 );
 const DEFAULT_DATABASE_URL = "postgres://root:root@127.0.0.1:5432/xiaolou";
+const PYTHON_API_INTERNAL_BASE_URL = (
+  process.env.PYTHON_API_INTERNAL_BASE_URL || "http://127.0.0.1:8000"
+).replace(/\/+$/, "");
 
 // Venv Python — used for all subprocess spawns.
 const VENV_PYTHON =
@@ -213,6 +216,11 @@ const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".bmp"]);
 const TERMINAL_STAGES = new Set(["succeeded", "failed", "cancelled"]);
 let projectAssetStore = null;
 
+function isUuidString(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    .test(String(value || ""));
+}
+
 // Tracks in-flight pipeline subprocesses.
 //   jobId → { child, pipelinePid, startedAt, timeoutTimer }
 // This is a soft cache over the authoritative record in PostgreSQL. If the
@@ -274,6 +282,8 @@ function normalizeJobRow(row) {
   if (!row) return null;
   return {
     ...row,
+    job_id: String(row.job_id),
+    legacy_id: row.legacy_id ? String(row.legacy_id) : null,
     progress: Number(row.progress) || 0,
     data: parseJobData(row.data),
   };
@@ -304,12 +314,19 @@ function pythonSubprocessEnv() {
 
 async function loadPgJob(jobId) {
   if (!_pgPool || !jobId) return null;
-  const result = await _pgPool.query(
-    `SELECT job_id, stage, progress, message, error, data, created_at, updated_at
-     FROM video_replace_jobs
-     WHERE job_id = $1`,
-    [jobId],
-  );
+  const result = isUuidString(jobId)
+    ? await _pgPool.query(
+      `SELECT job_id, legacy_id, stage, progress, message, error, data, created_at, updated_at
+       FROM video_replace_jobs
+       WHERE job_id = $1::uuid`,
+      [jobId],
+    )
+    : await _pgPool.query(
+      `SELECT job_id, legacy_id, stage, progress, message, error, data, created_at, updated_at
+       FROM video_replace_jobs
+       WHERE legacy_id = $1`,
+      [jobId],
+    );
   const row = normalizeJobRow(result.rows[0]);
   if (row) {
     _pgJobs.set(row.job_id, row);
@@ -333,7 +350,7 @@ async function initializeVideoReplaceStorage() {
   try {
     await ensurePostgresSchema(client);
     const result = await client.query(
-      `SELECT job_id, stage, progress, message, error, data, created_at, updated_at
+      `SELECT job_id, legacy_id, stage, progress, message, error, data, created_at, updated_at
        FROM video_replace_jobs
        ORDER BY updated_at DESC`,
     );
@@ -372,9 +389,10 @@ function queuePgJobWrite(job) {
     .then(async () => {
       await _pgPool.query(
         `INSERT INTO video_replace_jobs
-           (job_id, stage, progress, message, error, data, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)
+           (job_id, legacy_id, stage, progress, message, error, data, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)
          ON CONFLICT (job_id) DO UPDATE SET
+           legacy_id = coalesce(video_replace_jobs.legacy_id, excluded.legacy_id),
            stage = excluded.stage,
            progress = excluded.progress,
            message = excluded.message,
@@ -383,6 +401,7 @@ function queuePgJobWrite(job) {
            updated_at = excluded.updated_at`,
         [
           snapshot.job_id,
+          snapshot.legacy_id || null,
           snapshot.stage,
           Number(snapshot.progress) || 0,
           snapshot.message || null,
@@ -431,8 +450,10 @@ async function closeVideoReplaceStorage() {
 function dbCreate(jobId, data, stage = "uploaded") {
   const now = new Date().toISOString();
   assertStorageReady();
+  const normalizedJobId = isUuidString(jobId) ? jobId : randomUUID();
   const row = {
-    job_id: jobId,
+    job_id: normalizedJobId,
+    legacy_id: isUuidString(jobId) ? null : jobId,
     stage,
     progress: 0,
     message: null,
@@ -441,13 +462,18 @@ function dbCreate(jobId, data, stage = "uploaded") {
     created_at: now,
     updated_at: now,
   };
-  _pgJobs.set(jobId, row);
+  _pgJobs.set(normalizedJobId, row);
   queuePgJobWrite(row);
 }
 
 function dbGet(jobId) {
   assertStorageReady();
-  return cloneJob(_pgJobs.get(jobId) || null);
+  const direct = _pgJobs.get(jobId);
+  if (direct) return cloneJob(direct);
+  for (const row of _pgJobs.values()) {
+    if (row.legacy_id === jobId) return cloneJob(row);
+  }
+  return null;
 }
 
 function dbUpdate(jobId, { stage, progress, message, error: errMsg, dataPatch } = {}) {
@@ -465,7 +491,7 @@ function dbUpdate(jobId, { stage, progress, message, error: errMsg, dataPatch } 
     data: newData,
     updated_at: now,
   };
-  _pgJobs.set(jobId, nextJob);
+  _pgJobs.set(nextJob.job_id, nextJob);
   queuePgJobWrite(nextJob);
   return true;
 }
@@ -758,6 +784,181 @@ function runPythonSync(scriptPath, args, timeoutMs = 30_000) {
   const lastLine = stdout.split("\n").filter(Boolean).pop() || "{}";
   try { return { ok: true, ...JSON.parse(lastLine) }; }
   catch { return { ok: true }; }
+}
+
+async function enqueuePipelineViaPythonApi(jobId, payload = {}) {
+  const endpoint = `${PYTHON_API_INTERNAL_BASE_URL}/api/video-replace/jobs/${encodeURIComponent(jobId)}/enqueue`;
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    throw new Error(`Python API enqueue request failed: ${err?.message || err}`);
+  }
+
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  if (!response.ok) {
+    const detail = body?.detail?.message || body?.detail || body?.error?.message || response.statusText;
+    throw new Error(`Python API enqueue failed (${response.status}): ${detail}`);
+  }
+  return body;
+}
+
+function pythonVideoReplaceEndpoint(pathname) {
+  const suffix = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  return `${PYTHON_API_INTERNAL_BASE_URL}/api/video-replace${suffix}`;
+}
+
+function proxyHeaders(req, extra = {}) {
+  const headers = {
+    "Accept": "application/json",
+  };
+  for (const name of ["authorization", "content-type", "x-actor-id"]) {
+    const value = firstHeaderValue(req, name);
+    if (value) headers[name] = value;
+  }
+  return { ...headers, ...extra };
+}
+
+async function writePythonProxyResponse(res, response) {
+  const body = Buffer.from(await response.arrayBuffer());
+  const headers = {
+    "Content-Type": response.headers.get("content-type") || "application/json; charset=utf-8",
+    "Content-Length": body.length,
+    "Cache-Control": response.headers.get("cache-control") || "no-store",
+    ...corsHeaders(),
+  };
+  res.writeHead(response.status, headers);
+  res.end(body);
+}
+
+async function proxyRawVideoReplaceToPython(req, res, pathname, extraHeaders = {}) {
+  const endpoint = pythonVideoReplaceEndpoint(pathname);
+  try {
+    const response = await fetch(endpoint, {
+      method: req.method,
+      headers: proxyHeaders(req, extraHeaders),
+      body: req,
+      duplex: "half",
+    });
+    await writePythonProxyResponse(res, response);
+  } catch (err) {
+    vrFail(
+      res,
+      "PYTHON_API_UNAVAILABLE",
+      `Python video-replace API unavailable: ${err?.message || err}`,
+      502,
+    );
+  }
+}
+
+async function proxyJsonVideoReplaceToPython(req, res, pathname, payload, extraHeaders = {}) {
+  const endpoint = pythonVideoReplaceEndpoint(pathname);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: proxyHeaders(req, {
+        "content-type": "application/json",
+        ...extraHeaders,
+      }),
+      body: JSON.stringify(payload || {}),
+    });
+    await writePythonProxyResponse(res, response);
+  } catch (err) {
+    vrFail(
+      res,
+      "PYTHON_API_UNAVAILABLE",
+      `Python video-replace API unavailable: ${err?.message || err}`,
+      502,
+    );
+  }
+}
+
+async function proxyUploadToPython(req, res, store) {
+  const actorContext = resolveRequestActor(req, null, store, { optional: true });
+  const extraHeaders = {};
+  if (actorContext.actorId && !firstHeaderValue(req, "x-actor-id")) {
+    extraHeaders["x-actor-id"] = actorContext.actorId;
+  }
+  await proxyRawVideoReplaceToPython(req, res, "/upload", extraHeaders);
+}
+
+async function proxyReferenceUploadToPython(req, res) {
+  await proxyRawVideoReplaceToPython(req, res, "/reference");
+}
+
+async function proxyImportJobToPython(req, res, store) {
+  const actorContext = resolveRequestActor(req, null, store, { optional: true });
+  let body;
+  try {
+    body = await readJsonBodyLocal(req);
+  } catch {
+    return vrFail(res, "BAD_JSON", "request body must be valid JSON", 400);
+  }
+
+  const projectId = String(body.project_id || body.projectId || "").trim() || null;
+  if (projectId && store?.assertProjectAccess && actorContext.actorId) {
+    try {
+      store.assertProjectAccess(projectId, actorContext.actorId);
+    } catch (err) {
+      return vrFail(
+        res,
+        err?.code || "FORBIDDEN",
+        err?.message || "You do not have access to this project.",
+        err?.statusCode || 403,
+      );
+    }
+  }
+
+  return proxyJsonVideoReplaceToPython(req, res, "/jobs", {
+    ...body,
+    actor_id: body.actor_id || body.actorId || actorContext.actorId || null,
+    project_id: projectId,
+  });
+}
+
+async function proxyReferenceImportToPython(req, res) {
+  let body;
+  try {
+    body = await readJsonBodyLocal(req);
+  } catch {
+    return vrFail(res, "BAD_JSON", "request body must be valid JSON", 400);
+  }
+  return proxyJsonVideoReplaceToPython(req, res, "/reference-import", body);
+}
+
+async function proxyDetectToPython(req, res, jobId, store, url) {
+  const job = dbGet(jobId);
+  if (!job) return vrFail(res, "JOB_NOT_FOUND", "任务不存在", 404);
+  try {
+    assertVideoReplaceJobAccess(job, req, url, store);
+  } catch (err) {
+    return vrFail(res, err?.code || "FORBIDDEN", err?.message || "Forbidden", err?.statusCode || 403);
+  }
+
+  let body = {};
+  try {
+    body = await readJsonBodyLocal(req);
+  } catch {
+    body = {};
+  }
+  return proxyJsonVideoReplaceToPython(
+    req,
+    res,
+    `/jobs/${encodeURIComponent(jobId)}/detect`,
+    body,
+  );
 }
 
 function _tryKillPipeline(jobId, reason) {
@@ -1335,7 +1536,7 @@ async function handleUpload(req, res, store) {
 
   const thumbUrl = probeResult.thumb_ok ? vrUrl("/vr-thumbnails", thumbName) : null;
   const videoUrl = vrUrl("/vr-uploads", storedName);
-  const jobId = `vr_${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+  const jobId = randomUUID();
 
   dbCreate(jobId, {
     actor_id: actorContext.actorId,
@@ -1444,7 +1645,7 @@ async function handleImportJob(req, res, store) {
 
   const thumbUrl = probeResult.thumb_ok ? vrUrl("/vr-thumbnails", thumbName) : null;
   const storedVideoUrl = vrUrl("/vr-uploads", storedName);
-  const jobId = `vr_${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+  const jobId = randomUUID();
 
   dbCreate(jobId, {
     actor_id: actorContext.actorId,
@@ -1619,9 +1820,30 @@ async function handleGenerate(req, res, jobId, store, url) {
     }
   }
 
-  // Queue pipeline subprocess (non-blocking). A single 12GB GPU cannot run
-  // multiple VACE/Wan2.1 jobs safely at the same time.
-  enqueuePipelineAsync(jobId);
+  try {
+    await enqueuePipelineViaPythonApi(jobId, {
+      actor_id: getJobActorId(job) || access.actorId || null,
+      project_id: projectId || null,
+      metadata: {
+        source: "core-api-video-replace-native",
+        advanced_clamp_notes: clampNotes,
+      },
+    });
+  } catch (err) {
+    console.error("[vr-native] Python enqueue failed:", err?.message || err);
+    dbUpdate(jobId, {
+      stage: "enqueue_failed",
+      error: err?.message || "Python API enqueue failed",
+      message: "Python Celery queue submission failed",
+    });
+    const failed = dbGet(jobId);
+    return vrFail(
+      res,
+      "PIPELINE_ENQUEUE_FAILED",
+      failed?.error || "Python Celery queue submission failed",
+      503,
+    );
+  }
 
   const updated = dbGet(jobId);
   vrOk(res, jobToStatus(updated));
@@ -1671,7 +1893,7 @@ function handleGetJob(req, res, jobId, store, url) {
   vrOk(res, jobToStatus(job));
 }
 
-function handleCancelJob(req, res, jobId, store, url) {
+async function handleCancelJob(req, res, jobId, store, url) {
   const job = dbGet(jobId);
   if (!job) return vrFail(res, "JOB_NOT_FOUND", "任务不存在", 404);
   try {
@@ -1682,8 +1904,14 @@ function handleCancelJob(req, res, jobId, store, url) {
   if (TERMINAL_STAGES.has(job.stage)) {
     return vrFail(res, "ALREADY_TERMINAL", `任务已处于终止状态 (${job.stage})，无法取消`, 400);
   }
-  // Kill the pipeline subprocess tree (pipeline process + any VACE grandchild).
-  _tryKillPipeline(jobId, "user cancel");
+  try {
+    await fetch(
+      `${PYTHON_API_INTERNAL_BASE_URL}/api/video-replace/jobs/${encodeURIComponent(jobId)}/cancel`,
+      { method: "POST", headers: { "Accept": "application/json" } },
+    );
+  } catch (err) {
+    console.warn("[vr-native] Python cancel request failed:", err?.message || err);
+  }
   dbUpdate(jobId, {
     stage: "cancelled",
     message: "用户已取消生成",
@@ -1839,13 +2067,13 @@ async function handleVideoReplaceRequest(req, res, url, store = null) {
   try {
     // POST /api/video-replace/upload
     if (req.method === "POST" && apiPath === "/upload") {
-      await handleUpload(req, res, store || projectAssetStore);
+      await proxyUploadToPython(req, res, store || projectAssetStore);
       return true;
     }
 
     // POST /api/video-replace/reference
     if (req.method === "POST" && apiPath === "/reference") {
-      await handleReferenceUpload(req, res);
+      await proxyReferenceUploadToPython(req, res);
       return true;
     }
 
@@ -1857,13 +2085,13 @@ async function handleVideoReplaceRequest(req, res, url, store = null) {
 
     // POST /api/video-replace/jobs  (import from URL)
     if (req.method === "POST" && apiPath === "/jobs") {
-      await handleImportJob(req, res, store || projectAssetStore);
+      await proxyImportJobToPython(req, res, store || projectAssetStore);
       return true;
     }
 
     // POST /api/video-replace/reference-import
     if (req.method === "POST" && apiPath === "/reference-import") {
-      await handleReferenceImport(req, res);
+      await proxyReferenceImportToPython(req, res);
       return true;
     }
 
@@ -1875,7 +2103,7 @@ async function handleVideoReplaceRequest(req, res, url, store = null) {
 
       // POST /jobs/:id/detect
       if (req.method === "POST" && subPath === "/detect") {
-        await handleDetect(req, res, jobId, store || projectAssetStore, url);
+        await proxyDetectToPython(req, res, jobId, store || projectAssetStore, url);
         return true;
       }
 
@@ -1887,7 +2115,7 @@ async function handleVideoReplaceRequest(req, res, url, store = null) {
 
       // POST /jobs/:id/cancel
       if (req.method === "POST" && subPath === "/cancel") {
-        handleCancelJob(req, res, jobId, store || projectAssetStore, url);
+        await handleCancelJob(req, res, jobId, store || projectAssetStore, url);
         return true;
       }
 
@@ -2038,8 +2266,10 @@ function reconcileOnStartup() {
     }
 
     if (job.stage === "queued" && !pipelinePid) {
-      console.log(`[vr-native] startup reconcile: re-queueing queued job=${job.job_id}`);
-      enqueuePipelineAsync(job.job_id);
+      console.log(`[vr-native] startup reconcile: queued job=${job.job_id} is owned by Python Celery`);
+      dbUpdate(job.job_id, {
+        message: "queued for Python Celery video_local_gpu worker",
+      });
       requeued += 1;
       continue;
     }

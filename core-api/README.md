@@ -1,12 +1,24 @@
 # core-api
 
-Backend for XiaoLou AI 创作平台. Runs on Node.js built-in HTTP modules. After migration, PostgreSQL is the primary persistence layer.
+Backend for XiaoLou AI 创作平台. Runs on Node.js built-in HTTP modules.
+This package is now the transition/compatibility API while the production
+Python API is being built under `../services/api`.
 
 ## What it provides
 
 - REST endpoints for projects, scripts, assets, storyboards, videos, dubbings, tasks, wallet, enterprise, toolbox, and canvas operations.
 - Server-sent events at `/api/tasks/stream` for task progress.
 - PostgreSQL-backed runtime, with SQLite retained only as migration input and backup.
+
+## Runtime status
+
+Use code truth over older architecture reports: `src/server.js` currently calls
+`store-factory.js`, which creates `PostgresStore`. It does not directly
+instantiate the old `SqliteStore`. SQLite scripts in `scripts/*sqlite*.js` are
+migration-only utilities and must not be used as runtime persistence.
+
+New production work should land in `services/api` first, then Node routes can
+be retired or changed into compatibility proxies.
 
 ## Quick start
 
@@ -21,7 +33,7 @@ Default port: **4100**
 
 ## Environment variables
 
-Copy `.env.example` → `.env.local` and set your keys:
+Copy `.env.example` -> `.env.local` and set your keys:
 
 ```text
 YUNWU_API_KEY=your_real_key          # required for image / video generation
@@ -35,12 +47,18 @@ PORT=4100
 HOST=::                              # :: = all interfaces (default); 127.0.0.1 = local only
 CORE_API_PUBLIC_BASE_URL=https://your-domain.com   # for single-origin tunnel mode
 DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+READ_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+PGBOUNCER_DATABASE_URL=postgres://root:root@127.0.0.1:6432/xiaolou
+POSTGRES_USER=root
+POSTGRES_PASSWORD=root
+POSTGRES_DB=xiaolou
 DATABASE_PUBLIC_URL=postgres://root:root@218.92.180.214:5432/xiaolou
 VR_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+PYTHON_API_INTERNAL_BASE_URL=http://127.0.0.1:8000
 JAAZ_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
 PGPOOL_MAX=10
 POSTGRES_ALLOW_EMPTY_BOOTSTRAP=0
-CORE_API_DB_PATH=./data/demo.sqlite  # migration-only import source, relative to core-api/
+CORE_API_DB_PATH=./data/demo.sqlite  # migration-only import source; never runtime
 CORE_API_UPLOAD_DIR=./uploads        # upload directory, relative to core-api/
 ```
 
@@ -149,13 +167,14 @@ return_url: https://www.xiaolouai.cn/wallet/recharge
 
 ## Mock recharge visibility
 
-Demo mock recharge is visible to every host/IP by default. The current mock flow supports both WeChat Pay and Alipay demo orders:
+Demo mock recharge is local-only by default. The current mock flow supports both WeChat Pay and Alipay demo orders:
 
 ```text
-PAYMENT_MOCK_ALLOWED_HOSTS=*
+PAYMENT_MOCK_ALLOWED_HOSTS=localhost,127.0.0.1,::1
 ```
 
-This keeps the public demo page usable even when visitors open the site by raw IP. To restrict mock recharge later, replace `*` with a comma-separated host list such as `localhost,127.0.0.1,www.xiaolouai.cn`.
+Do not use `*` in production. If an internal QA surface needs mock recharge,
+list explicit hostnames such as `localhost,127.0.0.1,qa.xiaolouai.cn`.
 
 ## Public Super Admin Login
 
@@ -200,8 +219,8 @@ PORT=4101 node src/server.js
 
 Expose via one public domain for both frontend and API:
 
-- `/` → frontend port 3000
-- `/api` and `/uploads` → core-api port 4100
+- `/` -> frontend port 3000
+- `/api` and `/uploads` -> core-api port 4100
 
 Set this in `core-api/.env.local`:
 
@@ -249,19 +268,36 @@ Invoke-RestMethod -Method Post http://127.0.0.1:4100/api/demo/reset
 - Canvas API: `/api/canvas/*` and `/api/canvas-library/*` (legacy aliases `/twitcanva-api/*` preserved).
 - Response envelope: `{ success, data?, error?, meta? }`.
 
-## Video Replace architecture (default — 4100-only)
+## Video Replace architecture (transition)
 
-All video-replace traffic is terminated inside **core-api at port 4100**.
-There is no sidecar HTTP server; Python is invoked as on-demand CLIs:
+Current Stage 4 status: Python API owns the new upload/import/reference/detect
+surface plus `/vr-*` static serving. The Node route remains a compatibility
+surface during cutover, but upload/import/reference/reference-import/detect are
+now proxied to the Python API after Node performs its lightweight legacy access
+checks. `/api/video-replace/jobs/:id/generate` calls the Python API
+`POST /api/video-replace/jobs/:id/enqueue`. The Python API links the durable
+`video_replace_jobs` row to `tasks` and `provider_jobs`, then publishes the
+long-running pipeline to Celery queue `video_local_gpu`, where the worker runs
+`video-replace-service/vr_pipeline_cli.py`.
+
+Set this when the Python API is not on the default local port:
+
+```text
+PYTHON_API_INTERNAL_BASE_URL=http://127.0.0.1:8000
+```
+
+During cutover, compatibility traffic may still enter **core-api at port 4100**,
+but new Python-first routes are available under `services/api` at port 8000.
+There is no sidecar HTTP server; the Python API and worker reuse the CLI/model
+code directly:
 
 ```
 browser (3000, Vite)
-   └─▶ core-api (4100, this process)
-          ├─ /api/video-replace/upload       → vr_probe_cli.py   (sync, ~1 s)
-          ├─ /api/video-replace/jobs/:id/detect → vr_detect_cli.py (async, ~5–15 s)
-          └─ /api/video-replace/jobs/:id/generate
-                └─▶ spawn vr_pipeline_cli.py (detached, 30–90 min)
-                        └─▶ spawn Wan2.1 generate.py (GPU-heavy VACE child)
+   -> services/api (8000)
+        -> /api/video-replace/upload          -> vr_probe_cli.py
+        -> /api/video-replace/jobs/:id/detect -> vr_detect_cli.py
+        -> Celery video_local_gpu             -> vr_pipeline_cli.py
+             -> Wan2.1 generate.py (GPU-heavy VACE child)
 ```
 
 Orphan GPU prevention:
@@ -277,5 +313,5 @@ Orphan GPU prevention:
   `VR_PIPELINE_TIMEOUT_MS`) cuts any pipeline that refuses to terminate.
 
 `video-replace-service/app/main.py` (old FastAPI standalone on 4200) is
-**legacy debug** only and not part of the default stack — see that file's
+**legacy debug** only and not part of the default stack; see that file's
 top-of-file banner.

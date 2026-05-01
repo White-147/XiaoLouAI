@@ -7,6 +7,7 @@ The core-api process and Python CLI subprocesses share the
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -42,6 +43,13 @@ def _parse_data(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _uuid_or_new(job_id: str) -> tuple[str, str | None]:
+    try:
+        return str(uuid.UUID(job_id)), None
+    except ValueError:
+        return str(uuid.uuid4()), job_id
+
+
 class TasksDB:
     def __init__(self, database_url: str) -> None:
         self.database_url = _normalize_url(database_url)
@@ -62,14 +70,15 @@ class TasksDB:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS video_replace_jobs (
-                    job_id text PRIMARY KEY,
+                    job_id uuid PRIMARY KEY,
+                    legacy_id text,
                     stage text NOT NULL,
                     progress numeric NOT NULL DEFAULT 0,
                     message text,
                     error text,
                     data jsonb NOT NULL DEFAULT '{}'::jsonb,
-                    created_at text NOT NULL,
-                    updated_at text NOT NULL
+                    created_at timestamptz NOT NULL DEFAULT now(),
+                    updated_at timestamptz NOT NULL DEFAULT now()
                 )
                 """
             )
@@ -78,6 +87,9 @@ class TasksDB:
             )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_updated ON video_replace_jobs(updated_at)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_legacy_id ON video_replace_jobs(legacy_id)"
             )
 
     async def _notify(self, conn: asyncpg.Connection, job_id: str) -> None:
@@ -90,26 +102,30 @@ class TasksDB:
         stage: JobStage = JobStage.UPLOADED,
     ) -> None:
         now = _now()
+        normalized_job_id, legacy_id = _uuid_or_new(job_id)
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO video_replace_jobs (job_id, stage, progress, data, created_at, updated_at)
-                VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+                INSERT INTO video_replace_jobs
+                    (job_id, legacy_id, stage, progress, data, created_at, updated_at)
+                VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7)
                 ON CONFLICT (job_id) DO UPDATE SET
+                    legacy_id = COALESCE(video_replace_jobs.legacy_id, EXCLUDED.legacy_id),
                     stage = EXCLUDED.stage,
                     progress = EXCLUDED.progress,
                     data = EXCLUDED.data,
                     updated_at = EXCLUDED.updated_at
                 """,
-                job_id,
+                normalized_job_id,
+                legacy_id,
                 stage.value,
                 0.0,
                 json.dumps(data or {}),
                 now,
                 now,
             )
-            await self._notify(conn, job_id)
+            await self._notify(conn, normalized_job_id)
 
     async def update(
         self,
@@ -124,7 +140,11 @@ class TasksDB:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT stage, progress, data FROM video_replace_jobs WHERE job_id = $1",
+                """
+                SELECT job_id, stage, progress, data
+                FROM video_replace_jobs
+                WHERE job_id::text = $1 OR legacy_id = $1
+                """,
                 job_id,
             )
             if not row:
@@ -143,7 +163,7 @@ class TasksDB:
                     error = COALESCE($4, error),
                     data = $5::jsonb,
                     updated_at = $6
-                WHERE job_id = $7
+                WHERE job_id::text = $7 OR legacy_id = $7
                 """,
                 stage.value if stage else row["stage"],
                 progress if progress is not None else float(row["progress"] or 0),
@@ -153,13 +173,16 @@ class TasksDB:
                 _now(),
                 job_id,
             )
-            await self._notify(conn, job_id)
+            await self._notify(conn, str(row["job_id"]))
 
     async def get(self, job_id: str) -> dict[str, Any] | None:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM video_replace_jobs WHERE job_id = $1",
+                """
+                SELECT * FROM video_replace_jobs
+                WHERE job_id::text = $1 OR legacy_id = $1
+                """,
                 job_id,
             )
         if not row:

@@ -13,9 +13,9 @@ const {
   trimTrailingSlash,
 } = require("../request-base-url");
 
-// Public demo deployments need the mock recharge card visible from IP and domain
-// visits. Restrict with PAYMENT_MOCK_ALLOWED_HOSTS when real billing is enforced.
-const DEFAULT_PAYMENT_MOCK_ALLOWED_HOSTS = ["*"];
+// Mock recharge is local-only by default. Production deployments must opt in
+// with explicit hostnames if a controlled test payment surface is required.
+const DEFAULT_PAYMENT_MOCK_ALLOWED_HOSTS = ["localhost", "127.0.0.1", "::1"];
 
 function splitCsv(value, fallback = []) {
   const source = String(value || "").trim();

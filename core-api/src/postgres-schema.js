@@ -145,7 +145,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 CREATE TABLE IF NOT EXISTS video_replace_jobs (
-  job_id text PRIMARY KEY,
+  job_id uuid PRIMARY KEY,
+  legacy_id text,
   stage text NOT NULL,
   progress numeric NOT NULL DEFAULT 0,
   message text,
@@ -395,6 +396,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_actor ON tasks(actor_id);
 CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_stage ON video_replace_jobs(stage);
 CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_updated ON video_replace_jobs(updated_at);
+CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_legacy_id ON video_replace_jobs(legacy_id);
 CREATE INDEX IF NOT EXISTS idx_jaaz_chat_sessions_canvas ON jaaz_chat_sessions(canvas_id);
 CREATE INDEX IF NOT EXISTS idx_jaaz_chat_messages_session_id ON jaaz_chat_messages(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_jaaz_canvases_updated ON jaaz_canvases(updated_at);
@@ -455,6 +457,30 @@ function numberOrNull(value) {
 function rowId(prefix, parts) {
   const raw = parts.map((part) => text(part) || "unknown").join(":");
   return `${prefix}_${createHash("sha1").update(raw).digest("hex").slice(0, 24)}`;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function legacyUuid(entity, value) {
+  const normalized = text(value);
+  if (!normalized) return null;
+  if (UUID_RE.test(normalized)) return normalized.toLowerCase();
+  const hash = createHash("md5").update(`xiaolou:${entity}:${normalized}`).digest("hex");
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    hash.slice(12, 16),
+    hash.slice(16, 20),
+    hash.slice(20, 32),
+  ].join("-");
+}
+
+function ownerUuid(ownerType, ownerId) {
+  const normalizedOwnerType = String(ownerType || "").trim().toLowerCase();
+  const entity = ["organization", "org", "enterprise"].includes(normalizedOwnerType)
+    ? "organization"
+    : "user";
+  return legacyUuid(entity, ownerId);
 }
 
 function flattenMapOfArrays(mapValue, mapper) {
@@ -566,6 +592,8 @@ function projectSnapshot(snapshot) {
 
 async function ensurePostgresSchema(client) {
   await client.query(CREATE_SCHEMA_SQL);
+  await client.query("ALTER TABLE video_replace_jobs ADD COLUMN IF NOT EXISTS legacy_id text");
+  await client.query("CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_legacy_id ON video_replace_jobs(legacy_id)");
 }
 
 async function clearProjectedTables(client) {
@@ -580,11 +608,11 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO users (id, email, display_name, platform_role, organization_id, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,
       [
-        text(item.id) || rowId("user", [item.email, item.displayName]),
+        legacyUuid("user", text(item.id) || rowId("user", [item.email, item.displayName])),
         text(item.email),
         text(item.displayName || item.name),
         text(item.platformRole || item.role),
-        text(item.organizationId || item.defaultOrganizationId),
+        legacyUuid("organization", item.organizationId || item.defaultOrganizationId),
         JSON.stringify(item),
         text(item.createdAt),
         text(item.updatedAt),
@@ -597,7 +625,7 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO organizations (id, name, data, created_at, updated_at)
        VALUES ($1,$2,$3::jsonb,$4,$5)`,
       [
-        text(item.id) || rowId("org", [item.name]),
+        legacyUuid("organization", text(item.id) || rowId("org", [item.name])),
         text(item.name || item.displayName),
         JSON.stringify(item),
         text(item.createdAt),
@@ -611,9 +639,9 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO organization_members (id, organization_id, user_id, role, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)`,
       [
-        text(item.id) || rowId("orgmem", [item.organizationId, item.userId]),
-        text(item.organizationId),
-        text(item.userId),
+        legacyUuid("organization_member", text(item.id) || rowId("orgmem", [item.organizationId, item.userId])),
+        legacyUuid("organization", item.organizationId),
+        legacyUuid("user", item.userId),
         text(item.role),
         JSON.stringify(item),
         text(item.createdAt),
@@ -627,9 +655,9 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO wallets (id, owner_type, owner_id, balance, available_credits, frozen_credits, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
       [
-        text(item.id) || rowId("wallet", [item.ownerType, item.ownerId]),
+        legacyUuid("wallet", text(item.id) || rowId("wallet", [item.ownerType, item.ownerId])),
         text(item.ownerType),
-        text(item.ownerId),
+        ownerUuid(item.ownerType, item.ownerId),
         numberOrNull(item.balance ?? item.creditsAvailable),
         numberOrNull(item.availableCredits ?? item.creditsAvailable),
         numberOrNull(item.frozenCredits ?? item.creditsFrozen),
@@ -645,9 +673,9 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO wallet_ledger (id, wallet_id, actor_id, entry_type, amount, source_type, source_id, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)`,
       [
-        text(item.id) || rowId("ledger", [item.walletId, item.sourceType, item.sourceId, item.createdAt]),
-        text(item.walletId),
-        text(item.actorId),
+        legacyUuid("wallet_ledger", text(item.id) || rowId("ledger", [item.walletId, item.sourceType, item.sourceId, item.createdAt])),
+        legacyUuid("wallet", item.walletId),
+        legacyUuid("user", item.actorId),
         text(item.entryType || item.changeType),
         numberOrNull(item.amount),
         text(item.sourceType),
@@ -664,9 +692,9 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO wallet_recharge_orders (id, actor_id, wallet_id, payment_method, mode, status, amount, credits, provider_trade_no, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)`,
       [
-        text(item.id) || rowId("order", [item.providerTradeNo, item.createdAt]),
-        text(item.actorId),
-        text(item.walletId),
+        legacyUuid("wallet_recharge_order", text(item.id) || rowId("order", [item.providerTradeNo, item.createdAt])),
+        legacyUuid("user", item.actorId),
+        legacyUuid("wallet", item.walletId),
         text(item.paymentMethod),
         text(item.mode),
         text(item.status),
@@ -685,12 +713,12 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO projects (id, owner_type, owner_id, title, status, organization_id, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
       [
-        text(item.id) || rowId("project", [item.title, item.createdAt]),
+        legacyUuid("project", text(item.id) || rowId("project", [item.title, item.createdAt])),
         text(item.ownerType),
-        text(item.ownerId || item.createdBy),
+        ownerUuid(item.ownerType, item.ownerId || item.createdBy),
         text(item.title || item.name),
         text(item.status),
-        text(item.organizationId),
+        legacyUuid("organization", item.organizationId),
         JSON.stringify(item),
         text(item.createdAt),
         text(item.updatedAt),
@@ -703,13 +731,13 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO tasks (id, project_id, actor_id, type, action_code, status, wallet_id, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)`,
       [
-        text(item.id) || rowId("task", [item.type, item.projectId, item.createdAt]),
-        text(item.projectId),
-        text(item.actorId),
+        legacyUuid("task", text(item.id) || rowId("task", [item.type, item.projectId, item.createdAt])),
+        legacyUuid("project", item.projectId),
+        legacyUuid("user", item.actorId),
         text(item.type),
         text(item.actionCode),
         text(item.status),
-        text(item.walletId),
+        legacyUuid("wallet", item.walletId),
         JSON.stringify(item),
         text(item.createdAt),
         text(item.updatedAt),
@@ -721,7 +749,7 @@ async function insertProjectedRows(client, projections) {
     await client.query(
       `INSERT INTO project_settings (project_id, data, updated_at)
        VALUES ($1,$2::jsonb,$3)`,
-      [text(item.projectId), JSON.stringify(item), text(item.updatedAt)],
+      [legacyUuid("project", item.projectId), JSON.stringify(item), text(item.updatedAt)],
     );
   }
 
@@ -730,8 +758,8 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO project_scripts (id, project_id, title, version, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)`,
       [
-        text(item.id) || rowId("script", [item.projectId]),
-        text(item.projectId),
+        legacyUuid("project_script", text(item.id) || rowId("script", [item.projectId])),
+        legacyUuid("project", item.projectId),
         text(item.title || item.name),
         numberOrNull(item.version),
         JSON.stringify(item),
@@ -746,8 +774,8 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO project_assets (id, project_id, asset_type, name, scope, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,
       [
-        text(item.id) || rowId("asset", [item.projectId, item.name, item.createdAt]),
-        text(item.projectId),
+        legacyUuid("asset", text(item.id) || rowId("asset", [item.projectId, item.name, item.createdAt])),
+        legacyUuid("project", item.projectId),
         text(item.assetType || item.type || item.kind),
         text(item.name || item.title || item.filename),
         text(item.scope),
@@ -763,8 +791,8 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO storyboards (id, project_id, shot_no, title, image_status, video_status, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
       [
-        text(item.id) || rowId("storyboard", [item.projectId, item.shotNo, item.createdAt]),
-        text(item.projectId),
+        legacyUuid("storyboard", text(item.id) || rowId("storyboard", [item.projectId, item.shotNo, item.createdAt])),
+        legacyUuid("project", item.projectId),
         numberOrNull(item.shotNo ?? item.index ?? item.order),
         text(item.title || item.name),
         text(item.imageStatus),
@@ -781,9 +809,9 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO videos (id, project_id, storyboard_id, status, video_url, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,
       [
-        text(item.id) || rowId("video", [item.projectId, item.storyboardId, item.createdAt]),
-        text(item.projectId),
-        text(item.storyboardId),
+        legacyUuid("video", text(item.id) || rowId("video", [item.projectId, item.storyboardId, item.createdAt])),
+        legacyUuid("project", item.projectId),
+        legacyUuid("storyboard", item.storyboardId),
         text(item.status),
         text(item.videoUrl || item.outputUrl || item.url),
         JSON.stringify(item),
@@ -798,9 +826,9 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO dubbings (id, project_id, storyboard_id, status, audio_url, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,
       [
-        text(item.id) || rowId("dubbing", [item.projectId, item.storyboardId, item.createdAt]),
-        text(item.projectId),
-        text(item.storyboardId),
+        legacyUuid("dubbing", text(item.id) || rowId("dubbing", [item.projectId, item.storyboardId, item.createdAt])),
+        legacyUuid("project", item.projectId),
+        legacyUuid("storyboard", item.storyboardId),
         text(item.status),
         text(item.audioUrl || item.outputUrl || item.url),
         JSON.stringify(item),
@@ -814,7 +842,7 @@ async function insertProjectedRows(client, projections) {
     await client.query(
       `INSERT INTO project_timelines (project_id, version, data, updated_at)
        VALUES ($1,$2,$3::jsonb,$4)`,
-      [text(item.projectId), numberOrNull(item.version), JSON.stringify(item), text(item.updatedAt)],
+      [legacyUuid("project", item.projectId), numberOrNull(item.version), JSON.stringify(item), text(item.updatedAt)],
     );
   }
 
@@ -823,8 +851,8 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO canvas_projects (id, actor_id, title, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4::jsonb,$5,$6)`,
       [
-        text(item.id) || rowId("canvas", [item.actorId, item.title, item.createdAt]),
-        text(item.actorId),
+        legacyUuid("canvas", text(item.id) || rowId("canvas", [item.actorId, item.title, item.createdAt])),
+        legacyUuid("user", item.actorId),
         text(item.title),
         JSON.stringify(item),
         text(item.createdAt),
@@ -838,8 +866,8 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO agent_canvas_projects (id, actor_id, title, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4::jsonb,$5,$6)`,
       [
-        text(item.id) || rowId("agentcanvas", [item.actorId, item.title, item.createdAt]),
-        text(item.actorId),
+        legacyUuid("agent_canvas", text(item.id) || rowId("agentcanvas", [item.actorId, item.title, item.createdAt])),
+        legacyUuid("user", item.actorId),
         text(item.title),
         JSON.stringify(item),
         text(item.createdAt),
@@ -950,9 +978,9 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO create_studio_images (id, actor_id, task_id, model, prompt, image_url, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
       [
-        text(item.id) || rowId("createimage", [item.actorId || item.ownerId, item.taskId, item.createdAt]),
-        text(item.actorId || item.ownerId || item.userId),
-        text(item.taskId),
+        legacyUuid("create_image", text(item.id) || rowId("createimage", [item.actorId || item.ownerId, item.taskId, item.createdAt])),
+        legacyUuid("user", item.actorId || item.ownerId || item.userId),
+        legacyUuid("task", item.taskId),
         text(item.model || item.modelId),
         text(item.prompt || item.positivePrompt),
         text(item.imageUrl || item.outputUrl || item.url),
@@ -968,9 +996,9 @@ async function insertProjectedRows(client, projections) {
       `INSERT INTO create_studio_videos (id, actor_id, task_id, model, prompt, video_url, data, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,
       [
-        text(item.id) || rowId("createvideo", [item.actorId || item.ownerId, item.taskId, item.createdAt]),
-        text(item.actorId || item.ownerId || item.userId),
-        text(item.taskId),
+        legacyUuid("create_video", text(item.id) || rowId("createvideo", [item.actorId || item.ownerId, item.taskId, item.createdAt])),
+        legacyUuid("user", item.actorId || item.ownerId || item.userId),
+        legacyUuid("task", item.taskId),
         text(item.model || item.modelId),
         text(item.prompt || item.positivePrompt),
         text(item.videoUrl || item.outputUrl || item.url),
