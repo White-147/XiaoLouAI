@@ -8,6 +8,7 @@ const DEFAULT_JAAZ_API_PORT = 57988;
 const DEFAULT_JAAZ_UI_PORT = 5174;
 const DEFAULT_KEEPALIVE_MS = 30_000;
 const DEFAULT_START_TIMEOUT_MS = 15_000;
+const DEFAULT_DATABASE_URL = "postgres://root:root@127.0.0.1:5432/xiaolou";
 
 let ensureInFlight = null;
 let keepAliveTimer = null;
@@ -173,6 +174,13 @@ async function ensureApi(config) {
       ["main.py", "--port", String(config.apiPort)],
       {
         cwd: config.apiDir,
+        env: {
+          DATABASE_URL: process.env.DATABASE_URL || DEFAULT_DATABASE_URL,
+          JAAZ_DATABASE_URL:
+            process.env.JAAZ_DATABASE_URL ||
+            process.env.DATABASE_URL ||
+            DEFAULT_DATABASE_URL,
+        },
         outLog: config.apiOutLog,
         errLog: config.apiErrLog,
       },

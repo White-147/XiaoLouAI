@@ -8,7 +8,7 @@ which does NOT require a FastAPI HTTP listener. This script starts the
 FastAPI-on-4200 variant for local debugging / A-B testing only and refuses
 to run unless ``VR_LEGACY_STANDALONE=1`` is set, so that an accidental
 ``python run_api.py`` cannot clash with core-api (both paths share
-tasks.sqlite and would race each other's startup reconcile).
+video_replace_jobs and would race each other's startup reconcile).
 
 Usage (debug only):
 
@@ -32,7 +32,7 @@ def _main() -> None:
             "  set VR_LEGACY_STANDALONE=1\n"
             "  python run_api.py\n"
             "and make sure core-api (4100) is NOT running, otherwise the two paths\n"
-            "will race to reap each other's jobs via tasks.sqlite.\n"
+            "will race to reap each other's jobs via PostgreSQL.\n"
         )
         sys.exit(2)
 

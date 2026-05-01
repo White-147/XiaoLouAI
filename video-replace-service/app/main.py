@@ -11,7 +11,7 @@ variant. To start it you must explicitly set
 ``VR_LEGACY_STANDALONE=1`` — otherwise ``run_api.py`` refuses to bind.
 
 Do NOT use this in production and do NOT start it alongside the default
-4100-native stack: both paths share ``tasks.sqlite`` and would race to
+4100-native stack: both paths share ``video_replace_jobs`` and would race to
 reap each other's in-flight jobs.
 """
 from __future__ import annotations

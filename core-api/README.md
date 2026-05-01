@@ -1,12 +1,12 @@
 # core-api
 
-Backend for XiaoLou AI 创作平台. Runs on Node.js built-in HTTP modules, persists state in SQLite.
+Backend for XiaoLou AI 创作平台. Runs on Node.js built-in HTTP modules. After migration, PostgreSQL is the primary persistence layer.
 
 ## What it provides
 
 - REST endpoints for projects, scripts, assets, storyboards, videos, dubbings, tasks, wallet, enterprise, toolbox, and canvas operations.
 - Server-sent events at `/api/tasks/stream` for task progress.
-- SQLite-backed seed data — boots with a realistic demo project and survives restarts.
+- PostgreSQL-backed runtime, with SQLite retained only as migration input and backup.
 
 ## Quick start
 
@@ -34,8 +34,93 @@ Optional overrides:
 PORT=4100
 HOST=::                              # :: = all interfaces (default); 127.0.0.1 = local only
 CORE_API_PUBLIC_BASE_URL=https://your-domain.com   # for single-origin tunnel mode
-CORE_API_DB_PATH=./data/demo.sqlite  # SQLite path, relative to core-api/
+DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+DATABASE_PUBLIC_URL=postgres://root:root@218.92.180.214:5432/xiaolou
+VR_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+JAAZ_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+PGPOOL_MAX=10
+POSTGRES_ALLOW_EMPTY_BOOTSTRAP=0
+CORE_API_DB_PATH=./data/demo.sqlite  # migration-only import source, relative to core-api/
 CORE_API_UPLOAD_DIR=./uploads        # upload directory, relative to core-api/
+```
+
+## PostgreSQL migration
+
+After cutover, PostgreSQL is the only runtime write target. SQLite is retained
+only as the stopped migration source and rollback backup. The first PostgreSQL
+stage keeps the full app snapshot in `legacy_state_snapshot.snapshot_value`
+and also projects high-value entities into explicit management tables such as
+`users`, `wallets`, `projects`, `project_assets`, `storyboards`, `videos`,
+`dubbings`, `tasks`, `canvas_projects`, `create_studio_*`, and
+`playground_*`. Video-replace job metadata is moved into `video_replace_jobs`,
+and Jaaz canvas/chat/workflow data is moved into `jaaz_*` tables.
+
+Bootstrap the requested local management account/database:
+
+```bash
+cd core-api
+psql -f db/init-root.psql postgres
+```
+
+Credentials:
+
+```text
+database: xiaolou
+user: root
+password: root
+url: postgres://root:root@127.0.0.1:5432/xiaolou
+public url: postgres://root:root@218.92.180.214:5432/xiaolou
+```
+
+If PostgreSQL is installed on `218.92.180.214`, apply local/IP access on that
+server before importing or connecting remotely:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File db/configure-postgres-network.ps1 -DataDir "C:\Program Files\PostgreSQL\18\data"
+```
+
+The script configures `listen_addresses = 'localhost,218.92.180.214'`, adds
+loopback plus `218.92.180.214/32` to `pg_hba.conf`, and opens TCP `5432` in
+Windows Firewall when run as Administrator. Restart the PostgreSQL service
+afterward.
+
+Stop core-api before importing so SQLite cannot receive new writes, then run:
+
+```bash
+npm run db:backup-sqlite
+npm run db:migrate
+npm run db:import-sqlite
+npm run db:import-vr-sqlite
+npm run db:import-jaaz-sqlite
+npm run db:cutover:postgres
+```
+
+`db:cutover:postgres` verifies `legacy_state_snapshot` exists, then writes the
+PostgreSQL runtime settings into `.env.local`:
+
+```text
+DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+DATABASE_PUBLIC_URL=postgres://root:root@218.92.180.214:5432/xiaolou
+VR_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+JAAZ_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
+PGPOOL_MAX=10
+POSTGRES_ALLOW_EMPTY_BOOTSTRAP=0
+```
+
+Use `npm run db:cutover:postgres -- --use-public` only when the core-api
+process should connect through `218.92.180.214`; same-host deployments should
+prefer `127.0.0.1`. The same runtime switch is also committed as
+`.env.postgres.example` for easy copying into `.env.local`.
+
+PostgreSQL mode refuses to bootstrap an empty snapshot by default, so an
+accidental start before `db:import-sqlite` fails loudly instead of replacing the
+current SQLite data with seed data. For a brand-new demo-only PostgreSQL
+database, set `POSTGRES_ALLOW_EMPTY_BOOTSTRAP=1`.
+
+Then restart core-api and verify:
+
+```bash
+npm run verify:postgres
 ```
 
 ## Alipay recharge payments
@@ -146,7 +231,7 @@ Starts on a random port, checks:
 - `/api/projects/:id/overview`
 - `/api/toolbox/capabilities`
 
-Also creates a project, restarts, and confirms SQLite persistence.
+Also creates a project, restarts, and confirms persistence.
 
 ## Handy requests
 
@@ -159,7 +244,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:4100/api/demo/reset
 
 ## Notes
 
-- Uses Node built-in `node:sqlite` (Node ≥ 22.5). Prints an experimental warning on Node 24 — safe to ignore.
+- Runtime persistence is PostgreSQL-only; SQLite files are read only by the migration/backup scripts.
 - `POST /api/demo/reset` restores the seeded demo dataset.
 - Canvas API: `/api/canvas/*` and `/api/canvas-library/*` (legacy aliases `/twitcanva-api/*` preserved).
 - Response envelope: `{ success, data?, error?, meta? }`.
@@ -182,7 +267,7 @@ browser (3000, Vite)
 Orphan GPU prevention:
 
 - core-api persists `pipeline_pid` (outer Python) and `subprocess_pid` (VACE
-  grandchild) into `tasks.sqlite` as each step starts.
+  grandchild) into the PostgreSQL `video_replace_jobs` table.
 - On startup, core-api scans every non-terminal job, kills any still-alive
   PID tree via `taskkill /T /F` (Windows) / `kill -KILL -pgid` (POSIX), and
   marks the job failed with a clear "startup reap / previous crash" message.

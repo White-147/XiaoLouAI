@@ -5,7 +5,7 @@ Runs *without* the FastAPI server:
 
   1. Loads Settings (honours .env.local).
   2. Probes an input video + reference image from scripts/_tmp/.
-  3. Seeds a job directly in SQLite in the QUEUED stage.
+  3. Seeds a job directly in PostgreSQL in the QUEUED stage.
   4. Calls ReplaceRunner.run() — exercising:
        · SAM2 tracker with keyframe_index prompt (or OpenCV lite fallback)
        · VACE replacer (or OpenCV lite replacer)

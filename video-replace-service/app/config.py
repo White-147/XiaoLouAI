@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 200
 
     # ── Task database ──────────────────────────────────────────────────
-    database_url: str = "sqlite+aiosqlite:///./data/tasks.sqlite"
+    database_url: str = "postgres://root:root@127.0.0.1:5432/xiaolou"
 
     # ── Video limits ───────────────────────────────────────────────────
     max_video_seconds: int = 15
@@ -117,10 +117,6 @@ class Settings(BaseSettings):
     @property
     def final_dir(self) -> Path:
         return self.storage_root / "finals"
-
-    @property
-    def db_path(self) -> Path:
-        return self.storage_root / "tasks.sqlite"
 
     @property
     def cors_origin_list(self) -> list[str]:

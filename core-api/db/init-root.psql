@@ -1,0 +1,37 @@
+-- Bootstrap database for XiaoLouAI's first PostgreSQL migration stage.
+-- Run as a PostgreSQL superuser:
+--   psql -f db/init-root.psql postgres
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'root') THEN
+    CREATE ROLE root LOGIN PASSWORD 'root';
+  ELSE
+    ALTER ROLE root WITH LOGIN PASSWORD 'root' LOGIN;
+  END IF;
+END
+$$;
+
+SELECT 'CREATE DATABASE xiaolou OWNER root'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'xiaolou')\gexec
+
+GRANT ALL PRIVILEGES ON DATABASE xiaolou TO root;
+
+\connect xiaolou
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS citext;
+
+GRANT ALL ON SCHEMA public TO root;
+
+SELECT 'CREATE DATABASE xiaolou_verify OWNER root'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'xiaolou_verify')\gexec
+
+GRANT ALL PRIVILEGES ON DATABASE xiaolou_verify TO root;
+
+\connect xiaolou_verify
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS citext;
+
+GRANT ALL ON SCHEMA public TO root;

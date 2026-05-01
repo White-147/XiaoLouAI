@@ -3684,7 +3684,7 @@ class MockStore {
 
     // ── Migrate historically poisoned display URLs ────────────────────
     // Pre-fix records persisted base64 data URLs into display fields; the
-    // SQLite snapshot serializer then turned them into ``[truncated:…]``
+    // Legacy snapshot serializer then turned them into ``[truncated:…]``
     // on the next restart. Left alone these poisoned strings render as
     // broken images on /create/video. Scrub them at load time: try to
     // recover from adjacent fields, otherwise set to null so the frontend
@@ -4091,7 +4091,7 @@ class MockStore {
     //    See user request §B: the save path used to pipe `data:base64` URLs,
     //    `canvas.toDataURL('image/png')` frame extracts, ImageEditor composite
     //    fallbacks, and CameraAngle outputs straight into node.resultUrl /
-    //    node.lastFrame. After the sqlite snapshot serializer trimmed the
+    //    node.lastFrame. After the legacy snapshot serializer trimmed the
     //    giant strings, the snapshot came back as `[truncated:1.9M chars]`.
     //
     //    Recovery policy (conservative — no invented URLs):
@@ -4735,7 +4735,7 @@ class MockStore {
    *
    * Returns the **public `/uploads/<name>`-style URL** that is safe to persist
    * in `createStudioVideos`, task.metadata, and asset records without
-   * bloating the SQLite snapshot. For any input that is not a data URL the
+   * bloating the state snapshot. For any input that is not a data URL the
    * value is returned unchanged (caller can then decide whether it's already
    * safe).
    *
@@ -7616,7 +7616,7 @@ class MockStore {
         // Before this pass, frontend submits containing pasted/copied
         // screenshots could put a ~1 MB data URL into ``referenceImageUrl``
         // et al. That blob then flowed straight into task.metadata and
-        // createStudioVideos[...], and the SQLite snapshot serializer
+        // createStudioVideos[...], and the legacy snapshot serializer
         // truncated it to ``[truncated:XXXchars]`` on restart. Persist the
         // blob to /uploads/ once and rewrite input in place so every
         // downstream consumer (metadata, display record, provider call)

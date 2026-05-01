@@ -4,9 +4,9 @@ vr_pipeline_cli.py — run the full SAM2+VACE replace pipeline, no HTTP server.
 Usage (run from video-replace-service/ with venv Python):
   python vr_pipeline_cli.py <job_id>
 
-The runner writes progress directly into tasks.sqlite.  Callers should NOT
+The runner writes progress directly into PostgreSQL.  Callers should NOT
 wait for this process — core-api (4100) spawns it detached and watches for
-stage transitions via the same SQLite file.
+stage transitions via the same PostgreSQL table.
 
 Exit codes:
   0   pipeline finished (job may be succeeded OR failed in DB)
@@ -38,7 +38,7 @@ async def _run(job_id: str) -> None:
     storage = Storage(settings)
 
     # Publish the pipeline PID (our own process) on stdout as the very first
-    # JSON line so the Node parent can persist it into tasks.sqlite before
+    # JSON line so the Node parent can persist it into PostgreSQL before
     # any VACE subprocess spawns. If the pipeline later crashes we can still
     # kill the tree from a fresh core-api boot.
     print(json.dumps({"type": "pipeline_ready", "pid": os.getpid(), "job_id": job_id}),

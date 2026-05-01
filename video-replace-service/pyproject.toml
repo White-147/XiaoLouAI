@@ -14,7 +14,7 @@ dependencies = [
   "pydantic>=2.9",
   "pydantic-settings>=2.5",
   # Storage / DB
-  "aiosqlite>=0.20",
+  "asyncpg==0.31.0",
   "aiofiles>=24.1",
   # Media (H.264/AAC finalization + ffmpeg bundled fallback)
   "opencv-contrib-python>=4.10",

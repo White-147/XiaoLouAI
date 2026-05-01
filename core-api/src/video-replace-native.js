@@ -12,8 +12,8 @@
  *   vr_detect_cli.py   — YOLO detection (sync, ~5–15 s)
  *   vr_pipeline_cli.py — SAM2+VACE pipeline (async, 30–90 min)
  *
- * All VR data lives under VR_SERVICE_DIR/data/.  The same tasks.sqlite
- * that the Python service used is read/written directly here via node:sqlite.
+ * All VR files live under VR_SERVICE_DIR/data/. Job metadata is stored in
+ * PostgreSQL only; legacy tasks.sqlite files are migration inputs/backup.
  */
 
 "use strict";
@@ -33,7 +33,6 @@ const {
 const http = require("node:http");
 const { platform, tmpdir } = require("node:os");
 const { basename, extname, join, resolve } = require("node:path");
-const { DatabaseSync } = require("node:sqlite");
 const { spawn, spawnSync } = require("node:child_process");
 const { corsHeaders } = require("./http");
 const { killProcessTree, isProcessAlive } = require("./process-tree");
@@ -58,7 +57,7 @@ const VR_SERVICE_DIR = resolve(process.env.VR_SERVICE_DIR || resolveDefaultVrSer
 const VR_DATA_DIR = resolve(
   process.env.VR_DATA_ROOT || join(VR_SERVICE_DIR, "data")
 );
-const VR_DB_PATH = join(VR_DATA_DIR, "tasks.sqlite");
+const DEFAULT_DATABASE_URL = "postgres://root:root@127.0.0.1:5432/xiaolou";
 
 // Venv Python — used for all subprocess spawns.
 const VENV_PYTHON =
@@ -216,9 +215,8 @@ let projectAssetStore = null;
 
 // Tracks in-flight pipeline subprocesses.
 //   jobId → { child, pipelinePid, startedAt, timeoutTimer }
-// This is a soft cache over the authoritative record in tasks.sqlite — even
-// if the Node process crashes and this map is lost, the next boot's
-// reconcileOnStartup() will reap by reading pipeline_pid from the DB.
+// This is a soft cache over the authoritative record in PostgreSQL. If the
+// Node process crashes, the next boot rehydrates from video_replace_jobs.
 const _runningPipelines = new Map();
 const _queuedPipelineJobs = [];
 const _queuedPipelineSet = new Set();
@@ -246,43 +244,210 @@ function _refreshPipelineQueueMessages() {
 }
 
 // ---------------------------------------------------------------------------
-// SQLite — VR job database (same tasks.sqlite the Python service used)
+// PostgreSQL VR job database
 // ---------------------------------------------------------------------------
 
-let _db = null;
+let _pgPool = null;
+let _pgListenClient = null;
+let _pgJobs = new Map();
+let _pgWriteQueue = Promise.resolve();
+let _pgWriteError = null;
+let _storageInitialized = false;
+let _pgClosePromise = null;
 
-function getDb() {
-  if (_db) return _db;
-  mkdirSync(VR_DATA_DIR, { recursive: true });
-  _db = new DatabaseSync(VR_DB_PATH);
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS jobs (
-      job_id TEXT PRIMARY KEY,
-      stage TEXT NOT NULL,
-      progress REAL NOT NULL DEFAULT 0.0,
-      message TEXT,
-      error TEXT,
-      data TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
-  return _db;
+function parseJobData(value) {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value || "{}");
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object") {
+    return structuredClone(value);
+  }
+  return {};
+}
+
+function normalizeJobRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    progress: Number(row.progress) || 0,
+    data: parseJobData(row.data),
+  };
+}
+
+function cloneJob(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    data: structuredClone(row.data || {}),
+  };
+}
+
+function vrDatabaseUrl() {
+  return process.env.VR_DATABASE_URL || process.env.DATABASE_URL || DEFAULT_DATABASE_URL;
+}
+
+function pythonSubprocessEnv() {
+  const databaseUrl = vrDatabaseUrl();
+  return {
+    ...process.env,
+    DATABASE_URL: process.env.DATABASE_URL || databaseUrl,
+    VR_DATABASE_URL: databaseUrl,
+    PYTHONUNBUFFERED: "1",
+    PYTHONIOENCODING: "utf-8",
+  };
+}
+
+async function loadPgJob(jobId) {
+  if (!_pgPool || !jobId) return null;
+  const result = await _pgPool.query(
+    `SELECT job_id, stage, progress, message, error, data, created_at, updated_at
+     FROM video_replace_jobs
+     WHERE job_id = $1`,
+    [jobId],
+  );
+  const row = normalizeJobRow(result.rows[0]);
+  if (row) {
+    _pgJobs.set(row.job_id, row);
+  } else {
+    _pgJobs.delete(jobId);
+  }
+  return row;
+}
+
+async function initializeVideoReplaceStorage() {
+  if (_storageInitialized) return;
+
+  const { Pool } = require("pg");
+  const { ensurePostgresSchema } = require("./postgres-schema");
+  _pgPool = new Pool({
+    connectionString: vrDatabaseUrl(),
+    max: Number(process.env.PGPOOL_MAX || 10),
+  });
+
+  const client = await _pgPool.connect();
+  try {
+    await ensurePostgresSchema(client);
+    const result = await client.query(
+      `SELECT job_id, stage, progress, message, error, data, created_at, updated_at
+       FROM video_replace_jobs
+       ORDER BY updated_at DESC`,
+    );
+    _pgJobs = new Map(result.rows.map((row) => {
+      const normalized = normalizeJobRow(row);
+      return [normalized.job_id, normalized];
+    }));
+
+    _pgListenClient = await _pgPool.connect();
+    _pgListenClient.on("notification", (message) => {
+      const jobId = String(message.payload || "").trim();
+      if (!jobId) return;
+      loadPgJob(jobId).catch((error) => {
+        console.error("[vr-native] postgres job refresh failed:", error?.message || error);
+      });
+    });
+    _pgListenClient.on("error", (error) => {
+      console.error("[vr-native] postgres LISTEN client error:", error?.message || error);
+    });
+    await _pgListenClient.query("LISTEN video_replace_job_changed");
+    _storageInitialized = true;
+  } finally {
+    client.release();
+  }
+}
+
+function assertStorageReady() {
+  if (_storageInitialized) return;
+  throw new Error("video-replace PostgreSQL storage is not initialized");
+}
+
+function queuePgJobWrite(job) {
+  if (!_pgPool) return;
+  const snapshot = cloneJob(job);
+  _pgWriteQueue = _pgWriteQueue
+    .then(async () => {
+      await _pgPool.query(
+        `INSERT INTO video_replace_jobs
+           (job_id, stage, progress, message, error, data, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)
+         ON CONFLICT (job_id) DO UPDATE SET
+           stage = excluded.stage,
+           progress = excluded.progress,
+           message = excluded.message,
+           error = excluded.error,
+           data = excluded.data,
+           updated_at = excluded.updated_at`,
+        [
+          snapshot.job_id,
+          snapshot.stage,
+          Number(snapshot.progress) || 0,
+          snapshot.message || null,
+          snapshot.error || null,
+          JSON.stringify(snapshot.data || {}),
+          snapshot.created_at,
+          snapshot.updated_at,
+        ],
+      );
+      await _pgPool.query("SELECT pg_notify('video_replace_job_changed', $1)", [snapshot.job_id]);
+    })
+    .then(() => {
+      _pgWriteError = null;
+    })
+    .catch((error) => {
+      _pgWriteError = error;
+      console.error("[vr-native] postgres job write failed:", error?.message || error);
+    });
+}
+
+async function flushVideoReplaceStorage() {
+  await _pgWriteQueue;
+  if (_pgWriteError) throw _pgWriteError;
+}
+
+async function closeVideoReplaceStorage() {
+  if (_pgClosePromise) return _pgClosePromise;
+  _pgClosePromise = (async () => {
+    await flushVideoReplaceStorage();
+    if (_pgListenClient) {
+      try { await _pgListenClient.query("UNLISTEN *"); } catch { /* ignore */ }
+      _pgListenClient.release();
+      _pgListenClient = null;
+    }
+    if (_pgPool) {
+      await _pgPool.end();
+      _pgPool = null;
+    }
+    _storageInitialized = false;
+  })().finally(() => {
+    _pgClosePromise = null;
+  });
+  return _pgClosePromise;
 }
 
 function dbCreate(jobId, data, stage = "uploaded") {
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
-      "INSERT INTO jobs (job_id, stage, progress, data, created_at, updated_at) VALUES (?,?,?,?,?,?)"
-    )
-    .run(jobId, stage, 0.0, JSON.stringify(data || {}), now, now);
+  assertStorageReady();
+  const row = {
+    job_id: jobId,
+    stage,
+    progress: 0,
+    message: null,
+    error: null,
+    data: structuredClone(data || {}),
+    created_at: now,
+    updated_at: now,
+  };
+  _pgJobs.set(jobId, row);
+  queuePgJobWrite(row);
 }
 
 function dbGet(jobId) {
-  const row = getDb().prepare("SELECT * FROM jobs WHERE job_id = ?").get(jobId);
-  if (!row) return null;
-  return { ...row, data: JSON.parse(row.data || "{}") };
+  assertStorageReady();
+  return cloneJob(_pgJobs.get(jobId) || null);
 }
 
 function dbUpdate(jobId, { stage, progress, message, error: errMsg, dataPatch } = {}) {
@@ -290,26 +455,18 @@ function dbUpdate(jobId, { stage, progress, message, error: errMsg, dataPatch } 
   if (!job) return false;
   const newData = dataPatch ? { ...job.data, ...dataPatch } : job.data;
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
-      `UPDATE jobs SET
-        stage    = COALESCE(?, stage),
-        progress = COALESCE(?, progress),
-        message  = COALESCE(?, message),
-        error    = COALESCE(?, error),
-        data     = ?,
-        updated_at = ?
-       WHERE job_id = ?`
-    )
-    .run(
-      stage || null,
-      progress ?? null,
-      message || null,
-      errMsg || null,
-      JSON.stringify(newData),
-      now,
-      jobId
-    );
+
+  const nextJob = {
+    ...job,
+    stage: stage || job.stage,
+    progress: progress ?? job.progress,
+    message: message || job.message,
+    error: errMsg || job.error,
+    data: newData,
+    updated_at: now,
+  };
+  _pgJobs.set(jobId, nextJob);
+  queuePgJobWrite(nextJob);
   return true;
 }
 
@@ -527,7 +684,7 @@ function runPythonAsync(scriptPath, args, timeoutMs = 30_000) {
     }
     const child = spawn(VENV_PYTHON, [scriptPath, ...args], {
       cwd: VR_SERVICE_DIR,
-      env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
+      env: pythonSubprocessEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -585,7 +742,7 @@ function runPythonSync(scriptPath, args, timeoutMs = 30_000) {
     cwd: VR_SERVICE_DIR,
     encoding: "utf8",
     timeout: timeoutMs,
-    env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
+    env: pythonSubprocessEnv(),
     windowsHide: true,
   });
   if (result.error) return { ok: false, error: result.error.message };
@@ -681,7 +838,7 @@ function spawnPipelineAsync(jobId) {
   const child = spawn(VENV_PYTHON, [cliScript, jobId], {
     cwd: VR_SERVICE_DIR,
     detached: true,
-    env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
+    env: pythonSubprocessEnv(),
     stdio: childStdio,
     windowsHide: true,
   });
@@ -932,13 +1089,7 @@ function assertVideoReplaceJobSyncAccess(job, projectId, req, url, store) {
 }
 
 function parseJobRow(row) {
-  let data = {};
-  try {
-    data = JSON.parse(row.data || "{}");
-  } catch {
-    data = {};
-  }
-  return { ...row, data };
+  return normalizeJobRow(row);
 }
 
 function filterVisibleVideoReplaceAssets(assets, actorId, projectId, store = projectAssetStore) {
@@ -993,15 +1144,16 @@ function jobToStatus(job) {
 }
 
 function listJobs(limit = 30, options = {}) {
+  assertStorageReady();
   const cappedLimit = Math.max(1, Math.min(100, Number(limit) || 30));
   const access = options.access || null;
   const projectId = options.projectId || null;
   const store = options.store || null;
 
-  return getDb()
-    .prepare("SELECT * FROM jobs ORDER BY updated_at DESC")
-    .all()
-    .map(parseJobRow)
+  const rows = [..._pgJobs.values()]
+    .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+
+  return rows
     .filter((job) => isJobVisibleToActor(job, access, store, projectId))
     .slice(0, cappedLimit)
     .map(jobToStatus);
@@ -1664,6 +1816,7 @@ function isVideoReplaceRequest(pathname) {
  */
 async function handleVideoReplaceRequest(req, res, url, store = null) {
   if (!isVideoReplaceRequest(url.pathname)) return false;
+  await initializeVideoReplaceStorage();
   if (store) projectAssetStore = store;
 
   // OPTIONS pre-flight
@@ -1773,7 +1926,7 @@ async function handleVideoReplaceRequest(req, res, url, store = null) {
  * this Node session. Instead we:
  *   1. Store a synthetic entry in _runningPipelines so _tryKillPipeline works.
  *   2. Poll isProcessAlive() every 5 s. When the PID dies the Python side has
- *      already written its final stage to SQLite — we just clean up markers.
+ *      already written its final stage to PostgreSQL; we just clean up markers.
  *   3. Install the hard-timeout timer so a stuck adopted job is still reaped.
  */
 function _adoptOrphanPipeline(jobId, pipelinePid) {
@@ -1837,7 +1990,7 @@ function _adoptOrphanPipeline(jobId, pipelinePid) {
  *
  * Strategy per job:
  *   • pipeline_pid still ALIVE  → re-adopt (do NOT kill). The Python process
- *     writes directly to SQLite; Node just needs to poll for its exit.
+ *     writes directly to PostgreSQL; Node just needs to poll for its exit.
  *     This handles the hot-reload case: VACE keeps running in Python.
  *   • pipeline_pid dead / absent → the process already exited. If the job
  *     is still non-terminal the Python side crashed → mark failed.
@@ -1845,12 +1998,13 @@ function _adoptOrphanPipeline(jobId, pipelinePid) {
  * Called once by server.js right after ``createServer`` returns.
  */
 function reconcileOnStartup() {
+  assertStorageReady();
   let jobs;
   try {
-    const rows = getDb().prepare(
-      "SELECT job_id, stage, data FROM jobs WHERE stage IN ('queued','tracking','mask_ready','replacing','detecting') ORDER BY created_at ASC"
-    ).all();
-    jobs = rows.map((r) => ({ ...r, data: JSON.parse(r.data || "{}") }));
+    const rows = [..._pgJobs.values()]
+      .filter((job) => IN_FLIGHT_STAGES.has(job.stage))
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    jobs = rows.map((r) => ({ ...r, data: parseJobData(r.data) }));
   } catch (err) {
     console.error("[vr-native] reconcileOnStartup: DB scan failed:", err?.message);
     return { scanned: 0, reaped: 0 };
@@ -1945,8 +2099,11 @@ function shutdownPipelines(reason = "core-api shutdown") {
 }
 
 module.exports = {
+  closeVideoReplaceStorage,
   filterVisibleVideoReplaceAssets,
+  flushVideoReplaceStorage,
   handleVideoReplaceRequest,
+  initializeVideoReplaceStorage,
   isVideoReplaceRequest,
   shutdownPipelines,
   reconcileOnStartup,

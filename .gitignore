@@ -44,6 +44,7 @@ output/
 
 # Application runtime state and secrets
 core-api/credentials/
+core-api/backup/
 core-api/data/
 core-api/logs/
 core-api/tmp/

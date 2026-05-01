@@ -1,8 +1,8 @@
 # ⚠ LEGACY — this Dockerfile builds the standalone FastAPI (port 4200)
 # debug variant only. The default / production stack is core-api 4100-native
 # (Node). See core-api/README.md for the current architecture. Do not ship
-# this image alongside core-api 4100 — they share tasks.sqlite and would
-# race each other's startup reconcile.
+# this image alongside core-api 4100 in production. Both write the same
+# PostgreSQL video_replace_jobs table and can race startup reconcile.
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

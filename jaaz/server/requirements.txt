@@ -12,7 +12,7 @@ ollama
 httpx
 aiohttp
 gunicorn
-aiosqlite
+asyncpg==0.31.0
 requests
 Pillow
 nanoid

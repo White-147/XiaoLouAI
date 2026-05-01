@@ -21,7 +21,7 @@
 
 ```text
 XIAOLOU-main/    前端 React + Vite
-core-api/        后端 Node.js + SQLite
+core-api/        后端 Node.js + PostgreSQL
 jaaz/            Jaaz Agent Studio 外置源码与运行服务
 scripts/         本地启动与维护脚本
 docs/            部署说明

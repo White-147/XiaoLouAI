@@ -6,13 +6,23 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "verify": "node scripts/verify.js",
+    "verify": "node scripts/verify-postgres.js",
+    "verify:postgres": "node scripts/verify-postgres.js",
+    "db:init:postgres": "psql -f db/init-root.psql postgres",
+    "db:migrate": "node scripts/migrate-postgres.js",
+    "db:import-sqlite": "node scripts/migrate-sqlite-to-postgres.js",
+    "db:import-vr-sqlite": "node scripts/migrate-vr-sqlite-to-postgres.js",
+    "db:import-jaaz-sqlite": "node scripts/migrate-jaaz-sqlite-to-postgres.js",
+    "db:import-all-sqlite": "npm run db:import-sqlite && npm run db:import-vr-sqlite && npm run db:import-jaaz-sqlite",
+    "db:cutover:postgres": "node scripts/cutover-postgres.js",
+    "db:backup-sqlite": "node scripts/backup-sqlite.js",
     "normalize:canvas-workflows": "node scripts/normalize_canvas_workflow_models.js --write"
   },
   "dependencies": {
     "@google/genai": "^1.49.0",
     "@langchain/core": "^1.1.42",
     "@langchain/langgraph": "^1.2.9",
+    "pg": "^8.20.0",
     "protobufjs": "^7.5.6",
     "sharp": "^0.34.5",
     "ws": "^8.20.0"

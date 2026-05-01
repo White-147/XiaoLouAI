@@ -5,8 +5,8 @@
 # and is intentionally NOT referenced by scripts/start_xiaolou_stack.cmd or
 # scripts/start_core_api.cmd.
 #
-# NEVER run this alongside core-api 4100: both paths share ./data/tasks.sqlite
-# and would race each other's startup reconcile logic, killing live jobs.
+# Do not run this alongside core-api 4100 in production: both paths write the
+# PostgreSQL video_replace_jobs table and can race startup reconcile logic.
 
 services:
   redis:

@@ -3,10 +3,12 @@ require("./env").loadEnvFiles();
 const http = require("node:http");
 const { error, json, matchPath, noContent } = require("./http");
 const { buildRoutes } = require("./routes");
-const { SqliteStore } = require("./sqlite-store");
+const { createStore } = require("./store-factory");
 const { serveCanvasLibrary } = require("./canvas-library");
 const {
+  closeVideoReplaceStorage,
   handleVideoReplaceRequest,
+  initializeVideoReplaceStorage,
   shutdownPipelines,
   reconcileOnStartup: reconcileVideoReplaceOnStartup,
 } = require("./video-replace-native");
@@ -55,8 +57,9 @@ async function dispatch(req, res, url, routes, store) {
   return false;
 }
 
-function createServer() {
-  const store = new SqliteStore();
+async function createServer() {
+  const store = await createStore();
+  await initializeVideoReplaceStorage();
 
   // Reap create_image/video tasks left non-terminal by a previous crash or an
   // abandoned Vertex/Veo poll. Without this any navigation back to
@@ -119,8 +122,13 @@ function createServer() {
 
   server.on("close", () => {
     if (typeof store.close === "function") {
-      store.close();
+      Promise.resolve(store.close()).catch((err) => {
+        console.error("[server] store close failed:", err?.message || err);
+      });
     }
+    Promise.resolve(closeVideoReplaceStorage()).catch((err) => {
+      console.error("[server] video-replace storage close failed:", err?.message || err);
+    });
   });
 
   server.on("upgrade", (req, socket, head) => {
@@ -130,6 +138,7 @@ function createServer() {
     socket.destroy();
   });
 
+  server.store = store;
   return server;
 }
 
@@ -145,15 +154,17 @@ function formatListenUrl(host, port) {
   return `http://${h}:${port}`;
 }
 
-if (require.main === module) {
+(async function main() {
+  if (require.main !== module) return;
+
   const port = Number(process.env.PORT || "4100");
   const host = (process.env.HOST || "127.0.0.1").trim();
   const frontendPort = Number(process.env.FRONTEND_PORT || "3000");
 
+  const server = await createServer();
   // Reap any VR jobs left in a non-terminal state by a previous crash
-  // BEFORE we start accepting new traffic. Kills orphan pipeline / VACE
-  // subprocess trees recorded in tasks.sqlite's jobs.data.pipeline_pid /
-  // subprocess_pid so they don't keep eating VRAM.
+  // BEFORE we start accepting new traffic. In PostgreSQL cutover mode the
+  // authoritative records are video_replace_jobs in PostgreSQL.
   try {
     const { scanned, reaped } = reconcileVideoReplaceOnStartup();
     if (scanned > 0) {
@@ -165,7 +176,6 @@ if (require.main === module) {
     console.error("[server] video-replace startup reconcile failed:", err?.message);
   }
 
-  const server = createServer();
   server.listen(port, host, () => {
     console.log(`core-api listening on ${formatListenUrl(host, port)} (video-replace: native, no sidecar)`);
     startJaazKeepAlive();
@@ -199,7 +209,18 @@ if (require.main === module) {
         `[server] received ${signal}; leaving detached VR pipelines running for startup reconcile`
       );
     }
-    server.close(() => process.exit(0));
+    server.close(async () => {
+      try {
+        if (typeof server.store?.close === "function") {
+          await server.store.close();
+        }
+        await closeVideoReplaceStorage();
+      } catch (err) {
+        console.error("[server] shutdown persistence close failed:", err?.message || err);
+      } finally {
+        process.exit(0);
+      }
+    });
     // Hard-exit fallback in case server.close is blocked by sockets.
     setTimeout(() => process.exit(0), 5_000).unref();
   };
@@ -209,7 +230,10 @@ if (require.main === module) {
   // On Windows there's no SIGHUP / SIGBREAK default; Node delivers
   // SIGBREAK when the console receives Ctrl+Break.
   process.on("SIGBREAK", () => gracefulShutdown("SIGBREAK"));
-}
+})().catch((err) => {
+  console.error("[server] startup failed:", err?.message || err);
+  process.exit(1);
+});
 
 module.exports = {
   createServer

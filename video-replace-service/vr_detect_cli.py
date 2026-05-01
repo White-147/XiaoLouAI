@@ -4,8 +4,8 @@ vr_detect_cli.py — run YOLO person detection for a VR job, no HTTP server.
 Usage (run from video-replace-service/ with venv Python):
   python vr_detect_cli.py <job_id> [--conf 0.4]
 
-The runner writes results directly into tasks.sqlite; no stdout output is
-needed for the caller beyond the exit code.
+The runner writes results directly into PostgreSQL; no stdout output is needed
+for the caller beyond the exit code.
 
 Exit codes: 0 = success, 1 = job/detection error, 2 = unexpected error.
 """

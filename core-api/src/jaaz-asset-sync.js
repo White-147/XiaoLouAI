@@ -119,7 +119,7 @@ function cleanOptionalNumber(value) {
 function cleanPreviewUrl(value) {
   const normalized = String(value || "").trim();
   if (!normalized || normalized.length > 2048) return undefined;
-  // Avoid bloating the SQLite snapshot with inline thumbnails. Jaaz will keep
+  // Avoid bloating the core state snapshot with inline thumbnails. Jaaz keeps
   // the full canvas data; XiaoLou only needs a lightweight project index.
   if (/^data:/i.test(normalized)) return undefined;
   return normalized;
