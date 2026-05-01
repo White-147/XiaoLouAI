@@ -423,6 +423,43 @@ export type WalletLedgerEntry = {
   createdAt: string;
 };
 
+export type CreditUsageMode = "personal" | "organization";
+
+export type CreditUsageSeriesPoint = {
+  bucketStart: string;
+  bucketLabel: string;
+  consumedCredits: number;
+  refundedCredits: number;
+};
+
+export type CreditUsageSubject = {
+  type: WalletOwnerType | "unknown";
+  id: string | null;
+  label: string;
+  detail: string | null;
+  role?: string;
+};
+
+export type CreditUsageStats = {
+  subject: CreditUsageSubject;
+  mode: CreditUsageMode | "admin" | null;
+  windowDays: number;
+  bucket: "day" | string;
+  wallets: Wallet[];
+  summary: {
+    consumedCredits: number;
+    todayConsumedCredits: number;
+    refundedCredits: number;
+    pendingFrozenCredits: number;
+    availableCredits: number;
+    frozenCredits: number;
+    recentTaskCount: number;
+    lastActivityAt: string | null;
+  };
+  series: CreditUsageSeriesPoint[];
+  recentEntries: WalletLedgerEntry[];
+};
+
 export type CreditQuote = {
   actionCode: string;
   label: string;
@@ -1573,6 +1610,28 @@ export async function listWalletLedger(walletId: string) {
     }
     throw error;
   }
+}
+
+export async function getWalletUsageStats(mode: CreditUsageMode = "personal") {
+  const params = new URLSearchParams({ mode });
+  return request<CreditUsageStats>(`/api/wallet/usage-stats?${params.toString()}`);
+}
+
+export async function searchCreditUsageSubjects(search?: string) {
+  const params = new URLSearchParams();
+  const normalizedSearch = search?.trim();
+  if (normalizedSearch) params.set("search", normalizedSearch);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return request<{ items: CreditUsageSubject[] }>(`/api/admin/credit-usage-subjects${query}`);
+}
+
+export async function getAdminCreditUsageStats(input: {
+  subjectType: CreditUsageSubject["type"];
+  subjectId?: string | null;
+}) {
+  const params = new URLSearchParams({ subjectType: input.subjectType });
+  if (input.subjectId) params.set("subjectId", input.subjectId);
+  return request<CreditUsageStats>(`/api/admin/credit-usage-stats?${params.toString()}`);
 }
 
 export async function createWalletRechargeOrder(input: CreateWalletRechargeOrderInput) {

@@ -30,6 +30,7 @@ const {
 } = require("./vertex");
 const { createUploadFromBuffer } = require("./uploads");
 const { decodeAuthToken } = require("./store");
+const { accountIdForActor } = require("./accounts/canonical-ids");
 const { buildCanvasLibraryRoutes } = require("./canvas-library");
 const { filterVisibleVideoReplaceAssets } = require("./video-replace-native");
 const { isLocalLoopbackClientHint, SUPER_ADMIN_DEMO_ACTOR_ID } = require("./local-loopback-request");
@@ -151,6 +152,7 @@ function parseCreditQuoteInput(url) {
 function buildRoutes(store) {
   return [
     ...buildSystemRoutes(store),
+    ...buildWindowsNativeRoutes(store),
     ...buildAuthRoutes(store),
     ...buildWalletRoutes(store),
     ...buildApiCenterRoutes(store),
@@ -167,6 +169,15 @@ function buildRoutes(store) {
     ...buildAgentCanvasProjectRoutes(store),
     ...buildCanvasLibraryRoutes(store),
   ];
+}
+
+function requireCanonicalStore(store) {
+  if (!store || !store.pool || typeof store.createCanonicalJob !== "function") {
+    const error = new Error("PostgreSQL canonical runtime is not available.");
+    error.statusCode = 503;
+    error.code = "CANONICAL_RUNTIME_UNAVAILABLE";
+    throw error;
+  }
 }
 
 /**
@@ -397,6 +408,153 @@ function buildSystemRoutes(store) {
   ];
 }
 
+function buildWindowsNativeRoutes(store) {
+  return [
+    route("GET", "/api/windows-native/status", () =>
+      ok({
+        enabled: Boolean(store?.pool && typeof store.createCanonicalJob === "function"),
+        productionTarget: "windows-native-postgresql",
+        asyncFoundation: "postgresql",
+        forbiddenProductionDefaults: ["docker", "kubernetes", "windows-celery", "redis-open-source-windows"],
+      })
+    ),
+    routeWithStatus("POST", "/api/jobs", 202, async ({ req, url }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const actorId = getActorId(req, url);
+      const idempotencyKey =
+        req.headers["idempotency-key"] || body.idempotencyKey || body.idempotency_key || null;
+      const job = await store.createCanonicalJob({
+        ...body,
+        actorId,
+        accountOwnerType: body.accountOwnerType || "user",
+        accountOwnerId: body.accountOwnerId || actorId || "guest",
+        idempotencyKey,
+      });
+      return accepted({ id: job.id, status: job.status, ...job });
+    }),
+    route("GET", "/api/jobs", async ({ req, url }) => {
+      requireCanonicalStore(store);
+      const actorId = getActorId(req, url);
+      const accountId = url.searchParams.get("accountId") || (actorId ? accountIdForActor(actorId) : null);
+      const items = await store.listCanonicalJobs({
+        accountId,
+        lane: url.searchParams.get("lane") || undefined,
+        status: url.searchParams.get("status") || undefined,
+        limit: url.searchParams.get("limit") || 50,
+      });
+      return ok({ items });
+    }),
+    route("GET", "/api/jobs/:jobId", async ({ params }) => {
+      requireCanonicalStore(store);
+      const job = await store.getCanonicalJob(params.jobId);
+      if (!job) return failure(404, "NOT_FOUND", "job not found");
+      return ok(job);
+    }),
+    routeWithStatus("POST", "/api/jobs/:jobId/cancel", 200, async ({ params, req, url }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const actorId = getActorId(req, url);
+      const job = await store.cancelCanonicalJob(params.jobId, {
+        accountId: body.accountId || (actorId ? accountIdForActor(actorId) : null),
+        reason: body.reason || "cancelled by user",
+      });
+      if (!job) return failure(404, "NOT_FOUND", "job not found");
+      return ok(job);
+    }),
+    routeWithStatus("POST", "/api/internal/jobs/lease", 200, async ({ req }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const items = await store.leaseCanonicalJobs({
+        lane: body.lane,
+        workerId: body.workerId,
+        batchSize: body.batchSize || 1,
+        leaseSeconds: body.leaseSeconds || 300,
+      });
+      return ok({ items });
+    }),
+    routeWithStatus("POST", "/api/internal/jobs/:jobId/running", 200, async ({ params, req }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const job = await store.markCanonicalJobRunning(params.jobId, body.workerId);
+      if (!job) return failure(404, "NOT_FOUND", "job not found");
+      return ok(job);
+    }),
+    routeWithStatus("POST", "/api/internal/jobs/:jobId/heartbeat", 200, async ({ params, req }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const job = await store.heartbeatCanonicalJob(params.jobId, body.workerId, body.leaseSeconds || 300);
+      if (!job) return failure(404, "NOT_FOUND", "job not found or not leased by worker");
+      return ok(job);
+    }),
+    routeWithStatus("POST", "/api/internal/jobs/:jobId/succeeded", 200, async ({ params, req }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const job = await store.markCanonicalJobSucceeded(params.jobId, body.result || {});
+      if (!job) return failure(404, "NOT_FOUND", "job not found");
+      return ok(job);
+    }),
+    routeWithStatus("POST", "/api/internal/jobs/:jobId/failed", 200, async ({ params, req }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const job = await store.markCanonicalJobFailedOrRetry(
+        params.jobId,
+        new Error(body.message || "job failed"),
+        {
+          retry: body.retry,
+          retryDelaySeconds: body.retryDelaySeconds,
+        },
+      );
+      if (!job) return failure(404, "NOT_FOUND", "job not found");
+      return ok(job);
+    }),
+    routeWithStatus("POST", "/api/internal/jobs/recover-expired-leases", 200, async () => {
+      requireCanonicalStore(store);
+      return ok({ items: await store.recoverExpiredCanonicalJobLeases() });
+    }),
+    routeWithStatus("POST", "/api/media/upload-begin", 201, async ({ req, url }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const actorId = getActorId(req, url);
+      const upload = await store.beginObjectUpload({
+        ...body,
+        actorId,
+        idempotencyKey: req.headers["idempotency-key"] || body.idempotencyKey,
+      });
+      return ok(upload);
+    }),
+    routeWithStatus("POST", "/api/media/upload-complete", 200, async ({ req }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      return ok(await store.completeObjectUpload(body));
+    }),
+    routeWithStatus("POST", "/api/media/:mediaObjectId/signed-read-url", 200, async ({ params, req, url }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      const actorId = getActorId(req, url);
+      return ok(await store.getObjectSignedReadUrl({
+        mediaObjectId: params.mediaObjectId,
+        accountId: body.accountId || (actorId ? accountIdForActor(actorId) : null),
+        expiresInSeconds: body.expiresInSeconds,
+      }));
+    }),
+    routeWithStatus("POST", "/api/media/:mediaObjectId/move-permanent", 200, async ({ params, req }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      return ok(await store.moveObjectTempToPermanent({
+        mediaObjectId: params.mediaObjectId,
+        permanentPrefix: body.permanentPrefix,
+        reason: body.reason,
+      }));
+    }),
+    routeWithStatus("POST", "/api/internal/media/cleanup-temp", 200, async ({ req }) => {
+      requireCanonicalStore(store);
+      const body = await readJsonBody(req);
+      return ok(await store.cleanupTemporaryObjects(body));
+    }),
+  ];
+}
+
 function buildWalletRoutes(store) {
   return [
     route("GET", "/api/wallet", ({ req, url }) => ok(store.getWallet(getActorId(req, url)))),
@@ -462,6 +620,9 @@ function buildWalletRoutes(store) {
       );
 
       if (mode === "demo_mock") {
+        if (typeof store.syncCanonicalRechargeOrder === "function") {
+          await store.syncCanonicalRechargeOrder(createdOrder, createdOrder.provider);
+        }
         return ok(createdOrder);
       }
 
@@ -471,6 +632,10 @@ function buildWalletRoutes(store) {
           store.updateWalletRechargeOrder(createdOrder.id, sessionPatch, createdOrder.actorId, {
             allowPlatformAdmin: true,
           }) || createdOrder;
+
+        if (typeof store.syncCanonicalRechargeOrder === "function") {
+          await store.syncCanonicalRechargeOrder(updatedOrder, updatedOrder.provider);
+        }
 
         return ok(updatedOrder);
       } catch (error) {
@@ -497,6 +662,17 @@ function buildWalletRoutes(store) {
       if (!currentOrder) return failure(404, "NOT_FOUND", "recharge order not found");
 
       const providerState = await refreshRechargeOrder(currentOrder);
+      if (providerState.status === "paid" && typeof store.recordCanonicalRechargePayment === "function") {
+        await store.recordCanonicalRechargePayment({
+          order: currentOrder,
+          provider: providerState.provider || currentOrder.provider,
+          notification: {
+            ...providerState,
+            eventId: `query:${providerState.providerTradeNo || currentOrder.providerTradeNo || currentOrder.id}`,
+          },
+          rawBody: JSON.stringify(providerState.notifyPayload || providerState),
+        });
+      }
       const nextOrder =
         providerState.status === "paid"
           ? store.markWalletRechargeOrderPaid(currentOrder.id, actorId || currentOrder.actorId, providerState)
@@ -532,14 +708,34 @@ function buildWalletRoutes(store) {
       try {
         const notification = parseWechatNotification(rawBody, req.headers);
         const order = store.getWalletRechargeOrder(notification.orderId, null);
-        if (order) {
-          store.markWalletRechargeOrderPaid(order.id, null, {
+        if (!order) {
+          const missing = new Error("WeChat notification order was not found locally.");
+          missing.statusCode = 404;
+          missing.code = "WECHAT_ORDER_NOT_FOUND";
+          throw missing;
+        }
+
+        if (notification.status === "paid" && typeof store.recordCanonicalRechargePayment === "function") {
+          await store.recordCanonicalRechargePayment({
+            order,
             provider: "wechat",
-            providerTradeNo: notification.providerTradeNo,
-            paidAt: notification.paidAt,
-            notifyPayload: notification.notifyPayload,
-            failureReason: null,
+            notification,
+            rawBody,
           });
+        }
+
+        if (notification.status === "paid") {
+          try {
+            store.markWalletRechargeOrderPaid(order.id, null, {
+              provider: "wechat",
+              providerTradeNo: notification.providerTradeNo,
+              paidAt: notification.paidAt,
+              notifyPayload: notification.notifyPayload,
+              failureReason: null,
+            });
+          } catch (legacyError) {
+            console.error("[payments] canonical WeChat payment recorded but legacy wallet sync failed:", legacyError?.message || legacyError);
+          }
         }
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ code: "SUCCESS", message: "成功" }));
@@ -564,13 +760,25 @@ function buildWalletRoutes(store) {
 
         assertAlipayNotificationMatchesOrder(notification, order);
         if (notification.status === "paid") {
-          store.markWalletRechargeOrderPaid(order.id, null, {
-            provider: "alipay",
-            providerTradeNo: notification.providerTradeNo,
-            paidAt: notification.paidAt,
-            notifyPayload: notification.notifyPayload,
-            failureReason: null,
-          });
+          if (typeof store.recordCanonicalRechargePayment === "function") {
+            await store.recordCanonicalRechargePayment({
+              order,
+              provider: "alipay",
+              notification,
+              rawBody,
+            });
+          }
+          try {
+            store.markWalletRechargeOrderPaid(order.id, null, {
+              provider: "alipay",
+              providerTradeNo: notification.providerTradeNo,
+              paidAt: notification.paidAt,
+              notifyPayload: notification.notifyPayload,
+              failureReason: null,
+            });
+          } catch (legacyError) {
+            console.error("[payments] canonical Alipay payment recorded but legacy wallet sync failed:", legacyError?.message || legacyError);
+          }
         } else {
           store.updateWalletRechargeOrder(
             order.id,

@@ -1,4 +1,5 @@
 const { createHash } = require("node:crypto");
+const { ensureWindowsNativeSchema } = require("./windows-native-schema");
 
 const CORE_TABLES = [
   "pricing_rules",
@@ -594,6 +595,7 @@ async function ensurePostgresSchema(client) {
   await client.query(CREATE_SCHEMA_SQL);
   await client.query("ALTER TABLE video_replace_jobs ADD COLUMN IF NOT EXISTS legacy_id text");
   await client.query("CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_legacy_id ON video_replace_jobs(legacy_id)");
+  await ensureWindowsNativeSchema(client);
 }
 
 async function clearProjectedTables(client) {

@@ -19,7 +19,7 @@ psql -f db/init-root.psql postgres
 Then configure PostgreSQL to accept loopback plus `218.92.180.214` access:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File db/configure-postgres-network.ps1 -DataDir "C:\Program Files\PostgreSQL\18\data"
+powershell -ExecutionPolicy Bypass -File db/configure-postgres-network.ps1 -DataDir "D:\soft\program\PostgreSQL\18\data"
 ```
 
 The script backs up `postgresql.conf` and `pg_hba.conf`, sets

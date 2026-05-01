@@ -364,7 +364,7 @@ async def enqueue_video_replace_job(
     job.queue_name = "video_local_gpu"
     job.status = "queued"
     job.error = None
-    job.message = "video replace job queued for Celery GPU worker"
+    job.message = "video replace job queued for Windows local model worker migration"
     job.payload = {
         **(job.payload or {}),
         "actor_id": str(actor_id) if actor_id else (job.payload or {}).get("actor_id"),
@@ -392,49 +392,8 @@ async def enqueue_video_replace_job(
     await session.flush()
     await notify_video_replace_job_changed(session, str(job.id))
 
-    if not resolved_settings.task_publish_enabled:
-        return job, task, provider_job, None, "task publishing is disabled"
-
-    try:
-        from app.workers.tasks import run_video_replace_pipeline
-
-        celery_result = run_video_replace_pipeline.apply_async(
-            args=[str(job.id)],
-            queue="video_local_gpu",
-        )
-    except Exception as exc:
-        message = f"failed to publish video replace pipeline: {exc}"
-        job.status = "enqueue_failed"
-        job.error = message
-        task.status = "enqueue_failed"
-        task.error = message
-        provider_job.status = "failed"
-        provider_job.payload = {**(provider_job.payload or {}), "error": message}
-        await session.flush()
-        await notify_video_replace_job_changed(session, str(job.id))
-        if resolved_settings.task_publish_fail_fast:
-            raise VideoReplaceEnqueueError(message) from exc
-        return job, task, provider_job, None, message
-
-    job.payload = {
-        **(job.payload or {}),
-        "celery_task_id": str(celery_result.id),
-    }
-    task.payload = {
-        **(task.payload or {}),
-        "enqueue": {
-            "published": True,
-            "celery_task_id": str(celery_result.id),
-            "queue": "video_local_gpu",
-        },
-    }
-    provider_job.payload = {
-        **(provider_job.payload or {}),
-        "celery_task_id": str(celery_result.id),
-    }
-    await session.flush()
-    await notify_video_replace_job_changed(session, str(job.id))
-    return job, task, provider_job, str(celery_result.id), None
+    del resolved_settings
+    return job, task, provider_job, None, "legacy Celery publishing has been removed"
 
 
 async def cancel_video_replace_job(
@@ -450,7 +409,7 @@ async def cancel_video_replace_job(
         return job
 
     payload_before_cancel = job.payload or {}
-    revoke_error = _revoke_video_replace_celery_task(payload_before_cancel, reason=reason)
+    revoke_error = _revoke_legacy_worker_task(payload_before_cancel, reason=reason)
     if resolved_settings.video_replace_kill_on_cancel:
         _kill_recorded_processes(payload_before_cancel, reason=reason)
 
@@ -461,7 +420,7 @@ async def cancel_video_replace_job(
         "pipeline_pid": None,
         "subprocess_pid": None,
         "cancelled_at": datetime.now(tz=UTC).isoformat(),
-        "celery_revoke_error": revoke_error,
+        "legacy_worker_revoke_error": revoke_error,
     }
 
     if job.task_id:
@@ -678,25 +637,10 @@ def _kill_recorded_processes(payload: dict[str, Any], *, reason: str) -> None:
         _kill_process_tree(pid, reason=reason)
 
 
-def _revoke_video_replace_celery_task(payload: dict[str, Any], *, reason: str) -> str | None:
+def _revoke_legacy_worker_task(payload: dict[str, Any], *, reason: str) -> str | None:
     del reason
-    celery_task_id = payload.get("celery_task_id")
-    if not celery_task_id and isinstance(payload.get("enqueue"), dict):
-        celery_task_id = payload["enqueue"].get("celery_task_id")
-    if not celery_task_id:
-        return None
-
-    try:
-        from app.workers.celery_app import celery_app
-
-        celery_app.control.revoke(
-            str(celery_task_id),
-            terminate=True,
-            signal="SIGTERM",
-            reply=False,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return f"failed to revoke celery task {celery_task_id}: {exc}"
+    if payload.get("worker_task_id") or payload.get("celery_task_id") or isinstance(payload.get("enqueue"), dict):
+        return "legacy worker revoke skipped; durable PostgreSQL jobs own production cancellation"
     return None
 
 

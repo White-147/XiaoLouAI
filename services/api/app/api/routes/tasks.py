@@ -61,7 +61,7 @@ async def create_task(payload: TaskCreate, session: AsyncSession = Depends(get_s
         session,
         task.id,
         published=publish_result.published,
-        celery_task_id=publish_result.celery_task_id,
+        worker_task_id=publish_result.worker_task_id,
         error=publish_result.error,
         mark_failed=bool(publish_result.error and settings.task_publish_enabled),
     )
@@ -101,7 +101,7 @@ async def _mark_publish_result(
     task_id: UUID,
     *,
     published: bool,
-    celery_task_id: str | None = None,
+    worker_task_id: str | None = None,
     error: str | None = None,
     mark_failed: bool = False,
 ) -> Task:
@@ -113,7 +113,7 @@ async def _mark_publish_result(
         **(task.payload or {}),
         "enqueue": {
             "published": published,
-            "celery_task_id": celery_task_id,
+            "worker_task_id": worker_task_id,
             "error": error,
         },
     }

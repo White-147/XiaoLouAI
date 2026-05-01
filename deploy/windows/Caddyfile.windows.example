@@ -1,0 +1,56 @@
+www.example.com {
+	root * D:/code/XiaoLouAI/.runtime/app/XIAOLOU-main/dist
+
+	handle /api/internal/* {
+		respond 404
+	}
+
+	handle /api/schema* {
+		respond 404
+	}
+
+	handle /api/providers/health* {
+		respond 404
+	}
+
+	handle /healthz {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/accounts/ensure {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/jobs* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/payments/callbacks/* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/media/upload-begin {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/media/upload-complete {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/media/move-temp-to-permanent {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/media/signed-read-url {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/* {
+		respond 404
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

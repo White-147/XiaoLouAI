@@ -2,7 +2,7 @@
 
 Backend for XiaoLou AI 创作平台. Runs on Node.js built-in HTTP modules.
 This package is now the transition/compatibility API while the production
-Python API is being built under `../services/api`.
+.NET control plane is being built under `../control-plane-dotnet`.
 
 ## What it provides
 
@@ -17,8 +17,16 @@ Use code truth over older architecture reports: `src/server.js` currently calls
 instantiate the old `SqliteStore`. SQLite scripts in `scripts/*sqlite*.js` are
 migration-only utilities and must not be used as runtime persistence.
 
-New production work should land in `services/api` first, then Node routes can
-be retired or changed into compatibility proxies.
+New production work should land in `control-plane-dotnet/` first. During P1
+cutover, run core-api as a read-only compatibility surface:
+
+```text
+CORE_API_COMPAT_READ_ONLY=1
+```
+
+In that mode, core-api rejects `POST` / `PUT` / `PATCH` / `DELETE` with
+`CORE_API_COMPAT_READ_ONLY`; reads can remain available while old frontend or
+operator screens are retired or proxied to the .NET control plane.
 
 ## Quick start
 
@@ -94,7 +102,7 @@ If PostgreSQL is installed on `218.92.180.214`, apply local/IP access on that
 server before importing or connecting remotely:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File db/configure-postgres-network.ps1 -DataDir "C:\Program Files\PostgreSQL\18\data"
+powershell -ExecutionPolicy Bypass -File db/configure-postgres-network.ps1 -DataDir "D:\soft\program\PostgreSQL\18\data"
 ```
 
 The script configures `listen_addresses = 'localhost,218.92.180.214'`, adds
@@ -268,36 +276,24 @@ Invoke-RestMethod -Method Post http://127.0.0.1:4100/api/demo/reset
 - Canvas API: `/api/canvas/*` and `/api/canvas-library/*` (legacy aliases `/twitcanva-api/*` preserved).
 - Response envelope: `{ success, data?, error?, meta? }`.
 
-## Video Replace architecture (transition)
+## Video Replace architecture (Windows-native transition)
 
-Current Stage 4 status: Python API owns the new upload/import/reference/detect
-surface plus `/vr-*` static serving. The Node route remains a compatibility
-surface during cutover, but upload/import/reference/reference-import/detect are
-now proxied to the Python API after Node performs its lightweight legacy access
-checks. `/api/video-replace/jobs/:id/generate` calls the Python API
-`POST /api/video-replace/jobs/:id/enqueue`. The Python API links the durable
-`video_replace_jobs` row to `tasks` and `provider_jobs`, then publishes the
-long-running pipeline to Celery queue `video_local_gpu`, where the worker runs
-`video-replace-service/vr_pipeline_cli.py`.
+`core-api` is now a compatibility surface only. The long-term control plane is
+`control-plane-dotnet/`, and durable work must flow through PostgreSQL `jobs`
+and Windows Service workers. Python may still run local model adapter code such
+as `video-replace-service/vr_pipeline_cli.py`, but it must not become the main
+control plane or a Celery-based async foundation.
 
-Set this when the Python API is not on the default local port:
+During cutover, compatibility traffic may still enter **core-api at port 4100**.
+New production work should target the .NET control plane and the PostgreSQL
+queue contract:
 
 ```text
-PYTHON_API_INTERNAL_BASE_URL=http://127.0.0.1:8000
-```
-
-During cutover, compatibility traffic may still enter **core-api at port 4100**,
-but new Python-first routes are available under `services/api` at port 8000.
-There is no sidecar HTTP server; the Python API and worker reuse the CLI/model
-code directly:
-
-```
-browser (3000, Vite)
-   -> services/api (8000)
-        -> /api/video-replace/upload          -> vr_probe_cli.py
-        -> /api/video-replace/jobs/:id/detect -> vr_detect_cli.py
-        -> Celery video_local_gpu             -> vr_pipeline_cli.py
-             -> Wan2.1 generate.py (GPU-heavy VACE child)
+browser
+   -> .NET control API (4100)
+        -> PostgreSQL jobs/job_attempts
+        -> Windows Service local-model-worker
+             -> optional Python model adapter / inference runner
 ```
 
 Orphan GPU prevention:
@@ -313,5 +309,4 @@ Orphan GPU prevention:
   `VR_PIPELINE_TIMEOUT_MS`) cuts any pipeline that refuses to terminate.
 
 `video-replace-service/app/main.py` (old FastAPI standalone on 4200) is
-**legacy debug** only and not part of the default stack; see that file's
-top-of-file banner.
+**legacy debug** only and not part of the default stack.

@@ -1,6 +1,29 @@
 const { Pool } = require("pg");
 const { MockStore } = require("./store");
 const {
+  cancelJob,
+  createJob,
+  getJob,
+  heartbeatJob,
+  leaseJobs,
+  listJobs,
+  markJobFailedOrRetry,
+  markJobRunning,
+  markJobSucceeded,
+  recoverExpiredLeases,
+} = require("./jobs/postgres-jobs");
+const {
+  creditRechargeOrderOnce,
+  syncRechargePaymentOrder,
+} = require("./payments/canonical-ledger");
+const {
+  beginUpload,
+  cleanupTemp,
+  completeUpload,
+  getSignedReadUrl,
+  moveTempToPermanent,
+} = require("./storage/object-storage-metadata");
+const {
   checksum,
   ensurePostgresSchema,
   syncSnapshotProjections,
@@ -162,6 +185,74 @@ class PostgresStore extends MockStore {
       }
     })();
     return this._closePromise;
+  }
+
+  createCanonicalJob(input) {
+    return createJob(this.pool, input);
+  }
+
+  getCanonicalJob(jobId) {
+    return getJob(this.pool, jobId);
+  }
+
+  listCanonicalJobs(filters) {
+    return listJobs(this.pool, filters);
+  }
+
+  leaseCanonicalJobs(input) {
+    return leaseJobs(this.pool, input);
+  }
+
+  markCanonicalJobRunning(jobId, workerId) {
+    return markJobRunning(this.pool, jobId, workerId);
+  }
+
+  heartbeatCanonicalJob(jobId, workerId, leaseSeconds) {
+    return heartbeatJob(this.pool, jobId, workerId, leaseSeconds);
+  }
+
+  markCanonicalJobSucceeded(jobId, resultPayload) {
+    return markJobSucceeded(this.pool, jobId, resultPayload);
+  }
+
+  markCanonicalJobFailedOrRetry(jobId, error, options) {
+    return markJobFailedOrRetry(this.pool, jobId, error, options);
+  }
+
+  cancelCanonicalJob(jobId, input) {
+    return cancelJob(this.pool, jobId, input);
+  }
+
+  recoverExpiredCanonicalJobLeases() {
+    return recoverExpiredLeases(this.pool);
+  }
+
+  syncCanonicalRechargeOrder(order, providerOverride) {
+    return syncRechargePaymentOrder(this.pool, order, providerOverride);
+  }
+
+  recordCanonicalRechargePayment(input) {
+    return creditRechargeOrderOnce(this.pool, input);
+  }
+
+  beginObjectUpload(input) {
+    return beginUpload(this.pool, input);
+  }
+
+  completeObjectUpload(input) {
+    return completeUpload(this.pool, input);
+  }
+
+  getObjectSignedReadUrl(input) {
+    return getSignedReadUrl(this.pool, input);
+  }
+
+  moveObjectTempToPermanent(input) {
+    return moveTempToPermanent(this.pool, input);
+  }
+
+  cleanupTemporaryObjects(input) {
+    return cleanupTemp(this.pool, input);
   }
 }
 

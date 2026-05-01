@@ -1,3 +1,4 @@
-from app.workers.celery_app import QUEUE_NAMES, celery_app
+"""Legacy worker package.
 
-__all__ = ["QUEUE_NAMES", "celery_app"]
+Celery workers were removed from the Windows-native production path.
+"""

@@ -10,12 +10,9 @@ set "TRANSFORMERS_CACHE=%ROOT%\.cache\huggingface\transformers"
 set "TORCH_HOME=%ROOT%\.cache\torch"
 
 set "NODE_BIN="
-for /f "delims=" %%I in ('where node 2^>nul') do (
-    if not defined NODE_BIN set "NODE_BIN=%%I"
-)
-if not defined NODE_BIN if exist "C:\Program Files\nodejs\node.exe" set "NODE_BIN=C:\Program Files\nodejs\node.exe"
+if exist "D:\soft\program\nodejs\node.exe" set "NODE_BIN=D:\soft\program\nodejs\node.exe"
 if not defined NODE_BIN (
-    echo [ERROR] node.exe not found. Please install Node.js and add it to PATH.
+    echo [ERROR] D:\soft\program\nodejs\node.exe not found. Install Node.js to D: or set NODE_BIN explicitly in a D: runtime shell.
     exit /b 1
 )
 

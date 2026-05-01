@@ -1830,17 +1830,17 @@ async function handleGenerate(req, res, jobId, store, url) {
       },
     });
   } catch (err) {
-    console.error("[vr-native] Python enqueue failed:", err?.message || err);
+    console.error("[vr-native] legacy enqueue failed:", err?.message || err);
     dbUpdate(jobId, {
       stage: "enqueue_failed",
-      error: err?.message || "Python API enqueue failed",
-      message: "Python Celery queue submission failed",
+      error: err?.message || "legacy enqueue failed",
+      message: "PostgreSQL job enqueue failed",
     });
     const failed = dbGet(jobId);
     return vrFail(
       res,
       "PIPELINE_ENQUEUE_FAILED",
-      failed?.error || "Python Celery queue submission failed",
+      failed?.error || "PostgreSQL job enqueue failed",
       503,
     );
   }
@@ -2266,9 +2266,9 @@ function reconcileOnStartup() {
     }
 
     if (job.stage === "queued" && !pipelinePid) {
-      console.log(`[vr-native] startup reconcile: queued job=${job.job_id} is owned by Python Celery`);
+      console.log(`[vr-native] startup reconcile: queued job=${job.job_id} is owned by durable worker queue`);
       dbUpdate(job.job_id, {
-        message: "queued for Python Celery video_local_gpu worker",
+        message: "queued for Windows local model worker",
       });
       requeued += 1;
       continue;

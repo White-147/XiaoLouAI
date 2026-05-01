@@ -13,6 +13,8 @@ Thumbs.db
 # Build output
 **/dist/
 **/build/
+**/bin/
+**/obj/
 coverage/
 XIAOLOU-main/temp-build/
 
@@ -43,6 +45,13 @@ XIAOLOU-main/output/
 output/
 
 # Application runtime state and secrets
+.runtime/
+xiaolou-cache/
+xiaolou-temp/
+xiaolou-logs/
+xiaolou-backups/
+xiaolou-inputs/
+xiaolou-replay/
 core-api/credentials/
 core-api/backup/
 core-api/data/

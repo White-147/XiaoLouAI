@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <UserSecretsId>xiaolou-control-api</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\XiaoLou.Domain\XiaoLou.Domain.csproj" />
+    <ProjectReference Include="..\XiaoLou.Infrastructure.Postgres\XiaoLou.Infrastructure.Postgres.csproj" />
+    <ProjectReference Include="..\XiaoLou.Infrastructure.Storage\XiaoLou.Infrastructure.Storage.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\db\migrations\*.sql" Link="db\migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

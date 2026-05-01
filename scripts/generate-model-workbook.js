@@ -2,7 +2,8 @@ const path = require("path");
 const XLSX = require("../.sheettools/node_modules/xlsx");
 
 const FX_USD_CNY = 6.82;
-const inputPath = path.join(process.env.USERPROFILE || "C:/Users/Administrator", "Desktop", "模型.xlsx");
+const inputPath = process.env.MODEL_WORKBOOK_INPUT ||
+  path.join(__dirname, "..", ".runtime", "xiaolou-inputs", "模型.xlsx");
 const outputPath = path.resolve("模型_整理结果.xlsx");
 
 const HEADERS = [

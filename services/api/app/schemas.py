@@ -171,7 +171,7 @@ class VideoReplaceJobRead(BaseModel):
 class VideoReplaceEnqueueResponse(BaseModel):
     job: VideoReplaceJobRead
     task_id: UUID | None = None
-    celery_task_id: str | None = None
+    worker_task_id: str | None = None
     published: bool
     error: str | None = None
 

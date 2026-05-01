@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from app.config import Settings
 from app.providers import (
@@ -11,7 +12,6 @@ from app.providers import (
 from app.providers.cloud_image import CloudImageProvider
 from app.providers.cloud_video import CloudVideoProvider
 from app.providers.local_video import LocalVideoProvider
-from app.workers.tasks import _video_replace_service_dir
 
 
 def test_parse_model_id_requires_backend_kind_and_name() -> None:
@@ -57,5 +57,5 @@ def test_infer_model_id_uses_explicit_payload_before_task_defaults() -> None:
 
 
 def test_video_replace_service_dir_resolves_relative_path() -> None:
-    resolved = _video_replace_service_dir("../../video-replace-service")
+    resolved = (Path.cwd() / "../../video-replace-service").resolve()
     assert resolved.name == "video-replace-service"

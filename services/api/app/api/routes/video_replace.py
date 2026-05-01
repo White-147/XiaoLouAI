@@ -233,7 +233,7 @@ async def enqueue_video_replace_pipeline(
     settings = get_settings()
     try:
         async with session.begin():
-            job, task, _, celery_task_id, error = await enqueue_video_replace_job(
+            job, task, _, worker_task_id, error = await enqueue_video_replace_job(
                 session,
                 job_id=job_id,
                 actor_id=payload.actor_id,
@@ -251,8 +251,8 @@ async def enqueue_video_replace_pipeline(
     return VideoReplaceEnqueueResponse(
         job=VideoReplaceJobRead.model_validate(job),
         task_id=task.id,
-        celery_task_id=celery_task_id,
-        published=bool(celery_task_id),
+        worker_task_id=worker_task_id,
+        published=bool(worker_task_id),
         error=error,
     )
 

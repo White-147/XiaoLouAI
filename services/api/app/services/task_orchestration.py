@@ -17,7 +17,7 @@ from app.schemas import TaskCreate
 @dataclass(frozen=True)
 class TaskPublishResult:
     published: bool
-    celery_task_id: str | None = None
+    worker_task_id: str | None = None
     error: str | None = None
 
 
@@ -91,21 +91,15 @@ def publish_task_dispatch(
     queue_name: str,
     settings: Settings | None = None,
 ) -> TaskPublishResult:
+    del task_id, queue_name
     resolved_settings = settings or get_settings()
     if not resolved_settings.task_publish_enabled:
         return TaskPublishResult(published=False, error="task publishing is disabled")
 
-    try:
-        from app.workers.tasks import dispatch_task
-
-        result = dispatch_task.apply_async(args=[str(task_id)], queue=queue_name or "default")
-    except Exception as exc:
-        message = f"failed to publish Celery task: {exc}"
-        if resolved_settings.task_publish_fail_fast:
-            raise TaskPublishError(message) from exc
-        return TaskPublishResult(published=False, error=message)
-
-    return TaskPublishResult(published=True, celery_task_id=str(result.id))
+    message = "legacy Celery publishing has been removed from the production path"
+    if resolved_settings.task_publish_fail_fast:
+        raise TaskPublishError(message)
+    return TaskPublishResult(published=False, error=message)
 
 
 def provider_error_to_detail(exc: UnsupportedProviderError) -> dict[str, str]:

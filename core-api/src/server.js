@@ -16,6 +16,46 @@ const { collectNetworkAccessInfo } = require("./network-access");
 const { handleJaazGatewayRequest, handleJaazGatewayUpgrade } = require("./jaaz-gateway");
 const { startJaazKeepAlive } = require("./jaaz-services");
 
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function envFlag(name) {
+  return ["1", "true", "yes", "on"].includes(String(process.env[name] || "").trim().toLowerCase());
+}
+
+function isCompatReadOnlyMode() {
+  return envFlag("CORE_API_COMPAT_READ_ONLY");
+}
+
+function parseCompatPublicRouteAllowlist() {
+  return String(process.env.CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST || "")
+    .split(/[;\n,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [method, ...pathParts] = entry.split(/\s+/);
+      const path = pathParts.join(" ").trim();
+      return {
+        method: String(method || "").toUpperCase(),
+        path,
+        prefix: path.endsWith("*") ? path.slice(0, -1) : null,
+      };
+    })
+    .filter((entry) => entry.method && entry.path);
+}
+
+function isCompatPublicRouteAllowed(req, url) {
+  const allowlist = parseCompatPublicRouteAllowlist();
+  if (!allowlist.length) return true;
+  if (req.method === "OPTIONS" || req.method === "HEAD") return true;
+
+  return allowlist.some((entry) => {
+    if (entry.method !== req.method) return false;
+    return entry.prefix
+      ? url.pathname.startsWith(entry.prefix)
+      : url.pathname === entry.path;
+  });
+}
+
 async function dispatch(req, res, url, routes, store) {
   for (const route of routes) {
     if (route.method !== req.method) continue;
@@ -93,6 +133,26 @@ async function createServer() {
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+
+    if (isCompatReadOnlyMode() && MUTATING_METHODS.has(req.method)) {
+      error(
+        res,
+        410,
+        "CORE_API_COMPAT_READ_ONLY",
+        "core-api is running as a read-only compatibility surface. Use the .NET control plane for writes."
+      );
+      return;
+    }
+
+    if (isCompatReadOnlyMode() && !isCompatPublicRouteAllowed(req, url)) {
+      error(
+        res,
+        410,
+        "CORE_API_COMPAT_ROUTE_CLOSED",
+        "core-api legacy public route is closed in compatibility mode. Use the .NET control plane or the configured read-only allowlist."
+      );
+      return;
+    }
 
     // Video-replace native handler — checked first so it takes priority over
     // core-api's own /api/* routes and handles its own OPTIONS pre-flight.

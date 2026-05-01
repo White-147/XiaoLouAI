@@ -3,12 +3,9 @@ setlocal
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 
 set "NPM_CMD="
-for /f "delims=" %%I in ('where npm.cmd 2^>nul') do (
-    if not defined NPM_CMD set "NPM_CMD=%%I"
-)
-if not defined NPM_CMD if exist "C:\Program Files\nodejs\npm.cmd" set "NPM_CMD=C:\Program Files\nodejs\npm.cmd"
+if exist "D:\soft\program\nodejs\npm.cmd" set "NPM_CMD=D:\soft\program\nodejs\npm.cmd"
 if not defined NPM_CMD (
-    echo [ERROR] npm.cmd not found. Please install Node.js and add it to PATH.
+    echo [ERROR] D:\soft\program\nodejs\npm.cmd not found. Install Node.js to D: or set NPM_CMD explicitly in a D: runtime shell.
     exit /b 1
 )
 

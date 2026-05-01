@@ -36,9 +36,7 @@ class Settings(BaseSettings):
     db_pool_timeout: int = 5
     db_statement_timeout_ms: int = 30_000
 
-    rabbitmq_url: str = "amqp://root:root@127.0.0.1:5672/xiaolou"
-    redis_url: str = "redis://:root@127.0.0.1:6379/0"
-    task_publish_enabled: bool = True
+    task_publish_enabled: bool = False
     task_publish_fail_fast: bool = False
     provider_poll_interval_seconds: int = 15
     provider_job_timeout_seconds: int = 3600
