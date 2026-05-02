@@ -33,7 +33,8 @@ param(
     "POST /api/payments/alipay/notify",
     "POST /api/media/upload-begin",
     "POST /api/uploads"
-  )
+  ),
+  [switch]$SkipDiscoveredWriteRoutes
 )
 
 $ErrorActionPreference = "Stop"
@@ -215,6 +216,46 @@ function Split-MethodPathEntry {
   }
 }
 
+function Convert-RouteTemplateToSmokePath {
+  param([string]$Path)
+
+  $samplePath = [regex]::Replace($Path, ":[A-Za-z0-9_]+", "smoke-id")
+  if (-not $samplePath.StartsWith("/")) {
+    $samplePath = "/" + $samplePath
+  }
+  return $samplePath
+}
+
+function Get-CoreApiMutatingRoutes {
+  param([string]$RoutesPath)
+
+  if (-not (Test-Path -LiteralPath $RoutesPath)) {
+    throw "routes.js not found at $RoutesPath"
+  }
+
+  $source = Get-Content -LiteralPath $RoutesPath -Raw
+  $pattern = 'route(?:WithStatus)?\(\s*"(?<method>POST|PUT|PATCH|DELETE)"\s*,\s*"(?<path>[^"]+)"'
+  $routes = New-Object System.Collections.Generic.List[object]
+  $seen = New-Object "System.Collections.Generic.HashSet[string]"
+
+  foreach ($match in [regex]::Matches($source, $pattern)) {
+    $method = $match.Groups["method"].Value.ToUpperInvariant()
+    $template = $match.Groups["path"].Value
+    $path = Convert-RouteTemplateToSmokePath $template
+    $key = "$method $path"
+    if ($seen.Add($key)) {
+      $routes.Add([ordered]@{
+        method = $method
+        path = $path
+        template = $template
+        line = ($source.Substring(0, $match.Index).Split("`n").Count)
+      }) | Out-Null
+    }
+  }
+
+  return $routes
+}
+
 $NodeExe = Resolve-DTool $NodeExe "NODE_EXE" "D:\soft\program\nodejs\node.exe" "Node.js"
 $CoreApiRoot = Join-Path $RepoRoot "core-api"
 $PackageJson = Join-Path $CoreApiRoot "package.json"
@@ -235,6 +276,27 @@ if (-not $DatabaseUrl -or $DatabaseUrl.Contains("change-me")) {
 
 if (Test-PortOpen "127.0.0.1" $Port) {
   throw "Port $Port is already listening. Stop the existing process or pass a different -Port."
+}
+
+$routesJs = Join-Path $CoreApiRoot "src\routes.js"
+$discoveredWriteRoutes = @()
+$writeRouteEntries = New-Object System.Collections.Generic.List[string]
+$writeRouteKeys = New-Object "System.Collections.Generic.HashSet[string]"
+foreach ($blockedWritePath in $BlockedWritePaths) {
+  $entry = Split-MethodPathEntry $blockedWritePath
+  $key = "$($entry["method"]) $($entry["path"])"
+  if ($writeRouteKeys.Add($key)) {
+    $writeRouteEntries.Add($key) | Out-Null
+  }
+}
+if (-not $SkipDiscoveredWriteRoutes) {
+  $discoveredWriteRoutes = @(Get-CoreApiMutatingRoutes -RoutesPath $routesJs)
+  foreach ($routeEntry in $discoveredWriteRoutes) {
+    $key = "$($routeEntry["method"]) $($routeEntry["path"])"
+    if ($writeRouteKeys.Add($key)) {
+      $writeRouteEntries.Add($key) | Out-Null
+    }
+  }
 }
 
 $logDir = [Environment]::GetEnvironmentVariable("LOG_DIR", "Process")
@@ -314,7 +376,7 @@ try {
 
   $blockedWriteChecks = New-Object System.Collections.Generic.List[object]
   $firstBlockedWriteCode = $null
-  foreach ($blockedWritePath in $BlockedWritePaths) {
+  foreach ($blockedWritePath in $writeRouteEntries) {
     $entry = Split-MethodPathEntry $blockedWritePath
     $method = $entry["method"]
     $path = $entry["path"]
@@ -345,6 +407,13 @@ try {
     checks = [ordered]@{
       allowedReads = $allowedReadChecks
       legacyPublicGetsClosed = $closedReadChecks
+      mutatingWriteRouteDiscovery = [ordered]@{
+        enabled = -not [bool]$SkipDiscoveredWriteRoutes
+        routesJs = $routesJs
+        discoveredCount = @($discoveredWriteRoutes).Count
+        checkedCount = $blockedWriteChecks.Count
+        discoveredRoutes = $discoveredWriteRoutes
+      }
       mutatingWriteClosed = $firstBlockedWriteCode
       mutatingWritesClosed = $blockedWriteChecks
     }

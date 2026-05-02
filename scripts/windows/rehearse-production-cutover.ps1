@@ -262,6 +262,8 @@ foreach ($path in @(
   "$SourceRoot\scripts\windows\verify-legacy-canonical-projection.ps1",
   "$SourceRoot\scripts\windows\verify-legacy-canonical-projection-gate.ps1",
   "$SourceRoot\scripts\windows\project-legacy-to-canonical.ps1",
+  "$SourceRoot\scripts\windows\verify-p2-cutover-audit.ps1",
+  "$SourceRoot\scripts\windows\verify-frontend-legacy-dependencies.ps1",
   "$SourceRoot\scripts\windows\normalize-payment-provider-capture.ps1",
   "$SourceRoot\scripts\windows\verify-payment-provider-normalizers.ps1",
   "$SourceRoot\scripts\windows\payment-provider-native-adapter.js",

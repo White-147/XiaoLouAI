@@ -41,8 +41,9 @@ Windows smoke 命令：
 `PATCH` / `DELETE`。如果未设置 `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST`，
 只读模式只暴露 `GET /healthz` 和 `GET /api/windows-native/status`；其他
 legacy public read route 默认关闭，直到被显式 allowlist 或代理到 .NET 控制面。
-Windows smoke 也会覆盖 P2 关闭 legacy 支付、任务、媒体 metadata 和上传主写入口的
-代表性路径。
+Windows smoke 还会自动发现 `src/routes.js` 中所有 `POST` / `PUT` / `PATCH` /
+`DELETE` 路由，并验证它们返回 `410 CORE_API_COMPAT_READ_ONLY`；`-BlockedWritePaths`
+仍可用于补充手工探针。
 
 ## 快速开始
 

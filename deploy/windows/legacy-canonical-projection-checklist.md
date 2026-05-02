@@ -31,6 +31,17 @@ Windows-native canonical database.
 
 ## Non-Mutating Preflight
 
+For routine P2 cutover audit, use the consolidated entrypoint first:
+
+```powershell
+D:\code\XiaoLouAI\scripts\windows\verify-p2-cutover-audit.ps1
+```
+
+It runs the synthetic projection fixture, the legacy projection verifier, wallet
+ledger audit, the `core-api` read-only compatibility smoke, and the
+frontend/reverse-proxy legacy dependency audit. Without a supplied real legacy
+source, missing legacy evidence is reported as a warning rather than a blocker.
+
 Run this before any legacy write shutdown:
 
 ```powershell
@@ -111,6 +122,28 @@ projection, and runs the strict verifier with `-LegacyWritesFrozen`. The
 verifier must show source-specific canonical job proof for both rows. This
 prevents unrelated `tasks` projections from accidentally satisfying the
 provider/video job gate.
+
+## Frontend and Reverse Proxy Dependency Audit
+
+Run this after changing frontend API wiring or Windows public-surface examples:
+
+```powershell
+D:\code\XiaoLouAI\scripts\windows\verify-frontend-legacy-dependencies.ps1
+```
+
+The scanner verifies that Caddy/IIS only expose explicit Control API public
+routes and that unlisted `/api/*` routes remain blocked. It also scans frontend
+source for non-Control API legacy route references. Existing legacy mutating
+references are reported as migration warnings by default; use
+`-FailOnLegacyWriteDependency` only when the corresponding frontend flows have
+been migrated to `.NET` Control API or intentionally retired.
+
+Current P2 guard expectation: `XIAOLOU-main/src/lib/api.ts` blocks retired
+legacy mutating frontend calls before network with `LEGACY_WRITE_DISABLED`, so
+`verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency` should
+pass with zero live write candidates. Any new live candidate is a cutover
+blocker until it is migrated to a `.NET` Control API canonical write endpoint
+or explicitly retired behind the same guard.
 
 ## Projection Matrix
 

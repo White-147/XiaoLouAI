@@ -31,8 +31,9 @@ In that mode, core-api rejects `POST` / `PUT` / `PATCH` / `DELETE` with
 not set, read-only mode exposes only `GET /healthz` and
 `GET /api/windows-native/status`; all other legacy public reads are closed until
 they are deliberately allowlisted or proxied to the .NET control plane.
-The Windows smoke also checks representative P2 shutdown paths for legacy
-payment, job/task, media metadata, and upload writes.
+The Windows smoke also discovers every `POST` / `PUT` / `PATCH` / `DELETE`
+route in `src/routes.js` and verifies it returns `410 CORE_API_COMPAT_READ_ONLY`;
+`-BlockedWritePaths` remains available for extra hand-written probes.
 When no legacy snapshot is present, read-only mode keeps the seed state in
 memory and skips PostgreSQL snapshot/projection writes, so it can smoke test
 against the Windows-native canonical test database without requiring legacy

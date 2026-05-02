@@ -23,14 +23,60 @@ export { normalizeVideoMode, VIDEO_MODE_ALIASES } from "./create-capabilities";
 export const API_BASE_URL =
   import.meta.env.VITE_CORE_API_BASE_URL ?? "";
 
+const CONTROL_API_CLIENT_EXACT_PATHS = new Set([
+  "/api/accounts/ensure",
+  "/api/jobs",
+  "/api/media/upload-begin",
+  "/api/media/upload-complete",
+  "/api/media/move-temp-to-permanent",
+  "/api/media/signed-read-url",
+]);
+const LEGACY_MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const ALLOW_LEGACY_MUTATIONS = ["1", "true", "yes", "on"].includes(
+  String(import.meta.env.VITE_ALLOW_LEGACY_MUTATIONS ?? "").trim().toLowerCase(),
+);
+
 function isControlApiClientPath(path: string) {
+  const normalizedPath = path.split("?")[0];
+  return CONTROL_API_CLIENT_EXACT_PATHS.has(normalizedPath) || normalizedPath.startsWith("/api/jobs/");
+}
+
+function getRequestMethod(init?: RequestInit) {
+  return String(init?.method ?? "GET").trim().toUpperCase();
+}
+
+function isLegacySurfacePath(path: string) {
+  const normalizedPath = path.split("?")[0];
   return (
-    path === "/api/accounts/ensure" ||
-    path === "/api/jobs" ||
-    path.startsWith("/api/jobs?") ||
-    path.startsWith("/api/jobs/") ||
-    path === "/api/media" ||
-    path.startsWith("/api/media/")
+    normalizedPath === "/api" ||
+    normalizedPath.startsWith("/api/") ||
+    normalizedPath === "/uploads" ||
+    normalizedPath.startsWith("/uploads/") ||
+    normalizedPath === "/jaaz" ||
+    normalizedPath.startsWith("/jaaz/") ||
+    normalizedPath === "/jaaz-api" ||
+    normalizedPath.startsWith("/jaaz-api/") ||
+    normalizedPath.startsWith("/vr-")
+  );
+}
+
+function assertNoLegacyMutatingRequest(path: string, init?: RequestInit) {
+  const method = getRequestMethod(init);
+  if (
+    ALLOW_LEGACY_MUTATIONS ||
+    !LEGACY_MUTATING_METHODS.has(method) ||
+    isControlApiClientPath(path) ||
+    !isLegacySurfacePath(path)
+  ) {
+    return;
+  }
+
+  throw new ApiRequestError(
+    "Legacy mutating API routes are disabled in the Windows-native runtime. Use the .NET Control API or retire this flow.",
+    {
+      code: "LEGACY_WRITE_DISABLED",
+      status: 410,
+    },
   );
 }
 
@@ -1063,6 +1109,8 @@ function normalizeWalletRecord(wallet: Wallet, actorId: string): Wallet {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  assertNoLegacyMutatingRequest(path, init);
+
   const actorId = getCurrentActorId();
   const token = getAuthToken();
   const controlApiClientAssertion = getControlApiClientAssertion();
@@ -1796,6 +1844,8 @@ export async function reverseVideoPrompt(
 }
 
 export async function uploadFile(file: File, kind = "file") {
+  assertNoLegacyMutatingRequest("/api/uploads", { method: "POST" });
+
   const actorId = getCurrentActorId();
   const token = getAuthToken();
   const headers: Record<string, string> = {
@@ -2113,6 +2163,8 @@ export async function streamPlaygroundChat(
   onEvent: (event: PlaygroundChatEvent) => void,
   signal?: AbortSignal,
 ) {
+  assertNoLegacyMutatingRequest("/api/playground/chat", { method: "POST" });
+
   const actorId = getCurrentActorId();
   const token = getAuthToken();
   const headers: Record<string, string> = {
@@ -2446,6 +2498,8 @@ export type VideoReplaceGenerateInput = {
 };
 
 async function videoReplaceRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  assertNoLegacyMutatingRequest(`${VIDEO_REPLACE_BASE}${path}`, init);
+
   const actorId = getCurrentActorId();
   const token = getAuthToken();
   const headers = new Headers(init?.headers);
