@@ -265,7 +265,9 @@ export default function Layout() {
 
     const allowedOrigins = new Set([window.location.origin]);
     try {
-      const configuredJaazUrl = String(import.meta.env.VITE_JAAZ_AGENT_CANVAS_URL || "/jaaz/").trim() || "/jaaz/";
+      const configuredJaazUrl =
+        String(import.meta.env.VITE_JAAZ_AGENT_CANVAS_URL || "/create/agent-canvas").trim() ||
+        "/create/agent-canvas";
       allowedOrigins.add(new URL(configuredJaazUrl, window.location.href).origin);
     } catch {
       // Keep same-origin as the safe default.

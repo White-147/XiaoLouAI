@@ -42,7 +42,7 @@
  *   The Canvas "save" pipeline is now:
  *      sanitizeCanvasNodesForCloudSave()  // async — upload any data: URL
  *        → sanitizeCanvasNodesForPersistence()  // sync — drop anything left
- *        → POST /api/canvas-projects
+ *        to the Windows-native local canvas draft store
  */
 
 import { uploadAsset } from '../services/assetService';

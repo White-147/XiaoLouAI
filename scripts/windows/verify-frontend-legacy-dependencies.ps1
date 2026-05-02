@@ -55,6 +55,14 @@ function Test-ControlApiPublicPath {
     -or $Path -match "^/api/wallets($|[/?#])" `
     -or $Path -match "^/api/wallets/" `
     -or $Path -match "^/api/media/(upload-begin|upload-complete|move-temp-to-permanent|signed-read-url)($|[/?#])" `
+    -or $Path -match "^/api/projects($|[/?#])" `
+    -or $Path -match "^/api/projects/" `
+    -or $Path -match "^/api/canvas-projects($|[/?#])" `
+    -or $Path -match "^/api/canvas-projects/" `
+    -or $Path -match "^/api/agent-canvas/projects($|[/?#])" `
+    -or $Path -match "^/api/agent-canvas/projects/" `
+    -or $Path -match "^/api/create/(images|videos)($|[/?#])" `
+    -or $Path -match "^/api/create/(images|videos)/" `
     -or $Path -match "^/api/payments/callbacks/[^/?#]+($|[/?#])" `
     -or $Path -match "^/api/payments/(alipay|wechat)/notify($|[/?#])"
 }
@@ -138,7 +146,12 @@ if (Test-Path -LiteralPath $caddyPath) {
     -and $caddyText -match "handle\s+/api/payments/alipay/notify\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/payments/wechat/notify\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/media/upload-begin\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
-    -and $caddyText -match "handle\s+/api/media/signed-read-url\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100"
+    -and $caddyText -match "handle\s+/api/media/signed-read-url\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/projects\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/canvas-projects\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/agent-canvas/projects\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/create/images\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/create/videos\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100"
   $hasLegacyReverseProxy = $caddyText -match "handle\s+/(api|uploads|jaaz|jaaz-api|socket\.io)\*" `
     -and $caddyText -match "reverse_proxy"
 
@@ -155,7 +168,7 @@ if (Test-Path -LiteralPath $iisPath) {
   $hasOperationalBlock = $iisText -match '\^\(metrics\|api/\(schema\.\*\|providers/health\.\*\)\)\$'
   $hasUnlistedBlock = $iisText -match 'Block Unlisted XiaoLou API'
   $hasHealthProxy = $iisText -match '\^\(healthz\|livez\|readyz\)\$'
-  $hasPublicProxy = $iisText -match 'windows-native/status\|accounts/ensure\|jobs\(/.\*\)\?\|wallet\|wallet/usage-stats\|wallets\(/.\*\)\?\|payments/\(callbacks/\[\^/\]\+\|alipay/notify\|wechat/notify\)\|media/\(upload-begin\|upload-complete\|move-temp-to-permanent\|signed-read-url\)'
+  $hasPublicProxy = $iisText -match 'windows-native/status\|accounts/ensure\|jobs\(/.\*\)\?\|wallet\|wallet/usage-stats\|wallets\(/.\*\)\?\|projects\(/.\*\)\?\|canvas-projects\(/.\*\)\?\|agent-canvas/projects\(/.\*\)\?\|create/\(images\|videos\)\(/.\*\)\?\|payments/\(callbacks/\[\^/\]\+\|alipay/notify\|wechat/notify\)\|media/\(upload-begin\|upload-complete\|move-temp-to-permanent\|signed-read-url\)'
   if ($hasInternalBlock -and $hasOperationalBlock -and $hasUnlistedBlock -and $hasHealthProxy -and $hasPublicProxy) {
     Add-Item $checks "iis-public-surface" "ok" "IIS routes only explicit Control API public paths and blocks unlisted legacy surfaces."
   } else {

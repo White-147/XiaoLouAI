@@ -12,7 +12,7 @@ import { getAuthToken, useActorId } from "../../lib/actor-session";
 import { getCurrentProjectId } from "../../lib/session";
 import { useTheme, type AppTheme } from "../../lib/theme";
 
-const DEFAULT_JAAZ_AGENT_CANVAS_URL = import.meta.env.DEV ? "http://localhost:5174/jaaz/" : "/jaaz/";
+const DEFAULT_JAAZ_AGENT_CANVAS_URL = "/create/agent-canvas";
 
 type XiaolouJaazAuthMessage = {
   type: "xiaolou:auth";

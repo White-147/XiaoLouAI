@@ -589,6 +589,520 @@ app.MapPost("/api/media/move-temp-to-permanent", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
+app.MapGet("/api/projects", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    int? page,
+    int? pageSize,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var items = await projects.ListProjectsAsync(scope, page ?? 1, pageSize ?? 20, ct);
+    var total = items.FirstOrDefault()?.TryGetValue("total_count", out var totalCount) == true
+        ? totalCount
+        : items.Count;
+    return Results.Ok(new
+    {
+        items,
+        page = Math.Max(1, page ?? 1),
+        pageSize = Math.Clamp(pageSize ?? 20, 1, 100),
+        total,
+    });
+});
+
+app.MapPost("/api/projects", async (
+    ProjectRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Title))
+    {
+        return Results.BadRequest(new { error = "title is required" });
+    }
+
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    var scopedRequest = request with
+    {
+        AccountOwnerType = scope.AccountOwnerType,
+        AccountOwnerId = scope.AccountOwnerId,
+        RegionCode = scope.RegionCode,
+        Currency = scope.Currency,
+    };
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Json(await projects.CreateProjectAsync(scopedRequest, ct), statusCode: StatusCodes.Status201Created);
+});
+
+app.MapGet("/api/projects/{projectId}", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(project);
+});
+
+app.MapPut("/api/projects/{projectId}", async (
+    string projectId,
+    ProjectRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var existing = await projects.GetProjectAsync(projectId, ct);
+    if (existing is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, existing) is { } denied)
+    {
+        return denied;
+    }
+
+    var project = await projects.UpdateProjectAsync(projectId, request, ct);
+    return project is null ? Results.NotFound(new { error = "project not found" }) : Results.Ok(project);
+});
+
+app.MapGet("/api/projects/{projectId}/overview", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var overview = await projects.GetProjectOverviewAsync(projectId, ct);
+    return overview is null ? Results.NotFound(new { error = "project not found" }) : Results.Ok(overview);
+});
+
+app.MapGet("/api/projects/{projectId}/settings", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await projects.GetSettingsAsync(projectId, ct));
+});
+
+app.MapPut("/api/projects/{projectId}/settings", async (
+    string projectId,
+    JsonElement request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await projects.UpsertSettingsAsync(projectId, new ProjectSettingsRequest { Data = request }, ct));
+});
+
+app.MapGet("/api/projects/{projectId}/script", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await projects.GetScriptAsync(projectId, ct));
+});
+
+app.MapPut("/api/projects/{projectId}/script", async (
+    string projectId,
+    ProjectScriptRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await projects.UpsertScriptAsync(projectId, request, ct));
+});
+
+app.MapGet("/api/projects/{projectId}/timeline", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await projects.GetTimelineAsync(projectId, ct));
+});
+
+app.MapPut("/api/projects/{projectId}/timeline", async (
+    string projectId,
+    ProjectTimelineRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await projects.UpsertTimelineAsync(projectId, request, ct));
+});
+
+app.MapGet("/api/canvas-projects", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListCanvasProjectsAsync("canvas_projects", scope, false, ct) });
+});
+
+app.MapGet("/api/canvas-projects/{projectId}", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetCanvasProjectAsync("canvas_projects", projectId, false, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "canvas project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(project);
+});
+
+app.MapPost("/api/canvas-projects", async (
+    CanvasProjectRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var project = await projects.UpsertCanvasProjectAsync("canvas_projects", scope, request, false, ct);
+    return project is null
+        ? Results.Json(new { error = "canvas project is owned by another account" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Json(project, statusCode: StatusCodes.Status201Created);
+});
+
+app.MapPut("/api/canvas-projects/{projectId}", async (
+    string projectId,
+    CanvasProjectRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var project = await projects.UpsertCanvasProjectAsync("canvas_projects", scope, request with { Id = projectId }, false, ct);
+    return project is null
+        ? Results.Json(new { error = "canvas project is owned by another account" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Ok(project);
+});
+
+app.MapDelete("/api/canvas-projects/{projectId}", async (
+    string projectId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var deleted = await projects.DeleteCanvasProjectAsync("canvas_projects", scope, projectId, ct);
+    return deleted ? Results.Ok(new { deleted, projectId }) : Results.NotFound(new { error = "canvas project not found" });
+});
+
+app.MapGet("/api/agent-canvas/projects", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListCanvasProjectsAsync("agent_canvas_projects", scope, true, ct) });
+});
+
+app.MapGet("/api/agent-canvas/projects/{projectId}", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetCanvasProjectAsync("agent_canvas_projects", projectId, true, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "agent canvas project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(project);
+});
+
+app.MapPost("/api/agent-canvas/projects", async (
+    CanvasProjectRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var project = await projects.UpsertCanvasProjectAsync("agent_canvas_projects", scope, request, true, ct);
+    return project is null
+        ? Results.Json(new { error = "agent canvas project is owned by another account" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Json(project, statusCode: StatusCodes.Status201Created);
+});
+
+app.MapPut("/api/agent-canvas/projects/{projectId}", async (
+    string projectId,
+    CanvasProjectRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var project = await projects.UpsertCanvasProjectAsync("agent_canvas_projects", scope, request with { Id = projectId }, true, ct);
+    return project is null
+        ? Results.Json(new { error = "agent canvas project is owned by another account" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Ok(project);
+});
+
+app.MapDelete("/api/agent-canvas/projects/{projectId}", async (
+    string projectId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var deleted = await projects.DeleteCanvasProjectAsync("agent_canvas_projects", scope, projectId, ct);
+    return deleted ? Results.Ok(new { deleted, projectId }) : Results.NotFound(new { error = "agent canvas project not found" });
+});
+
+app.MapGet("/api/create/images", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListCreateResultsAsync(scope, "image", ct) });
+});
+
+app.MapGet("/api/create/videos", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListCreateResultsAsync(scope, "video", ct) });
+});
+
+app.MapDelete("/api/create/images/{imageId}", async (
+    string imageId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await projects.DeleteCreateResultAsync(scope, "image", imageId, ct));
+});
+
+app.MapDelete("/api/create/videos/{videoId}", async (
+    string videoId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await projects.DeleteCreateResultAsync(scope, "video", videoId, ct));
+});
+
 app.MapGet("/api/providers/health", async (
     PostgresProviderHealthStore providers,
     CancellationToken ct) =>
@@ -882,6 +1396,10 @@ static bool IsPublicClientApiRequest(HttpContext context)
     return path.StartsWithSegments("/api/accounts/ensure")
         || path.StartsWithSegments("/api/jobs")
         || path.StartsWithSegments("/api/media")
+        || path.StartsWithSegments("/api/projects")
+        || path.StartsWithSegments("/api/canvas-projects")
+        || path.StartsWithSegments("/api/agent-canvas/projects")
+        || path.StartsWithSegments("/api/create")
         || string.Equals(path.Value, "/api/wallet", StringComparison.OrdinalIgnoreCase)
         || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
         || string.Equals(path.Value, "/api/wallet/usage-stats", StringComparison.OrdinalIgnoreCase)
@@ -1095,6 +1613,22 @@ static string? GetRequiredClientPermission(HttpContext context)
         {
             return "media:write";
         }
+    }
+
+    if (path.StartsWithSegments("/api/projects"))
+    {
+        return HttpMethods.IsGet(method) ? "projects:read" : "projects:write";
+    }
+
+    if (path.StartsWithSegments("/api/canvas-projects")
+        || path.StartsWithSegments("/api/agent-canvas/projects"))
+    {
+        return HttpMethods.IsGet(method) ? "canvas:read" : "canvas:write";
+    }
+
+    if (path.StartsWithSegments("/api/create"))
+    {
+        return HttpMethods.IsGet(method) ? "create:read" : "create:write";
     }
 
     return null;

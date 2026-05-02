@@ -343,7 +343,13 @@ function New-ClientAuthProviderAssertion {
       "jobs:cancel",
       "wallet:read",
       "media:read",
-      "media:write"
+      "media:write",
+      "projects:read",
+      "projects:write",
+      "canvas:read",
+      "canvas:write",
+      "create:read",
+      "create:write"
     )
   }
 

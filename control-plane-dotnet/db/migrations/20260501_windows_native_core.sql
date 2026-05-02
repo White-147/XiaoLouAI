@@ -341,6 +341,134 @@ CREATE TABLE IF NOT EXISTS provider_health (
   PRIMARY KEY (provider, region_code, model_family)
 );
 
+CREATE TABLE IF NOT EXISTS projects (
+  id text PRIMARY KEY,
+  account_id uuid REFERENCES accounts(id),
+  owner_type text,
+  owner_id text,
+  title text,
+  summary text,
+  status text,
+  cover_url text,
+  organization_id text,
+  current_step text,
+  progress_percent numeric,
+  budget_credits numeric,
+  budget_limit_credits numeric,
+  budget_used_credits numeric,
+  billing_wallet_type text,
+  billing_policy text,
+  created_by_user_id text,
+  director_agent_name text,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at text,
+  updated_at text
+);
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS account_id uuid REFERENCES accounts(id);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS summary text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS cover_url text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS current_step text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS progress_percent numeric;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_credits numeric;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_limit_credits numeric;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_used_credits numeric;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS billing_wallet_type text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS billing_policy text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS created_by_user_id text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS director_agent_name text;
+
+CREATE INDEX IF NOT EXISTS idx_projects_account_updated
+  ON projects(account_id, updated_at)
+  WHERE account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_projects_owner
+  ON projects(owner_type, owner_id);
+
+CREATE TABLE IF NOT EXISTS project_settings (
+  project_id text PRIMARY KEY,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_at text
+);
+
+CREATE TABLE IF NOT EXISTS project_scripts (
+  id text PRIMARY KEY,
+  project_id text,
+  title text,
+  version integer,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at text,
+  updated_at text
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_scripts_project
+  ON project_scripts(project_id, version DESC);
+
+CREATE TABLE IF NOT EXISTS project_timelines (
+  project_id text PRIMARY KEY,
+  version integer,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_at text
+);
+
+CREATE TABLE IF NOT EXISTS canvas_projects (
+  id text PRIMARY KEY,
+  account_id uuid REFERENCES accounts(id),
+  actor_id text,
+  title text,
+  thumbnail_url text,
+  canvas_data jsonb,
+  agent_context jsonb,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at text,
+  updated_at text
+);
+
+ALTER TABLE canvas_projects ADD COLUMN IF NOT EXISTS account_id uuid REFERENCES accounts(id);
+ALTER TABLE canvas_projects ADD COLUMN IF NOT EXISTS thumbnail_url text;
+ALTER TABLE canvas_projects ADD COLUMN IF NOT EXISTS canvas_data jsonb;
+ALTER TABLE canvas_projects ADD COLUMN IF NOT EXISTS agent_context jsonb;
+
+CREATE INDEX IF NOT EXISTS idx_canvas_projects_account_updated
+  ON canvas_projects(account_id, updated_at)
+  WHERE account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_canvas_actor
+  ON canvas_projects(actor_id);
+
+CREATE TABLE IF NOT EXISTS agent_canvas_projects (
+  id text PRIMARY KEY,
+  account_id uuid REFERENCES accounts(id),
+  actor_id text,
+  title text,
+  thumbnail_url text,
+  canvas_data jsonb,
+  agent_context jsonb,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at text,
+  updated_at text
+);
+
+ALTER TABLE agent_canvas_projects ADD COLUMN IF NOT EXISTS account_id uuid REFERENCES accounts(id);
+ALTER TABLE agent_canvas_projects ADD COLUMN IF NOT EXISTS thumbnail_url text;
+ALTER TABLE agent_canvas_projects ADD COLUMN IF NOT EXISTS canvas_data jsonb;
+ALTER TABLE agent_canvas_projects ADD COLUMN IF NOT EXISTS agent_context jsonb;
+
+CREATE INDEX IF NOT EXISTS idx_agent_canvas_projects_account_updated
+  ON agent_canvas_projects(account_id, updated_at)
+  WHERE account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_agent_canvas_actor
+  ON agent_canvas_projects(actor_id);
+
+CREATE TABLE IF NOT EXISTS create_studio_result_deletions (
+  account_id uuid NOT NULL REFERENCES accounts(id),
+  result_kind text NOT NULL CHECK (result_kind IN ('image', 'video')),
+  result_id text NOT NULL,
+  deleted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (account_id, result_kind, result_id)
+);
+
 CREATE OR REPLACE FUNCTION xiaolou_lock_account_lane(
   p_account_id uuid,
   p_lane text

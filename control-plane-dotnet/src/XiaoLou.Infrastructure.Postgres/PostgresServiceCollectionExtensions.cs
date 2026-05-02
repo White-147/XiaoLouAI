@@ -37,6 +37,7 @@ public static class PostgresServiceCollectionExtensions
         services.AddSingleton<PostgresMediaStore>();
         services.AddSingleton<PostgresOutboxStore>();
         services.AddSingleton<PostgresProviderHealthStore>();
+        services.AddSingleton<PostgresProjectSurfaceStore>();
         services.AddSingleton<PostgresJobNotificationListener>();
 
         return services;

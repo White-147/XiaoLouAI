@@ -1,7 +1,7 @@
 import { FlaskConical, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const DEFAULT_AGENT_STUDIO_URL = "/jaaz/?embed=xiaolou";
+const DEFAULT_AGENT_STUDIO_URL = "/create/agent-canvas?embed=xiaolou";
 const CHECK_TIMEOUT_MS = 6000;
 const IFRAME_LOAD_TIMEOUT_MS = 15000;
 
@@ -80,7 +80,7 @@ export default function AgentStudio() {
       } catch {
         if (!cancelled) {
           setStatus("error");
-          setErrorText("Agent Studio 服务暂不可用，请确认 Jaaz 前端服务和 /jaaz 代理已正常启动。");
+          setErrorText("Agent Studio 服务暂不可用，请确认原生 agent-canvas 入口或显式配置的外部画布服务已正常启动。");
         }
       } finally {
         window.clearTimeout(timeout);

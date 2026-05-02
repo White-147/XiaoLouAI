@@ -11,8 +11,9 @@ Language: [简体中文](README.md) | [English](README.en.md)
 Required services:
 
 - `3000`, or the current Vite port: `XIAOLOU-main` frontend
-- `4100`: `core-api` backend during migration
-- `5174` / `57988`: Jaaz UI / Jaaz API for the agent canvas
+- `4100`: `.NET` Control API, the primary entry for production canonical public routes
+- `core-api`: migration-only read-only compatibility, login/assertion transition, or local comparison; do not reopen old write routes
+- `5174` / `57988`: Jaaz UI / Jaaz API only for local agent-canvas comparison or embed debugging, not the production control plane
 
 One-command startup:
 
@@ -22,8 +23,8 @@ scripts\start_xiaolou_stack.cmd
 
 Manual startup:
 
-```bash
-cd core-api && npm run dev
+```powershell
+cd control-plane-dotnet && dotnet run --project .\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj
 cd XIAOLOU-main && npm run dev
 ```
 
@@ -52,10 +53,16 @@ VITE_JAAZ_API_PROXY_TARGET=http://127.0.0.1:57988
 
 - `/create/canvas` is compiled directly into the main frontend and no longer
   needs a separate canvas port.
-- `/create/agent-studio` uses the Jaaz service, whose ports are separate from
-  the main frontend.
+- `/create/agent-studio` no longer depends on old Jaaz writes by default; use
+  Jaaz ports only for local embed comparison.
 - The external `/playground` implementation has been removed. The route remains
   as a future entry point for native XiaoLou capabilities.
+- Project, canvas, agent-canvas, and create image/video list-delete flows now
+  call the first-batch `.NET` canonical source endpoints:
+  `/api/projects*`, `/api/canvas-projects*`, `/api/agent-canvas/projects*`,
+  `/api/create/images*`, and `/api/create/videos*`. Source verification has
+  passed, but runtime service completion still requires elevated
+  publish/restart/P0.
 
 ## README Language Policy
 

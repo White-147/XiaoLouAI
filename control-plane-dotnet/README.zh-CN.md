@@ -25,6 +25,21 @@ src/XiaoLou.Infrastructure.Storage     对象存储签名抽象
 db/migrations                          canonical PostgreSQL SQL
 ```
 
+## 当前 canonical surfaces
+
+当前源码已实现 accounts、jobs、支付回调、wallet read、media metadata/signing，以及第一批
+project/create/canvas surface：
+
+- `/api/projects*`
+- `/api/canvas-projects*`
+- `/api/agent-canvas/projects*`
+- `/api/create/images*`
+- `/api/create/videos*`
+
+这些路由由 PostgreSQL canonical tables 和显式 client permissions 支撑。源码 build 与本地临时
+smoke 已通过，但该批仍需在 elevated Administrator PowerShell 中发布后，运行中的
+`XiaoLou-ControlApi` Windows 服务才可视为已更新。
+
 ## 本地构建
 
 在 Windows 上安装 .NET 8 SDK，然后运行：
@@ -57,8 +72,9 @@ $env:DATABASE_URL="postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_te
 
 脚本会验证 accounts、schema apply、jobs lease/running/heartbeat/succeed、
 LISTEN/NOTIFY、支付回调幂等、不可变 wallet ledger 写入、媒体 metadata、
-provider health、outbox lease，以及 ClosedApiWorker / local-model-worker 的
-succeed 和 fail 路径。验证不使用 Docker、Linux、Celery 或 Redis。
+project/create/canvas canonical routes、provider health、outbox lease，以及
+ClosedApiWorker / local-model-worker 的 succeed 和 fail 路径。验证不使用
+Docker、Linux、Celery 或 Redis。
 
 ## README 语言维护规则
 

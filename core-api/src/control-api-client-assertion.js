@@ -8,6 +8,12 @@ const DEFAULT_PERMISSIONS = Object.freeze([
   "wallet:read",
   "media:read",
   "media:write",
+  "projects:read",
+  "projects:write",
+  "canvas:read",
+  "canvas:write",
+  "create:read",
+  "create:write",
 ]);
 
 const DEFAULT_TTL_SECONDS = 60 * 60;

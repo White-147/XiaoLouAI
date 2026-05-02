@@ -1,9 +1,9 @@
 import { getRuntimeConfig, getRuntimeEnvValue } from '../runtimeConfig';
 
-// Canonical API paths matching XiaoLou's core-api backend.
-// /api/canvas/* is handled by the existing /api proxy in vite.config.ts.
-// /canvas-library/* has a dedicated proxy entry in vite.config.ts.
-const API_BASE_URL = '/api/canvas';
+// Legacy canvas backend writes are retired in the Windows-native runtime.
+// Direct-embed canvas now uses host services for generation, media upload, and
+// local draft persistence unless an operator explicitly configures a base URL.
+const API_BASE_URL = '/canvas-runtime-api-retired';
 const LIBRARY_BASE_URL = '/canvas-library';
 
 function trimTrailingSlash(value: string) {
@@ -24,8 +24,7 @@ function normalizeApiPath(path: string) {
     return normalized;
   }
 
-  const direct = ensureLeadingSlash(normalized);
-  return direct.startsWith('/api/') ? direct.slice('/api'.length) : direct;
+  return ensureLeadingSlash(normalized);
 }
 
 function normalizeLibraryPath(path: string) {

@@ -87,6 +87,26 @@ www.example.com {
 		reverse_proxy 127.0.0.1:4100
 	}
 
+	handle /api/projects* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/canvas-projects* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/agent-canvas/projects* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/create/images* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/create/videos* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
 	handle /api/* {
 		respond 404
 	}

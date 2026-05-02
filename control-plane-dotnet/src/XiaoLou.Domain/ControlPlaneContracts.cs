@@ -100,6 +100,55 @@ public sealed record CancelJobRequest : AccountScope
     public string? Reason { get; init; }
 }
 
+public sealed record ProjectRequest : AccountScope
+{
+    public string? Id { get; init; }
+    public string? Title { get; init; }
+    public string? Summary { get; init; }
+    public string? Status { get; init; }
+    public string? CoverUrl { get; init; }
+    public string? OrganizationId { get; init; }
+    public string? OwnerType { get; init; }
+    public string? OwnerId { get; init; }
+    public string? CurrentStep { get; init; }
+    public decimal? ProgressPercent { get; init; }
+    public decimal? BudgetCredits { get; init; }
+    public decimal? BudgetLimitCredits { get; init; }
+    public decimal? BudgetUsedCredits { get; init; }
+    public string? BillingWalletType { get; init; }
+    public string? BillingPolicy { get; init; }
+    public string? DirectorAgentName { get; init; }
+    public JsonElement Data { get; init; }
+}
+
+public sealed record ProjectSettingsRequest : AccountScope
+{
+    public JsonElement Data { get; init; }
+}
+
+public sealed record ProjectScriptRequest : AccountScope
+{
+    public string? Content { get; init; }
+    public string? Title { get; init; }
+}
+
+public sealed record ProjectTimelineRequest : AccountScope
+{
+    public int? Version { get; init; }
+    public decimal? TotalDurationSeconds { get; init; }
+    public JsonElement Tracks { get; init; }
+    public JsonElement Data { get; init; }
+}
+
+public sealed record CanvasProjectRequest : AccountScope
+{
+    public string? Id { get; init; }
+    public string? Title { get; init; }
+    public string? ThumbnailUrl { get; init; }
+    public JsonElement CanvasData { get; init; }
+    public JsonElement AgentContext { get; init; }
+}
+
 public sealed record PaymentCallbackRequest : AccountScope
 {
     public string Provider { get; init; } = "";

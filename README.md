@@ -109,6 +109,13 @@ only the approved public Control API routes to `127.0.0.1:4100`:
 - `/api/media/upload-complete`
 - `/api/media/move-temp-to-permanent`
 - `/api/media/signed-read-url`
+- `/api/wallet`
+- `/api/wallets*`
+- `/api/projects*`
+- `/api/canvas-projects*`
+- `/api/agent-canvas/projects*`
+- `/api/create/images*`
+- `/api/create/videos*`
 
 `/api/internal/*`, `/api/schema/*`, `/api/providers/health`, and unlisted
 legacy API paths must not be exposed through the public reverse proxy.
@@ -165,6 +172,16 @@ smoke/test secrets by default, `rehearse -RunP0` imports runtime auth-provider
 env and picks a configured owner grant, and `StrictProduction` intentionally
 blocks the current local smoke env until real production secrets are installed.
 
+Current P2 source checkpoint: frontend legacy write route batches have been
+retired or migrated, and the remaining frontend review items are guarded
+non-live literals. The first `.NET` canonical real-surface source batch for
+`/api/projects`, `/api/create/images|videos`, `/api/canvas-projects`, and
+`/api/agent-canvas/projects` is implemented and source-verified. Because it
+changes `.NET` runtime code, do not claim the running Windows services contain
+that batch until `complete-control-api-publish-restart-p0.ps1` has completed
+from an elevated Administrator PowerShell and runtime smoke has checked those
+routes through `http://127.0.0.1:4100`.
+
 ## Payment Provider Onboarding
 
 Payment provider integration is prepared, but real Alipay/WeChat Pay merchant
@@ -217,7 +234,7 @@ refactor toward P2.
 ## Runtime Rules
 
 - PostgreSQL is canonical for accounts, jobs, payments, wallet ledger, media
-  metadata, outbox, and provider health.
+  metadata, project/canvas/create surfaces, outbox, and provider health.
 - Payment callbacks must be idempotent, signature-checked, and written through
   immutable `wallet_ledger` entries in the `account-finance` lane.
 - Jobs are leased from PostgreSQL with `FOR UPDATE SKIP LOCKED`; workers do not
@@ -236,6 +253,12 @@ Read these first before continuing the refactor:
 
 - `XIAOLOU_REFACTOR_HANDOFF.md`
 - `docs/xiaolouai-python-refactor-handoff.md`
+
+After every code, script, config, reverse-proxy, runtime, or README change,
+update both handoff files before closing the work. If a prior "next execution"
+note has been superseded, mark it as historical in
+`docs/xiaolouai-python-refactor-handoff.md` instead of leaving two competing
+instructions.
 
 ## README Language Policy
 

@@ -2,8 +2,8 @@
  * Unified media capability types shared across create/image, create/video, and create/canvas.
  *
  * These types define the single source of truth for model capabilities.
- * The backend (core-api/store.js) is the authoritative data source;
- * frontends consume these via /api/create/{images,videos}/capabilities.
+ * The Windows-native Control API job payload is the authoritative contract;
+ * frontends consume local fallback capabilities until provider evidence lands.
  */
 
 export type MediaKind = "image" | "video";
@@ -35,7 +35,7 @@ export type VideoInputMode =
   | "video_extend";
 
 /**
- * Video mode values accepted by the generation API (`/api/create/videos/generate`).
+ * Video mode values accepted by the canonical create-video job payload.
  * Differs from `VideoInputMode` in that the API uses `image_to_video` (not
  * `single_reference`) to describe single-reference generation.
  */

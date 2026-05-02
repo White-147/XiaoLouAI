@@ -195,32 +195,17 @@ function prefetchAgentCanvasProject(asset: Asset) {
   if (!canvasId || agentCanvasProjectPrefetchInFlight.has(canvasId)) return;
 
   agentCanvasProjectPrefetchInFlight.add(canvasId);
-  const canvasKey = `xiaolou:jaaz-prefetch:canvas:${canvasId}`;
-  void fetch(`/jaaz-api/api/canvas/${encodeURIComponent(canvasId)}`, {
-    credentials: "same-origin",
-  })
-    .then(async (response) => {
-      if (response.ok) {
-        writeJaazPrefetchCache(canvasKey, await response.json());
-      }
-      if (!sessionId) return;
-      const chatResponse = await fetch(
-        `/jaaz-api/api/chat_session/${encodeURIComponent(sessionId)}?limit=80`,
-        { credentials: "same-origin" },
-      );
-      if (chatResponse.ok) {
-        writeJaazPrefetchCache(
-          `xiaolou:jaaz-prefetch:chat:${sessionId}:latest`,
-          await chatResponse.json(),
-        );
-      }
-    })
-    .catch(() => {
-      // Silent warmup failure; normal click path can still load from Jaaz.
-    })
-    .finally(() => {
-      window.setTimeout(() => agentCanvasProjectPrefetchInFlight.delete(canvasId), 5000);
+  writeJaazPrefetchCache(`xiaolou:jaaz-prefetch:canvas:${canvasId}`, {
+    retired: true,
+    canvasId,
+  });
+  if (sessionId) {
+    writeJaazPrefetchCache(`xiaolou:jaaz-prefetch:chat:${sessionId}:latest`, {
+      retired: true,
+      sessionId,
     });
+  }
+  window.setTimeout(() => agentCanvasProjectPrefetchInFlight.delete(canvasId), 5000);
 }
 
 function assetMatchesQuery(asset: Asset, rawQuery: string) {

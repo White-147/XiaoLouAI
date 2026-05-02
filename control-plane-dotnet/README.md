@@ -25,6 +25,22 @@ src/XiaoLou.Infrastructure.Storage     object-storage signing abstraction
 db/migrations                          canonical PostgreSQL SQL
 ```
 
+## Current Canonical Surfaces
+
+Implemented source surfaces include accounts, jobs, payment callbacks, wallet
+reads, media metadata/signing, and the first project/create/canvas batch:
+
+- `/api/projects*`
+- `/api/canvas-projects*`
+- `/api/agent-canvas/projects*`
+- `/api/create/images*`
+- `/api/create/videos*`
+
+These routes are backed by PostgreSQL canonical tables and explicit client
+permissions. The source build and local temporary smoke have passed, but this
+batch must still be published from an elevated Administrator PowerShell before
+the running `XiaoLou-ControlApi` Windows service can be treated as updated.
+
 ## Local Build
 
 Install the .NET 8 SDK on Windows, then run:
@@ -58,9 +74,9 @@ $env:DATABASE_URL="postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_te
 
 The script verifies accounts, PostgreSQL schema apply, jobs lease/running/
 heartbeat/succeed, LISTEN/NOTIFY, payment callback idempotency, immutable wallet
-ledger insertion, media metadata, provider health, outbox leasing, and the
-ClosedApiWorker/local-model-worker succeed and fail paths. It does not use
-Docker, Linux, Celery, or Redis.
+ledger insertion, media metadata, project/create/canvas canonical routes,
+provider health, outbox leasing, and the ClosedApiWorker/local-model-worker
+succeed and fail paths. It does not use Docker, Linux, Celery, or Redis.
 
 ## README Language Policy
 

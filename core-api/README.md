@@ -3,12 +3,14 @@
 Language: [English](README.md) | [简体中文](README.zh-CN.md)
 
 Backend for XiaoLou AI 创作平台. Runs on Node.js built-in HTTP modules.
-This package is now the transition/compatibility API while the production
-.NET control plane is being built under `../control-plane-dotnet`.
+This package is now only the transition/read-only compatibility API. Production
+control-plane work belongs under `../control-plane-dotnet`.
 
 ## What it provides
 
-- REST endpoints for projects, scripts, assets, storyboards, videos, dubbings, tasks, wallet, enterprise, toolbox, and canvas operations.
+- Legacy route implementations and migration references for projects, scripts,
+  assets, storyboards, videos, dubbings, tasks, wallet, enterprise, toolbox,
+  and canvas operations.
 - Server-sent events at `/api/tasks/stream` for task progress.
 - PostgreSQL-backed runtime, with SQLite retained only as migration input and backup.
 
@@ -35,6 +37,12 @@ they are deliberately allowlisted or proxied to the .NET control plane.
 The Windows smoke also discovers every `POST` / `PUT` / `PATCH` / `DELETE`
 route in `src/routes.js` and verifies it returns `410 CORE_API_COMPAT_READ_ONLY`;
 `-BlockedWritePaths` remains available for extra hand-written probes.
+
+Current P2 status: frontend legacy write routes have been retired or migrated,
+and `/api/projects*`, `/api/canvas-projects*`, `/api/agent-canvas/projects*`,
+and `/api/create/images|videos` now have first-batch `.NET` canonical source
+implementations. Keep core-api closed for those production surfaces; do not
+reopen old Node writes to make the frontend work.
 When no legacy snapshot is present, read-only mode keeps the seed state in
 memory and skips PostgreSQL snapshot/projection writes, so it can smoke test
 against the Windows-native canonical test database without requiring legacy
@@ -245,7 +253,12 @@ PORT=4101 node src/server.js
 
 ## Single-origin tunnel mode
 
-Expose via one public domain for both frontend and API:
+This section is legacy/local guidance only. Production Windows-native hosting
+serves `XIAOLOU-main/dist` and reverse-proxies only the explicit public .NET
+Control API allowlist from the root README and `deploy/windows/*` examples.
+
+For local compatibility comparison, a single-origin tunnel can expose both the
+frontend and the legacy compatibility API:
 
 - `/` -> frontend port 3000
 - `/api` and `/uploads` -> core-api port 4100
@@ -326,6 +339,9 @@ Once old legacy write paths and workers are frozen, rerun the gate with
 showing as warnings. The switch does not bypass missing projection blockers.
 
 ## Handy requests
+
+These are local legacy compatibility probes. In production, equivalent
+project/canvas/create surfaces should be served by the `.NET` Control API.
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:4100/api/projects

@@ -16,7 +16,7 @@
           <action type="Rewrite" url="http://127.0.0.1:4100/{R:0}" />
         </rule>
         <rule name="XiaoLou Public API Reverse Proxy" stopProcessing="true">
-          <match url="^api/(windows-native/status|accounts/ensure|jobs(/.*)?|wallet|wallet/usage-stats|wallets(/.*)?|payments/(callbacks/[^/]+|alipay/notify|wechat/notify)|media/(upload-begin|upload-complete|move-temp-to-permanent|signed-read-url))$" />
+          <match url="^api/(windows-native/status|accounts/ensure|jobs(/.*)?|wallet|wallet/usage-stats|wallets(/.*)?|projects(/.*)?|canvas-projects(/.*)?|agent-canvas/projects(/.*)?|create/(images|videos)(/.*)?|payments/(callbacks/[^/]+|alipay/notify|wechat/notify)|media/(upload-begin|upload-complete|move-temp-to-permanent|signed-read-url))$" />
           <action type="Rewrite" url="http://127.0.0.1:4100/{R:0}" />
         </rule>
         <rule name="Block Unlisted XiaoLou API" stopProcessing="true">
