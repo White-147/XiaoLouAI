@@ -9,6 +9,9 @@
 </p>
 
 </h2>
+<p align="center">
+  Language: <a href="./README.md">English</a> | <a href="./README_zh.md">简体中文</a>
+</p>
 <p align="center">The world's first open-source multimodal canvas creative agent</p>
 <p align="center">This is a substitute for Canva and Manus that prioritizes privacy and is usable locally.</p>
 <p>
@@ -22,6 +25,12 @@
   
   Download:https://github.com/11cafe/jaaz/releases
 </p>
+
+## README Language Policy
+
+Keep this README and `README_zh.md` in sync. Any future README change should
+update both language versions. `README-zh.md` is kept as a legacy Chinese entry
+and should point readers to the maintained Chinese version.
 <br><br>
 
 <p align="center">
@@ -183,7 +192,6 @@ VSCode/Cursor Install Extensions：
 `pip install -r requirements.txt`
 
 `python main.py`
-
 
 
 

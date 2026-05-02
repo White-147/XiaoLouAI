@@ -1,6 +1,6 @@
 # XiaoLouAI Windows 原生长期重构交接
 
-更新时间：2026-05-02 06:36:00 +08:00
+更新时间：2026-05-02 08:09:54 +08:00
 工作目录：`D:\code\XiaoLouAI`
 参考文件：`docs/xiaolouai-python-refactor-handoff.md`、本地 deep-research report
 
@@ -661,14 +661,65 @@ D:\soft\program\nodejs\npm.cmd run lint
 }
 ```
 
+### 4.10 2026-05-02 Control API 权限 scope 与 legacy core-api GET 收口
+
+本轮继续补齐 P1 入口权限语义和 legacy public route 收口：
+
+- `.NET ControlApi` public client 面新增 `CLIENT_API_ALLOWED_PERMISSIONS` / `ClientApi.AllowedPermissions`。
+  - 权限按 route/action 判定，而不是只看 token 是否正确。
+  - 当前 public action：`accounts:ensure`、`jobs:create`、`jobs:read`、`jobs:cancel`、`media:read`、`media:write`。
+  - 支持 `jobs:*`、`media:*` 和 `*`，但只建议 staging/临时灰度使用。
+  - Windows `.env` 示例、发布脚本、Control API 启动脚本、服务注册脚本和 cutover preflight 均已纳入该权限配置。
+- `core-api` 只读兼容模式继续收窄：
+  - `CORE_API_COMPAT_READ_ONLY=1` 仍然阻断 `POST` / `PUT` / `PATCH` / `DELETE`。
+  - 未配置 `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST` 时，默认只允许 `GET /healthz` 和 `GET /api/windows-native/status`。
+  - 其他 legacy public GET route 默认返回 `CORE_API_COMPAT_ROUTE_CLOSED`。
+  - `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=*` 仅保留为本地调试开关，不作为生产 cutover 配置。
+- 文档更新：
+  - `README.md`、`core-api/README.md`、`core-api/.env.example`、`deploy/windows/ops-runbook.md` 均已记录 public permission 与 core-api default allowlist 语义。
+
+本轮验证命令：
+
+```powershell
+. .\scripts\windows\load-env.ps1 -EnvFile .\scripts\windows\.env.windows.example
+& $env:DOTNET_EXE build .\control-plane-dotnet\XiaoLou.ControlPlane.sln
+D:\soft\program\nodejs\node.exe --check .\core-api\src\server.js
+.\scripts\windows\assert-d-drive-runtime.ps1 -EnvFile .\scripts\windows\.env.windows.example
+.\scripts\windows\verify-control-plane-p0.ps1 -BaseUrl 'http://127.0.0.1:4100' -DotnetExe 'D:\soft\program\dotnet\dotnet.exe' -PythonExe 'D:\soft\program\Python\Python312\python.exe' -ClientApiToken 'xiaolou-test-client-token'
+```
+
+新增运行验证：
+
+- 以 `CLIENT_API_ALLOWED_PERMISSIONS=accounts:ensure,jobs:read` 临时启动 Control API，确认 `POST /api/accounts/ensure` 可通过，但 `POST /api/jobs` 被 403 拒绝。
+- 以完整 permission 白名单临时启动 Control API，并跑通完整 P0：
+
+```json
+{
+  "runId": "p0-b23c30678ec144b4a506b9c7364c796b",
+  "workersVerified": true
+}
+```
+
+- `core-api` full process smoke 受当前测试库 schema 缺少 `users.platform_role` 阻挡；本轮改为导出并直接验证 `core-api` compat allowlist 判定函数，确认默认只允许 `/healthz`，默认关闭 `/api/wallet`，显式 `*` 可本地放开。
+
+### 4.11 2026-05-02 README 中英文双版约定
+
+本轮将项目内 Git 可见的一线 README 统一为 GitHub 可切换的中英文双版：
+
+- 默认英文 README 配套 `README.zh-CN.md`。
+- 默认中文 README 配套 `README.en.md`。
+- `jaaz/` 已有 `README.md` / `README_zh.md`，本轮补齐互链；`README-zh.md` 保留为历史中文入口，并指向维护版中文 README。
+- 每份 README 顶部都保留 `English | 简体中文` 或 `简体中文 | English` 语言切换。
+- 每份 README 都加入语言维护规则：后续修改 README 时，必须在同一次变更中同步更新中英文版本。
+
 ## 5. 下一步计划
 
 ### P1：切生产演练与入口硬化
 
 1. 执行一次显式发布演练：`rehearse-production-cutover.ps1 -ExecutePublish -RegisterServices -UpdateExisting -RunP0`，确认 `D:\code\XiaoLouAI\.runtime\app` 运行目录、服务注册和 P0 验证闭环。
 2. 用真实 provider 捕获样本跑 staging replay，确认第二次回放幂等、wallet audit 无 mismatch。
-3. 继续把 Control API public client token 迁向真实用户/组织鉴权 provider，保留 configured grant 作为切生产收窄和灰度开关。
-4. 继续清理或代理 `core-api/` legacy public routes，确保生产只读兼容面不会恢复主写。
+3. 继续把 Control API public client token 迁向真实用户/组织鉴权 provider，保留 configured grant 和 permission scope 作为切生产收窄/灰度开关。
+4. 补齐 legacy -> canonical projection/checklist，逐步关闭 `core-api/` 支付、任务、媒体主写入口。
 
 ### P2：移除旧控制面依赖
 

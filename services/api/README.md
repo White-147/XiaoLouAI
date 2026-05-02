@@ -1,5 +1,7 @@
 # XiaoLouAI Legacy Python API Reference
 
+Language: [English](README.md) | [简体中文](README.zh-CN.md)
+
 `services/api` is no longer the production control plane. The long-term route is:
 
 ```text
@@ -32,3 +34,8 @@ startup files have been removed from the repository production path.
 Do not add RabbitMQ, Redis, Celery, Docker Compose, or container startup steps
 back into production documentation. New work belongs under
 `control-plane-dotnet/` and the Windows-native service scripts.
+
+## README Language Policy
+
+Keep this README and `README.zh-CN.md` in sync. Any future README change should
+update both language versions.

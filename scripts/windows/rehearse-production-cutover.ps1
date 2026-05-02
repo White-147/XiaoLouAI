@@ -179,6 +179,16 @@ if (Test-Path -LiteralPath $runtimeEnv) {
   if ((Get-EnvFileValue $runtimeEnv "CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT") -ne "true") {
     Add-Item $warnings "client-api-configured-grants" "warning" "Set CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT=true before production cutover, after CLIENT_API_ALLOWED_ACCOUNT_IDS or CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS are configured."
   }
+  $clientApiPermissions = Get-EnvFileValue $runtimeEnv "CLIENT_API_ALLOWED_PERMISSIONS"
+  if (-not $clientApiPermissions -or $clientApiPermissions -match "(^|[,;])\s*\*\s*($|[,;])") {
+    Add-Item $warnings "client-api-permissions" "warning" "Set CLIENT_API_ALLOWED_PERMISSIONS to explicit public permissions before production cutover."
+  }
+  if ((Get-EnvFileValue $runtimeEnv "CORE_API_COMPAT_READ_ONLY") -ne "1") {
+    Add-Item $warnings "core-api-read-only" "warning" "Set CORE_API_COMPAT_READ_ONLY=1 for any legacy core-api compatibility process."
+  }
+  if (-not (Get-EnvFileValue $runtimeEnv "CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST")) {
+    Add-Item $warnings "core-api-route-allowlist" "warning" "Set CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST to keep legacy GET routes closed by default."
+  }
 } else {
   Add-Item $warnings "runtime-env" "missing" "$runtimeEnv will be created on publish"
 }

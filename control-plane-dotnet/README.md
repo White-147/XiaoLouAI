@@ -1,5 +1,7 @@
 # XiaoLouAI Control Plane (.NET)
 
+Language: [English](README.md) | [简体中文](README.zh-CN.md)
+
 This directory is the Windows-native long-term control plane for XiaoLouAI.
 
 ```text
@@ -59,3 +61,8 @@ heartbeat/succeed, LISTEN/NOTIFY, payment callback idempotency, immutable wallet
 ledger insertion, media metadata, provider health, outbox leasing, and the
 ClosedApiWorker/local-model-worker succeed and fail paths. It does not use
 Docker, Linux, Celery, or Redis.
+
+## README Language Policy
+
+Keep this README and `README.zh-CN.md` in sync. Any future README change should
+update both language versions.

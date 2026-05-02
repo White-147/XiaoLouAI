@@ -17,6 +17,7 @@ const { handleJaazGatewayRequest, handleJaazGatewayUpgrade } = require("./jaaz-g
 const { startJaazKeepAlive } = require("./jaaz-services");
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const DEFAULT_COMPAT_PUBLIC_ROUTE_ALLOWLIST = "GET /healthz;GET /api/windows-native/status";
 
 function envFlag(name) {
   return ["1", "true", "yes", "on"].includes(String(process.env[name] || "").trim().toLowerCase());
@@ -27,7 +28,13 @@ function isCompatReadOnlyMode() {
 }
 
 function parseCompatPublicRouteAllowlist() {
-  return String(process.env.CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST || "")
+  const configured = String(process.env.CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST || "").trim();
+  const rawAllowlist = configured || DEFAULT_COMPAT_PUBLIC_ROUTE_ALLOWLIST;
+  if (rawAllowlist === "*" || rawAllowlist.toLowerCase() === "all") {
+    return { allowAll: true, routes: [] };
+  }
+
+  const routes = rawAllowlist
     .split(/[;\n,]+/)
     .map((entry) => entry.trim())
     .filter(Boolean)
@@ -41,14 +48,15 @@ function parseCompatPublicRouteAllowlist() {
       };
     })
     .filter((entry) => entry.method && entry.path);
+  return { allowAll: false, routes };
 }
 
 function isCompatPublicRouteAllowed(req, url) {
   const allowlist = parseCompatPublicRouteAllowlist();
-  if (!allowlist.length) return true;
+  if (allowlist.allowAll) return true;
   if (req.method === "OPTIONS" || req.method === "HEAD") return true;
 
-  return allowlist.some((entry) => {
+  return allowlist.routes.some((entry) => {
     if (entry.method !== req.method) return false;
     return entry.prefix
       ? url.pathname.startsWith(entry.prefix)
@@ -296,5 +304,7 @@ function formatListenUrl(host, port) {
 });
 
 module.exports = {
-  createServer
+  createServer,
+  isCompatPublicRouteAllowed,
+  parseCompatPublicRouteAllowlist,
 };

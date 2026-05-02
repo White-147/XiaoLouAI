@@ -1,5 +1,10 @@
 # 🧠 Jaaz – AI自动化营销Agent助手 通用智能助手
 
+语言：[English](README.md) | [维护版简体中文](README_zh.md) | [历史中文入口](README-zh.md)
+
+> 本文件是历史中文入口。后续中英文同步维护以 `README.md` 和 `README_zh.md`
+> 为准；修改 Jaaz README 时请同时更新这两个版本。
+
 一款本地桌面版的 Manus AI Agent 应用程序，支持一键安装到 Mac 和 Windows 电脑上。通用ai agent助手，擅长营销运营自动化。免费使用。
 
 ---

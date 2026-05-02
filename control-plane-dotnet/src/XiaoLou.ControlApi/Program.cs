@@ -57,10 +57,11 @@ app.Use(async (context, next) =>
         return;
     }
 
-    if (IsPublicClientApiRequest(context)
-        && !IsClientRequestAllowed(context, context.RequestServices.GetRequiredService<IOptions<ClientApiOptions>>().Value))
+    var isPublicClientRequest = IsPublicClientApiRequest(context);
+    var clientApiOptions = context.RequestServices.GetRequiredService<IOptions<ClientApiOptions>>().Value;
+    if (isPublicClientRequest && !IsClientRequestAllowed(context, clientApiOptions))
     {
-        var tokenConfigured = GetConfiguredClientToken(context.RequestServices.GetRequiredService<IOptions<ClientApiOptions>>().Value) is not null;
+        var tokenConfigured = GetConfiguredClientToken(clientApiOptions) is not null;
         context.Response.StatusCode = tokenConfigured
             ? StatusCodes.Status401Unauthorized
             : StatusCodes.Status403Forbidden;
@@ -69,6 +70,17 @@ app.Use(async (context, next) =>
             error = tokenConfigured
                 ? "client API token is required or invalid"
                 : "client API is not available from this request context",
+        });
+        return;
+    }
+
+    if (isPublicClientRequest && !IsClientPermissionAllowed(context, clientApiOptions))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = "client token is missing the required public API permission",
+            requiredPermission = GetRequiredClientPermission(context),
         });
         return;
     }
@@ -508,6 +520,70 @@ static bool IsClientRequestAllowed(HttpContext context, ClientApiOptions options
     return remoteIp is null || IPAddress.IsLoopback(remoteIp);
 }
 
+static bool IsClientPermissionAllowed(HttpContext context, ClientApiOptions options)
+{
+    if (!IsClientTokenModeEnabled(options))
+    {
+        return true;
+    }
+
+    var allowedPermissions = GetConfiguredAllowedPermissions(options);
+    if (string.IsNullOrWhiteSpace(allowedPermissions))
+    {
+        return true;
+    }
+
+    var requiredPermission = GetRequiredClientPermission(context);
+    return requiredPermission is not null
+        && ContainsCsvGrant(allowedPermissions, requiredPermission);
+}
+
+static string? GetRequiredClientPermission(HttpContext context)
+{
+    var path = context.Request.Path;
+    var method = context.Request.Method;
+
+    if (HttpMethods.IsPost(method)
+        && string.Equals(path.Value, "/api/accounts/ensure", StringComparison.OrdinalIgnoreCase))
+    {
+        return "accounts:ensure";
+    }
+
+    if (path.StartsWithSegments("/api/jobs"))
+    {
+        if (HttpMethods.IsGet(method))
+        {
+            return "jobs:read";
+        }
+
+        if (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/jobs", StringComparison.OrdinalIgnoreCase))
+        {
+            return "jobs:create";
+        }
+
+        if (HttpMethods.IsPost(method) && path.Value?.EndsWith("/cancel", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "jobs:cancel";
+        }
+    }
+
+    if (path.StartsWithSegments("/api/media"))
+    {
+        if (HttpMethods.IsPost(method)
+            && string.Equals(path.Value, "/api/media/signed-read-url", StringComparison.OrdinalIgnoreCase))
+        {
+            return "media:read";
+        }
+
+        if (HttpMethods.IsPost(method))
+        {
+            return "media:write";
+        }
+    }
+
+    return null;
+}
+
 static bool IsClientTokenModeEnabled(ClientApiOptions options)
 {
     return GetConfiguredClientToken(options) is not null;
@@ -651,6 +727,13 @@ static string? GetConfiguredAllowedAccountOwnerIds(ClientApiOptions options)
         : options.AllowedAccountOwnerIds;
 }
 
+static string? GetConfiguredAllowedPermissions(ClientApiOptions options)
+{
+    return string.IsNullOrWhiteSpace(options.AllowedPermissions)
+        ? Environment.GetEnvironmentVariable("CLIENT_API_ALLOWED_PERMISSIONS")
+        : options.AllowedPermissions;
+}
+
 static bool TryReadAccountId(Dictionary<string, object?> row, out Guid accountId)
 {
     accountId = default;
@@ -696,7 +779,20 @@ static bool ContainsCsvGrant(string? csv, string value)
     }
 
     return csv.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Any(item => item == "*" || string.Equals(item, value, StringComparison.OrdinalIgnoreCase));
+        .Any(item => item == "*"
+            || string.Equals(item, value, StringComparison.OrdinalIgnoreCase)
+            || IsPrefixGrantMatch(item, value));
+}
+
+static bool IsPrefixGrantMatch(string grant, string value)
+{
+    if (!grant.EndsWith(":*", StringComparison.Ordinal))
+    {
+        return false;
+    }
+
+    var prefix = grant[..^1];
+    return value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
 }
 
 static bool HasExternalForwardedAddress(HttpContext context)
@@ -749,6 +845,8 @@ internal sealed class ClientApiOptions
     public string? AllowedAccountIds { get; init; }
 
     public string? AllowedAccountOwnerIds { get; init; }
+
+    public string? AllowedPermissions { get; init; }
 }
 
 internal sealed class LeaseRecoveryService(

@@ -1,5 +1,7 @@
 # core-api
 
+Language: [English](README.md) | [简体中文](README.zh-CN.md)
+
 Backend for XiaoLou AI 创作平台. Runs on Node.js built-in HTTP modules.
 This package is now the transition/compatibility API while the production
 .NET control plane is being built under `../control-plane-dotnet`.
@@ -25,8 +27,10 @@ CORE_API_COMPAT_READ_ONLY=1
 ```
 
 In that mode, core-api rejects `POST` / `PUT` / `PATCH` / `DELETE` with
-`CORE_API_COMPAT_READ_ONLY`; reads can remain available while old frontend or
-operator screens are retired or proxied to the .NET control plane.
+`CORE_API_COMPAT_READ_ONLY`. If `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST` is
+not set, read-only mode exposes only `GET /healthz` and
+`GET /api/windows-native/status`; all other legacy public reads are closed until
+they are deliberately allowlisted or proxied to the .NET control plane.
 
 ## Quick start
 
@@ -54,6 +58,8 @@ Optional overrides:
 PORT=4100
 HOST=::                              # :: = all interfaces (default); 127.0.0.1 = local only
 CORE_API_PUBLIC_BASE_URL=https://your-domain.com   # for single-origin tunnel mode
+CORE_API_COMPAT_READ_ONLY=1
+CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=GET /healthz;GET /api/windows-native/status
 DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
 READ_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
 PGBOUNCER_DATABASE_URL=postgres://root:root@127.0.0.1:6432/xiaolou
@@ -310,3 +316,8 @@ Orphan GPU prevention:
 
 `video-replace-service/app/main.py` (old FastAPI standalone on 4200) is
 **legacy debug** only and not part of the default stack.
+
+## README Language Policy
+
+Keep this README and `README.zh-CN.md` in sync. Any future README change should
+update both language versions.

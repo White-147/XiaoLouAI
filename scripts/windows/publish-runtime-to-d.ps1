@@ -141,6 +141,9 @@ $clientApiRequireAccountScope = if ($env:CLIENT_API_REQUIRE_ACCOUNT_SCOPE) { $en
 $clientApiRequireConfiguredAccountGrant = if ($env:CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT) { $env:CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT } else { "false" }
 $clientApiAllowedAccountIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_IDS) { $env:CLIENT_API_ALLOWED_ACCOUNT_IDS } else { "" }
 $clientApiAllowedAccountOwnerIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS) { $env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS } else { "" }
+$clientApiAllowedPermissions = if ($env:CLIENT_API_ALLOWED_PERMISSIONS) { $env:CLIENT_API_ALLOWED_PERMISSIONS } else { "accounts:ensure,jobs:create,jobs:read,jobs:cancel,media:read,media:write" }
+$coreApiCompatReadOnly = if ($env:CORE_API_COMPAT_READ_ONLY) { $env:CORE_API_COMPAT_READ_ONLY } else { "1" }
+$coreApiCompatPublicRouteAllowlist = if ($env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST) { $env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST } else { "GET /healthz;GET /api/windows-native/status" }
 $envValues = [ordered]@{
   XIAOLOU_RUNTIME_ROOT = $runtimeStateRoot
   XIAOLOU_REPO_ROOT = $SourceRoot
@@ -188,6 +191,9 @@ $envValues = [ordered]@{
   CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT = $clientApiRequireConfiguredAccountGrant
   CLIENT_API_ALLOWED_ACCOUNT_IDS = $clientApiAllowedAccountIds
   CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS = $clientApiAllowedAccountOwnerIds
+  CLIENT_API_ALLOWED_PERMISSIONS = $clientApiAllowedPermissions
+  CORE_API_COMPAT_READ_ONLY = $coreApiCompatReadOnly
+  CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST = $coreApiCompatPublicRouteAllowlist
 }
 
 foreach ($entry in $envValues.GetEnumerator()) {

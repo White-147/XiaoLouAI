@@ -43,6 +43,9 @@ if ($env:CLIENT_API_ALLOWED_ACCOUNT_IDS) {
 if ($env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS) {
   $env:ClientApi__AllowedAccountOwnerIds = $env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS
 }
+if ($env:CLIENT_API_ALLOWED_PERMISSIONS) {
+  $env:ClientApi__AllowedPermissions = $env:CLIENT_API_ALLOWED_PERMISSIONS
+}
 
 Set-Location "$Root\publish\control-api"
 & "$env:DOTNET_EXE" "$env:CONTROL_API_DLL"

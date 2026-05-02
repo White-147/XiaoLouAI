@@ -4,6 +4,9 @@
   <p align="center">本地版Canva + Manus</p>
 
 </h2>
+<p align="center">
+  语言：<a href="./README.md">English</a> | <a href="./README_zh.md">简体中文</a>
+</p>
 [中文入门指南](https://mxnpt25l6k.feishu.cn/docx/LvcTdlVbFoRAZWxnhBYcqVydnpc)
 
 世界上首个开源多模态创意代理，这是一款注重隐私、本地使用和易用性的创意工具， Lovart、Manus 和 Figma 的结合产品。
@@ -96,6 +99,11 @@
 
 `python main.py`
 
+## README 语言维护规则
+
+请保持本文件与 `README.md` 同步。后续修改 README 时必须同时更新中英文版本。
+`README-zh.md` 是历史中文入口，应引导读者使用本文件作为维护版中文 README。
+
 ## 开发
 
 🟠 **Need Python version >=3.12**
@@ -113,4 +121,3 @@ VSCode/Cursor Install Extensions：
 `pip install -r requirements.txt`
 
 `python main.py`
-

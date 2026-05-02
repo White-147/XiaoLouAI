@@ -63,8 +63,16 @@ D:\code\XiaoLouAI\scripts\windows\rehearse-production-cutover.ps1
 - Protected public client routes are `/api/accounts/ensure`, `/api/jobs*`, and `/api/media*`.
 - Keep `CLIENT_API_REQUIRE_ACCOUNT_SCOPE=true` in production so requests must carry account scope headers matching the request body/query/route.
 - Set `CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT=true` before production cutover once the active accounts are known. Then grant only the intended accounts with `CLIENT_API_ALLOWED_ACCOUNT_IDS`, or owner-scoped canaries with `CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS` such as `user:<id>` or `organization:<id>`.
+- Set `CLIENT_API_ALLOWED_PERMISSIONS` to the exact public actions this frontend token may call, for example `accounts:ensure,jobs:create,jobs:read,jobs:cancel,media:read,media:write`. Use `jobs:*`, `media:*`, or `*` only as temporary staging grants.
 - `CLIENT_API_ALLOWED_ACCOUNT_IDS=*` and owner wildcards such as `user:*` are broad grants. Use them only for temporary staging or deliberate canary windows with a rollback plan.
 - `/api/payments/callbacks/*` remains provider-signature protected and is not a client-token route.
+
+## Legacy core-api Compatibility Boundary
+
+- Do not expose `core-api/` as the long-term production control plane.
+- If a temporary `core-api` compatibility process must run, set `CORE_API_COMPAT_READ_ONLY=1`.
+- In read-only mode, unspecified `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST` now defaults to `GET /healthz;GET /api/windows-native/status`; all other legacy public GET routes are closed unless deliberately allowlisted.
+- Use `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=*` only for local debugging, not production cutover.
 
 ## Payment Gray Replay
 

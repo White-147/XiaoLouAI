@@ -4,6 +4,8 @@
 
 # XiaoLou 前端
 
+语言：[简体中文](README.md) | [English](README.en.md)
+
 ## 标准开发方式
 
 必需服务：
@@ -51,3 +53,7 @@ VITE_JAAZ_API_PROXY_TARGET=http://127.0.0.1:57988
 - `/create/canvas` 已直接编译进主前端，不需要独立画布端口。
 - `/create/agent-studio` 使用 Jaaz 服务，端口与主项目前端分离。
 - `/playground` 的外置实现已清理，只保留路由入口，方便后续接入小楼原生能力。
+
+## README 语言维护规则
+
+请保持本文件与 `README.en.md` 同步。后续修改 README 时必须同时更新中英文版本。

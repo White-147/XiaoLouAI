@@ -1,5 +1,7 @@
 # XiaoLouAI - Windows Native AI Creation Platform
 
+Language: [English](README.md) | [简体中文](README.zh-CN.md)
+
 XiaoLouAI production is Windows-native and PostgreSQL-first. The long-term
 control plane is `.NET 8 / ASP.NET Core`; Python is reserved for local model
 adapters and inference runners.
@@ -104,8 +106,9 @@ For production, set both `INTERNAL_API_TOKEN` and `CLIENT_API_TOKEN`.
 `/api/accounts/ensure`, `/api/jobs*`, and `/api/media*` require the client token
 plus account-scope headers. Before cutover, enable
 `CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT=true` and explicitly grant the
-intended accounts or owners. `/api/payments/callbacks/*` remains protected by
-provider callback signature verification.
+intended accounts or owners. Also keep `CLIENT_API_ALLOWED_PERMISSIONS` to the
+minimal public actions needed by the frontend token. `/api/payments/callbacks/*`
+remains protected by provider callback signature verification.
 
 ## Runtime Rules
 
@@ -120,7 +123,8 @@ provider callback signature verification.
 - `core-api/` exists for compatibility during cutover. New control-plane work
   belongs in `control-plane-dotnet/`. Set `CORE_API_COMPAT_READ_ONLY=1` for
   any production compatibility process so old Node routes cannot continue
-  accepting writes.
+  accepting writes; in that mode, legacy public GET routes are closed by
+  default except `GET /healthz` and `GET /api/windows-native/status`.
 
 ## Handoff
 
@@ -128,6 +132,12 @@ Read these first before continuing the refactor:
 
 - `XIAOLOU_REFACTOR_HANDOFF.md`
 - `docs/xiaolouai-python-refactor-handoff.md`
+
+## README Language Policy
+
+Every project README should stay bilingual. When changing a README, update the
+matching English and Simplified Chinese version in the same change, and keep the
+language switch links at the top working in GitHub.
 
 ## License
 
