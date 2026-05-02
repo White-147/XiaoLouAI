@@ -5,7 +5,8 @@ param(
   [string]$NpmCmd = "",
   [string]$PythonExe = "",
   [switch]$SkipFrontend,
-  [switch]$SkipDotnetPublish
+  [switch]$SkipDotnetPublish,
+  [switch]$SkipRollbackSnapshot
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,16 +52,96 @@ foreach ($toolPath in @($DotnetExe, $NpmCmd, $PythonExe)) {
   }
 }
 
+$dotnetRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($DotnetExe))
+$nodeExe = Join-Path (Split-Path -Parent ([System.IO.Path]::GetFullPath($NpmCmd))) "node.exe"
+
 [Environment]::SetEnvironmentVariable("DOTNET_EXE", $DotnetExe, "Process")
 [Environment]::SetEnvironmentVariable("PYTHON_EXE", $PythonExe, "Process")
 [Environment]::SetEnvironmentVariable("NPM_CMD", $NpmCmd, "Process")
+[Environment]::SetEnvironmentVariable("DOTNET_CLI_USE_MSBUILD_SERVER", "0", "Process")
+[Environment]::SetEnvironmentVariable("MSBUILDDISABLENODEREUSE", "1", "Process")
 
 $runtimeStateRoot = Split-Path -Parent $RuntimeRoot
+$rollbackSnapshotRoot = Join-Path $runtimeStateRoot "xiaolou-backups\runtime-snapshots"
+New-Item -ItemType Directory -Force -Path $rollbackSnapshotRoot | Out-Null
+
+function Copy-RuntimeSnapshotDirectory {
+  param(
+    [string]$RelativePath,
+    [string]$SnapshotPath,
+    [string[]]$ExcludeNames = @()
+  )
+
+  $source = Join-Path $RuntimeRoot $RelativePath
+  if (-not (Test-Path -LiteralPath $source)) {
+    return $null
+  }
+
+  $destination = Join-Path $SnapshotPath $RelativePath
+  New-Item -ItemType Directory -Force -Path $destination | Out-Null
+
+  foreach ($item in Get-ChildItem -LiteralPath $source -Force) {
+    if ($ExcludeNames -contains $item.Name) {
+      continue
+    }
+
+    Copy-Item -LiteralPath $item.FullName -Destination $destination -Recurse -Force
+  }
+
+  return [ordered]@{
+    relative_path = $RelativePath
+    source = $source
+    destination = $destination
+    excluded_names = $ExcludeNames
+  }
+}
+
+if (-not $SkipRollbackSnapshot) {
+  $snapshotItems = New-Object System.Collections.Generic.List[object]
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  $snapshotPath = Join-Path $rollbackSnapshotRoot "runtime-$stamp"
+  New-Item -ItemType Directory -Force -Path $snapshotPath | Out-Null
+
+  foreach ($item in @(
+    [ordered]@{ path = "publish\control-api"; exclude = @() },
+    [ordered]@{ path = "publish\closed-api-worker"; exclude = @() },
+    [ordered]@{ path = "publish\local-model-worker-service"; exclude = @() },
+    [ordered]@{ path = "XIAOLOU-main\dist"; exclude = @() },
+    [ordered]@{ path = "scripts\windows"; exclude = @(".env.windows") },
+    [ordered]@{ path = "deploy"; exclude = @() },
+    [ordered]@{ path = "services\local-model-worker"; exclude = @() }
+  )) {
+    $copied = Copy-RuntimeSnapshotDirectory `
+      -RelativePath $item.path `
+      -SnapshotPath $snapshotPath `
+      -ExcludeNames $item.exclude
+    if ($null -ne $copied) {
+      $snapshotItems.Add($copied) | Out-Null
+    }
+  }
+
+  if ($snapshotItems.Count -gt 0) {
+    $manifest = [ordered]@{
+      created_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
+      source_root = $SourceRoot
+      runtime_root = $RuntimeRoot
+      snapshot_path = $snapshotPath
+      excluded_secret_files = @("scripts\windows\.env.windows")
+      items = $snapshotItems
+    }
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $snapshotPath "snapshot-manifest.json") -Encoding UTF8
+    Write-Host "Created rollback snapshot at $snapshotPath"
+  } else {
+    Remove-Item -LiteralPath $snapshotPath -Force -ErrorAction SilentlyContinue
+    Write-Host "No existing runtime artifacts found; rollback snapshot was skipped."
+  }
+}
 
 $paths = @(
   $RuntimeRoot,
   "$RuntimeRoot\publish\control-api",
   "$RuntimeRoot\publish\closed-api-worker",
+  "$RuntimeRoot\publish\local-model-worker-service",
   "$RuntimeRoot\scripts\windows",
   "$RuntimeRoot\services\local-model-worker",
   "$RuntimeRoot\XIAOLOU-main\dist",
@@ -68,6 +149,7 @@ $paths = @(
   "$runtimeStateRoot\xiaolou-temp",
   "$runtimeStateRoot\xiaolou-logs",
   "$runtimeStateRoot\xiaolou-backups",
+  $rollbackSnapshotRoot,
   "$runtimeStateRoot\xiaolou-inputs",
   "$runtimeStateRoot\xiaolou-replay"
 )
@@ -82,12 +164,20 @@ if (-not $SkipDotnetPublish) {
     & $DotnetExe restore ".\XiaoLou.ControlPlane.sln"
     if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed with exit code $LASTEXITCODE" }
 
-    & $DotnetExe publish ".\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj" -c Release -o "$RuntimeRoot\publish\control-api"
+    & $DotnetExe publish ".\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj" -c Release -o "$RuntimeRoot\publish\control-api" -p:UseSharedCompilation=false
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish ControlApi failed with exit code $LASTEXITCODE" }
 
-    & $DotnetExe publish ".\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj" -c Release -o "$RuntimeRoot\publish\closed-api-worker"
+    & $DotnetExe publish ".\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj" -c Release -o "$RuntimeRoot\publish\closed-api-worker" -p:UseSharedCompilation=false
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish ClosedApiWorker failed with exit code $LASTEXITCODE" }
+
+    & $DotnetExe publish ".\src\XiaoLou.LocalModelWorkerService\XiaoLou.LocalModelWorkerService.csproj" -c Release -o "$RuntimeRoot\publish\local-model-worker-service" -p:UseSharedCompilation=false
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish LocalModelWorkerService failed with exit code $LASTEXITCODE" }
   } finally {
+    try {
+      & $DotnetExe build-server shutdown | Out-Null
+    } catch {
+      Write-Warning "dotnet build-server shutdown failed: $($_.Exception.Message)"
+    }
     Pop-Location
   }
 }
@@ -117,6 +207,47 @@ if (-not (Test-Path -LiteralPath "$RuntimeRoot\scripts\windows\.env.windows")) {
 
 $envFile = "$RuntimeRoot\scripts\windows\.env.windows"
 $envText = Get-Content -LiteralPath $envFile -Raw
+function Get-EnvFileValue {
+  param(
+    [string]$Text,
+    [string]$Name
+  )
+
+  foreach ($line in ($Text -split "\r?\n")) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $parts = $trimmed.Split("=", 2)
+    if ($parts.Count -eq 2 -and $parts[0].Trim() -eq $Name) {
+      return $parts[1].Trim()
+    }
+  }
+
+  return $null
+}
+
+function Resolve-EnvValue {
+  param(
+    [string]$Text,
+    [string]$Name,
+    [string]$DefaultValue = ""
+  )
+
+  $processValue = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if ($processValue) {
+    return $processValue
+  }
+
+  $existing = Get-EnvFileValue -Text $Text -Name $Name
+  if ($null -ne $existing) {
+    return $existing
+  }
+
+  return $DefaultValue
+}
+
 function Set-EnvFileValue {
   param(
     [string]$Text,
@@ -135,24 +266,40 @@ function Set-EnvFileValue {
 
 $cacheRoot = "$runtimeStateRoot\xiaolou-cache"
 $tempRoot = "$runtimeStateRoot\xiaolou-temp"
-$clientApiToken = if ($env:CLIENT_API_TOKEN) { $env:CLIENT_API_TOKEN } else { "change-me-client-token" }
-$clientApiTokenHeader = if ($env:CLIENT_API_TOKEN_HEADER) { $env:CLIENT_API_TOKEN_HEADER } else { "X-XiaoLou-Client-Token" }
-$clientApiRequireAccountScope = if ($env:CLIENT_API_REQUIRE_ACCOUNT_SCOPE) { $env:CLIENT_API_REQUIRE_ACCOUNT_SCOPE } else { "true" }
-$clientApiRequireConfiguredAccountGrant = if ($env:CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT) { $env:CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT } else { "false" }
-$clientApiAllowedAccountIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_IDS) { $env:CLIENT_API_ALLOWED_ACCOUNT_IDS } else { "" }
-$clientApiAllowedAccountOwnerIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS) { $env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS } else { "" }
-$clientApiAllowedPermissions = if ($env:CLIENT_API_ALLOWED_PERMISSIONS) { $env:CLIENT_API_ALLOWED_PERMISSIONS } else { "accounts:ensure,jobs:create,jobs:read,jobs:cancel,media:read,media:write" }
-$coreApiCompatReadOnly = if ($env:CORE_API_COMPAT_READ_ONLY) { $env:CORE_API_COMPAT_READ_ONLY } else { "1" }
-$coreApiCompatPublicRouteAllowlist = if ($env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST) { $env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST } else { "GET /healthz;GET /api/windows-native/status" }
+$clientApiToken = Resolve-EnvValue -Text $envText -Name "CLIENT_API_TOKEN" -DefaultValue "change-me-client-token"
+$clientApiTokenHeader = Resolve-EnvValue -Text $envText -Name "CLIENT_API_TOKEN_HEADER" -DefaultValue "X-XiaoLou-Client-Token"
+$clientApiAuthProvider = Resolve-EnvValue -Text $envText -Name "CLIENT_API_AUTH_PROVIDER"
+$clientApiAuthProviderSecret = Resolve-EnvValue -Text $envText -Name "CLIENT_API_AUTH_PROVIDER_SECRET"
+$clientApiAuthProviderIssuer = Resolve-EnvValue -Text $envText -Name "CLIENT_API_AUTH_PROVIDER_ISSUER"
+$clientApiAuthProviderAudience = Resolve-EnvValue -Text $envText -Name "CLIENT_API_AUTH_PROVIDER_AUDIENCE"
+$clientApiAuthProviderTtlSeconds = Resolve-EnvValue -Text $envText -Name "CLIENT_API_AUTH_PROVIDER_TTL_SECONDS" -DefaultValue "3600"
+$clientApiAuthProviderClockSkewSeconds = Resolve-EnvValue -Text $envText -Name "CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS" -DefaultValue "60"
+$clientApiRequireAuthProvider = Resolve-EnvValue -Text $envText -Name "CLIENT_API_REQUIRE_AUTH_PROVIDER" -DefaultValue "false"
+$clientApiRequireAccountScope = Resolve-EnvValue -Text $envText -Name "CLIENT_API_REQUIRE_ACCOUNT_SCOPE" -DefaultValue "true"
+$clientApiRequireConfiguredAccountGrant = Resolve-EnvValue -Text $envText -Name "CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT" -DefaultValue "false"
+$clientApiAllowedAccountIds = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_ACCOUNT_IDS"
+$clientApiAllowedAccountOwnerIds = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS"
+$clientApiAllowedPermissions = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_PERMISSIONS" -DefaultValue "accounts:ensure,jobs:create,jobs:read,jobs:cancel,media:read,media:write"
+$coreApiCompatReadOnly = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_READ_ONLY" -DefaultValue "1"
+$coreApiCompatPublicRouteAllowlist = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST" -DefaultValue "GET /healthz;GET /api/windows-native/status"
+$paymentCallbackAllowedProviders = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_ALLOWED_PROVIDERS" -DefaultValue "testpay,alipay,wechat"
+$paymentCallbackRequireAllowedProvider = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER" -DefaultValue "true"
+$paymentCallbackRequireAccountGrant = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT" -DefaultValue "false"
+$paymentCallbackAllowedAccountIds = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_ALLOWED_ACCOUNT_IDS"
+$paymentCallbackAllowedAccountOwnerIds = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS"
 $envValues = [ordered]@{
   XIAOLOU_RUNTIME_ROOT = $runtimeStateRoot
   XIAOLOU_REPO_ROOT = $SourceRoot
   XIAOLOU_ROOT = $RuntimeRoot
   XIAOLOU_DATA_ROOT = "$RuntimeRoot\data"
+  DOTNET_ROOT = $dotnetRoot
   DOTNET_EXE = $DotnetExe
   PYTHON_EXE = $PythonExe
+  NODE_EXE = $nodeExe
+  NPM_CMD = $NpmCmd
   CONTROL_API_DLL = "$RuntimeRoot\publish\control-api\XiaoLou.ControlApi.dll"
   CLOSED_API_WORKER_DLL = "$RuntimeRoot\publish\closed-api-worker\XiaoLou.ClosedApiWorker.dll"
+  LOCAL_MODEL_WORKER_SERVICE_DLL = "$RuntimeRoot\publish\local-model-worker-service\XiaoLou.LocalModelWorkerService.dll"
   LOCAL_CACHE_DIR = $cacheRoot
   LOCAL_TEMP_DIR = $tempRoot
   LOG_DIR = "$runtimeStateRoot\xiaolou-logs"
@@ -187,6 +334,13 @@ $envValues = [ordered]@{
   MODELSCOPE_CACHE = "$cacheRoot\modelscope"
   CLIENT_API_TOKEN = $clientApiToken
   CLIENT_API_TOKEN_HEADER = $clientApiTokenHeader
+  CLIENT_API_AUTH_PROVIDER = $clientApiAuthProvider
+  CLIENT_API_AUTH_PROVIDER_SECRET = $clientApiAuthProviderSecret
+  CLIENT_API_AUTH_PROVIDER_ISSUER = $clientApiAuthProviderIssuer
+  CLIENT_API_AUTH_PROVIDER_AUDIENCE = $clientApiAuthProviderAudience
+  CLIENT_API_AUTH_PROVIDER_TTL_SECONDS = $clientApiAuthProviderTtlSeconds
+  CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS = $clientApiAuthProviderClockSkewSeconds
+  CLIENT_API_REQUIRE_AUTH_PROVIDER = $clientApiRequireAuthProvider
   CLIENT_API_REQUIRE_ACCOUNT_SCOPE = $clientApiRequireAccountScope
   CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT = $clientApiRequireConfiguredAccountGrant
   CLIENT_API_ALLOWED_ACCOUNT_IDS = $clientApiAllowedAccountIds
@@ -194,6 +348,16 @@ $envValues = [ordered]@{
   CLIENT_API_ALLOWED_PERMISSIONS = $clientApiAllowedPermissions
   CORE_API_COMPAT_READ_ONLY = $coreApiCompatReadOnly
   CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST = $coreApiCompatPublicRouteAllowlist
+  PAYMENT_CALLBACK_ALLOWED_PROVIDERS = $paymentCallbackAllowedProviders
+  PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER = $paymentCallbackRequireAllowedProvider
+  PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT = $paymentCallbackRequireAccountGrant
+  PAYMENT_CALLBACK_ALLOWED_ACCOUNT_IDS = $paymentCallbackAllowedAccountIds
+  PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS = $paymentCallbackAllowedAccountOwnerIds
+  Payments__AllowedProviders = $paymentCallbackAllowedProviders
+  Payments__RequireAllowedProvider = $paymentCallbackRequireAllowedProvider
+  Payments__RequireAccountGrant = $paymentCallbackRequireAccountGrant
+  Payments__AllowedAccountIds = $paymentCallbackAllowedAccountIds
+  Payments__AllowedAccountOwnerIds = $paymentCallbackAllowedAccountOwnerIds
 }
 
 foreach ($entry in $envValues.GetEnumerator()) {

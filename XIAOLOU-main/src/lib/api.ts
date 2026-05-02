@@ -1,4 +1,4 @@
-import { getCurrentActorId, getAuthToken } from "./actor-session";
+import { getControlApiClientAssertion, getCurrentActorId, getAuthToken } from "./actor-session";
 import { isLocalLoopbackAccess, SUPER_ADMIN_DEMO_ACTOR_ID } from "./local-loopback";
 import type {
   MediaCapabilitiesResponse,
@@ -22,6 +22,17 @@ export { normalizeVideoMode, VIDEO_MODE_ALIASES } from "./create-capabilities";
 
 export const API_BASE_URL =
   import.meta.env.VITE_CORE_API_BASE_URL ?? "";
+
+function isControlApiClientPath(path: string) {
+  return (
+    path === "/api/accounts/ensure" ||
+    path === "/api/jobs" ||
+    path.startsWith("/api/jobs?") ||
+    path.startsWith("/api/jobs/") ||
+    path === "/api/media" ||
+    path.startsWith("/api/media/")
+  );
+}
 
 export type ProjectStep =
   | "global"
@@ -553,6 +564,7 @@ export type CreateOrganizationMemberInput = {
 export type RegistrationResult = {
   actorId: string;
   token?: string;
+  controlApiClientAssertion?: string | null;
   permissionContext: PermissionContext;
   wallets?: Wallet[];
   wallet?: Wallet | null;
@@ -580,6 +592,7 @@ export type LoginInput = {
 export type LoginResult = {
   actorId: string;
   token: string;
+  controlApiClientAssertion?: string | null;
   displayName: string;
   email: string;
   permissionContext: PermissionContext;
@@ -1052,12 +1065,15 @@ function normalizeWalletRecord(wallet: Wallet, actorId: string): Wallet {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const actorId = getCurrentActorId();
   const token = getAuthToken();
+  const controlApiClientAssertion = getControlApiClientAssertion();
   const headers = new Headers(init?.headers);
   if (!headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   headers.set("X-Actor-Id", actorId);
-  if (token) {
+  if (controlApiClientAssertion && isControlApiClientPath(path)) {
+    headers.set("Authorization", `Bearer ${controlApiClientAssertion}`);
+  } else if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
   const response = await fetch(`${API_BASE_URL}${path}`, {

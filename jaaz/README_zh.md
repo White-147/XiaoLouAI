@@ -1,3 +1,8 @@
+> XiaoLouAI 生产说明：此 Jaaz 上游 README 仅作为本地参考保留，其中的
+> Docker、Linux、云端或独立部署段落都不是 XiaoLouAI 的生产部署说明。
+> XiaoLouAI 生产路线以仓库根 README 和 `deploy/windows/ops-runbook.md`
+> 为准：Windows 原生 `.NET` Control API、PostgreSQL 与 Windows Service workers。
+
 <h1 align="center">
   <a href="https://jaaz.app" target="_blank"> Jaaz.app</a>
   <p align="center">世界上首个开源人工智能设计代理</p>

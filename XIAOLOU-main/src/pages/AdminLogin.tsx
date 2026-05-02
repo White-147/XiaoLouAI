@@ -2,7 +2,12 @@ import { ArrowLeft, LoaderCircle, LogIn, ShieldCheck } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getMe, loginAdminWithEmail } from "../lib/api";
-import { rememberKnownActor, setAuthToken, setCurrentActorId } from "../lib/actor-session";
+import {
+  rememberKnownActor,
+  setAuthToken,
+  setControlApiClientAssertion,
+  setCurrentActorId,
+} from "../lib/actor-session";
 import { GoogleLoginButton } from "../components/auth/GoogleLoginButton";
 
 type LocationState = {
@@ -44,11 +49,13 @@ export default function AdminLogin() {
     try {
       const result = await loginAdminWithEmail({ email, password });
       setAuthToken(result.token);
+      setControlApiClientAssertion(result.controlApiClientAssertion);
       rememberKnownActor({
         id: result.actorId,
         label: result.displayName,
         detail: result.email,
         token: result.token,
+        controlApiClientAssertion: result.controlApiClientAssertion,
       });
       setCurrentActorId(result.actorId);
       navigate(state?.from || "/admin/orders", { replace: true });

@@ -4,6 +4,7 @@ export const DEFAULT_ACTOR_ID = "guest";
 const ACTOR_STORAGE_KEY = "xiaolou-current-actor-id";
 const KNOWN_ACTORS_STORAGE_KEY = "xiaolou-known-actors";
 const AUTH_TOKEN_KEY = "xiaolou-auth-token";
+const CONTROL_API_ASSERTION_KEY = "xiaolou-control-api-client-assertion";
 const ACTOR_CHANGE_EVENT = "xiaolou:actor-change";
 
 export type KnownActor = {
@@ -11,6 +12,7 @@ export type KnownActor = {
   label: string;
   detail?: string;
   token?: string | null;
+  controlApiClientAssertion?: string | null;
 };
 
 function normalizeActorId(actorId: string | null | undefined) {
@@ -82,6 +84,7 @@ export function rememberKnownActor(actor: KnownActor) {
     label: String(actor.label || actor.id).trim() || actor.id,
     detail: String(actor.detail || "").trim(),
     token: actor.token ?? null,
+    controlApiClientAssertion: actor.controlApiClientAssertion ?? null,
   };
 
   const nextKnownActors = [
@@ -95,6 +98,11 @@ export function rememberKnownActor(actor: KnownActor) {
 export function getKnownActorToken(actorId: string): string | null {
   const actor = readKnownActors().find((item) => item.id === actorId);
   return actor?.token ?? null;
+}
+
+export function getKnownActorControlApiClientAssertion(actorId: string): string | null {
+  const actor = readKnownActors().find((item) => item.id === actorId);
+  return actor?.controlApiClientAssertion ?? null;
 }
 
 export function removeKnownActor(actorId: string) {
@@ -137,6 +145,20 @@ export function getAuthToken(): string | null {
   return window.localStorage.getItem(AUTH_TOKEN_KEY) || null;
 }
 
+export function getControlApiClientAssertion(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(CONTROL_API_ASSERTION_KEY) || null;
+}
+
+export function setControlApiClientAssertion(assertion: string | null | undefined) {
+  if (typeof window === "undefined") return;
+  if (assertion) {
+    window.localStorage.setItem(CONTROL_API_ASSERTION_KEY, assertion);
+  } else {
+    window.localStorage.removeItem(CONTROL_API_ASSERTION_KEY);
+  }
+}
+
 export function setAuthToken(token: string | null) {
   if (typeof window === "undefined") return;
   if (token) {
@@ -154,6 +176,7 @@ export function setAuthToken(token: string | null) {
 export function logout() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  window.localStorage.removeItem(CONTROL_API_ASSERTION_KEY);
   setCurrentActorId(DEFAULT_ACTOR_ID);
 }
 

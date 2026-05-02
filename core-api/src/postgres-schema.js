@@ -419,6 +419,71 @@ CREATE INDEX IF NOT EXISTS idx_create_studio_videos_task ON create_studio_videos
 CREATE INDEX IF NOT EXISTS idx_enterprise_applications_status ON enterprise_applications(status);
 `;
 
+const COMPAT_READONLY_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS legacy_state_snapshot (
+  snapshot_key text PRIMARY KEY,
+  snapshot_value jsonb NOT NULL,
+  snapshot_checksum text NOT NULL,
+  imported_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS migration_audit (
+  id bigserial PRIMARY KEY,
+  source text NOT NULL,
+  entity text NOT NULL,
+  source_count integer NOT NULL DEFAULT 0,
+  target_count integer NOT NULL DEFAULT 0,
+  checksum text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS video_replace_jobs (
+  job_id uuid PRIMARY KEY,
+  legacy_id text,
+  stage text NOT NULL,
+  progress numeric NOT NULL DEFAULT 0,
+  message text,
+  error text,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at text NOT NULL,
+  updated_at text NOT NULL
+);
+
+ALTER TABLE video_replace_jobs ADD COLUMN IF NOT EXISTS legacy_id text;
+CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_stage ON video_replace_jobs(stage);
+CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_updated ON video_replace_jobs(updated_at);
+CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_legacy_id ON video_replace_jobs(legacy_id);
+`;
+
+const LEGACY_PROJECTION_SCHEMA = {
+  users: {
+    id: "text",
+    email: "text",
+    display_name: "text",
+    platform_role: "text",
+    organization_id: "text",
+    data: "jsonb",
+  },
+  organizations: {
+    id: "text",
+    name: "text",
+    data: "jsonb",
+  },
+  wallets: {
+    id: "text",
+    owner_type: "text",
+    owner_id: "text",
+    data: "jsonb",
+  },
+  wallet_ledger: {
+    id: "text",
+    wallet_id: "text",
+    actor_id: "text",
+    data: "jsonb",
+  },
+};
+
 function stableStringify(value) {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
@@ -453,6 +518,10 @@ function text(value) {
 function numberOrNull(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function envFlag(name) {
+  return ["1", "true", "yes", "on"].includes(String(process.env[name] || "").trim().toLowerCase());
 }
 
 function rowId(prefix, parts) {
@@ -592,10 +661,53 @@ function projectSnapshot(snapshot) {
 }
 
 async function ensurePostgresSchema(client) {
+  if (envFlag("CORE_API_COMPAT_READ_ONLY")) {
+    await client.query(COMPAT_READONLY_SCHEMA_SQL);
+    await ensureWindowsNativeSchema(client);
+    return;
+  }
+
   await client.query(CREATE_SCHEMA_SQL);
   await client.query("ALTER TABLE video_replace_jobs ADD COLUMN IF NOT EXISTS legacy_id text");
   await client.query("CREATE INDEX IF NOT EXISTS idx_video_replace_jobs_legacy_id ON video_replace_jobs(legacy_id)");
   await ensureWindowsNativeSchema(client);
+}
+
+async function getTableColumns(client, tableName) {
+  const result = await client.query(
+    `SELECT column_name, data_type
+     FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = $1`,
+    [tableName],
+  );
+  return new Map(result.rows.map((row) => [row.column_name, row.data_type]));
+}
+
+async function assertLegacyProjectionSchema(client) {
+  const mismatches = [];
+  for (const [tableName, requiredColumns] of Object.entries(LEGACY_PROJECTION_SCHEMA)) {
+    const columns = await getTableColumns(client, tableName);
+    for (const [columnName, expectedType] of Object.entries(requiredColumns)) {
+      const actualType = columns.get(columnName);
+      if (!actualType) {
+        mismatches.push(`${tableName}.${columnName} missing`);
+      } else if (actualType !== expectedType) {
+        mismatches.push(`${tableName}.${columnName} is ${actualType}, expected ${expectedType}`);
+      }
+    }
+  }
+
+  if (mismatches.length > 0) {
+    throw new Error(
+      [
+        "core-api legacy projection schema is not compatible with the connected PostgreSQL database.",
+        "This usually means core-api write/bootstrap mode is pointing at the Windows-native canonical test database.",
+        "Run core-api with CORE_API_COMPAT_READ_ONLY=1 for compatibility smoke tests, or use a separate legacy compatibility database imported with core-api migration scripts.",
+        `Mismatches: ${mismatches.join("; ")}`,
+      ].join(" "),
+    );
+  }
 }
 
 async function clearProjectedTables(client) {
@@ -1057,6 +1169,7 @@ async function writeAuditRows(client, source, projections) {
 async function syncSnapshotProjections(client, snapshot, options = {}) {
   const source = options.source || "runtime";
   const projections = projectSnapshot(snapshot);
+  await assertLegacyProjectionSchema(client);
   if (options.replace !== false) {
     await clearProjectedTables(client);
   }
@@ -1069,6 +1182,7 @@ async function syncSnapshotProjections(client, snapshot, options = {}) {
 
 module.exports = {
   CORE_TABLES,
+  assertLegacyProjectionSchema,
   checksum,
   ensurePostgresSchema,
   projectSnapshot,

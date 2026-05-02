@@ -56,10 +56,12 @@ import {
 } from "../lib/api";
 import {
   getKnownActors,
+  getKnownActorControlApiClientAssertion,
   getKnownActorToken,
   rememberKnownActor,
   removeKnownActor,
   setCurrentActorId,
+  setControlApiClientAssertion,
   setAuthToken,
   logout,
   useActorId,
@@ -247,6 +249,7 @@ export default function Layout() {
     if (isLocalLoopbackAccess()) return;
     if (actorId !== SUPER_ADMIN_DEMO_ACTOR_ID) return;
     setAuthToken(null);
+    setControlApiClientAssertion(null);
     setCurrentActorId("guest");
     navigate("/home");
   }, [actorId, navigate]);
@@ -407,11 +410,13 @@ export default function Layout() {
       .then((result) => {
         if (!active) return;
         setAuthToken(result.token);
+        setControlApiClientAssertion(result.controlApiClientAssertion);
         rememberKnownActor({
           id: result.actorId,
           label: result.displayName,
           detail: result.email,
           token: result.token,
+          controlApiClientAssertion: result.controlApiClientAssertion,
         });
         setCurrentActorId(result.actorId);
         setPermissionContext(result.permissionContext);
@@ -543,7 +548,9 @@ export default function Layout() {
 
   const handleSwitchActor = (nextActorId: string) => {
     const savedToken = getKnownActorToken(nextActorId);
+    const savedControlApiClientAssertion = getKnownActorControlApiClientAssertion(nextActorId);
     setAuthToken(savedToken);
+    setControlApiClientAssertion(savedControlApiClientAssertion);
     setCurrentActorId(nextActorId);
     void listProjects()
       .then((response) => {
@@ -564,11 +571,13 @@ export default function Layout() {
     try {
       const result = await loginWithEmail(loginForm);
       setAuthToken(result.token);
+      setControlApiClientAssertion(result.controlApiClientAssertion);
       rememberKnownActor({
         id: result.actorId,
         label: result.displayName,
         detail: result.email,
         token: result.token,
+        controlApiClientAssertion: result.controlApiClientAssertion,
       });
       setCurrentActorId(result.actorId);
       try {
@@ -606,11 +615,13 @@ export default function Layout() {
       if (result.token) {
         setAuthToken(result.token);
       }
+      setControlApiClientAssertion(result.controlApiClientAssertion);
       rememberKnownActor({
         id: result.actorId,
         label: result.permissionContext.actor.displayName,
         detail: authRegisterMode === "personal" ? "注册用户" : "企业管理员",
         token: result.token ?? null,
+        controlApiClientAssertion: result.controlApiClientAssertion ?? null,
       });
       setCurrentActorId(result.actorId);
       try {

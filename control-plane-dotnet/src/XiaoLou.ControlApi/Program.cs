@@ -15,6 +15,7 @@ builder.Services.AddXiaoLouPostgres(builder.Configuration);
 builder.Services.Configure<ObjectStorageOptions>(builder.Configuration.GetSection("ObjectStorage"));
 builder.Services.Configure<InternalApiOptions>(builder.Configuration.GetSection("InternalApi"));
 builder.Services.Configure<ClientApiOptions>(builder.Configuration.GetSection("ClientApi"));
+builder.Services.Configure<PaymentCallbackOptions>(builder.Configuration.GetSection("Payments"));
 builder.Services.AddSingleton<IObjectStorageSigner, ObjectStorageSigner>();
 builder.Services.AddSingleton<IPaymentSignatureVerifier, HmacPaymentSignatureVerifier>();
 builder.Services.AddHostedService<LeaseRecoveryService>();
@@ -59,19 +60,22 @@ app.Use(async (context, next) =>
 
     var isPublicClientRequest = IsPublicClientApiRequest(context);
     var clientApiOptions = context.RequestServices.GetRequiredService<IOptions<ClientApiOptions>>().Value;
-    if (isPublicClientRequest && !IsClientRequestAllowed(context, clientApiOptions))
+    var clientAuth = isPublicClientRequest
+        ? AuthenticateClientRequest(context, clientApiOptions)
+        : ClientAuthenticationResult.Allowed(null);
+    if (isPublicClientRequest && !clientAuth.IsAllowed)
     {
-        var tokenConfigured = GetConfiguredClientToken(clientApiOptions) is not null;
-        context.Response.StatusCode = tokenConfigured
-            ? StatusCodes.Status401Unauthorized
-            : StatusCodes.Status403Forbidden;
+        context.Response.StatusCode = clientAuth.StatusCode;
         await context.Response.WriteAsJsonAsync(new
         {
-            error = tokenConfigured
-                ? "client API token is required or invalid"
-                : "client API is not available from this request context",
+            error = clientAuth.Error,
         });
         return;
+    }
+
+    if (isPublicClientRequest)
+    {
+        context.Items[ClientPrincipal.ItemKey] = clientAuth.Principal;
     }
 
     if (isPublicClientRequest && !IsClientPermissionAllowed(context, clientApiOptions))
@@ -281,6 +285,7 @@ app.MapGet("/api/internal/jobs/wait-signal", async (
 app.MapPost("/api/payments/callbacks/{provider}", async (
     string provider,
     HttpRequest http,
+    IOptions<PaymentCallbackOptions> paymentCallbackOptions,
     PostgresPaymentLedger ledger,
     IPaymentSignatureVerifier verifier,
     CancellationToken ct) =>
@@ -289,11 +294,20 @@ app.MapPost("/api/payments/callbacks/{provider}", async (
     var rawBody = await reader.ReadToEndAsync(ct);
     var callback = JsonSerializer.Deserialize<PaymentCallbackRequest>(rawBody, jsonOptions)
         ?? new PaymentCallbackRequest();
+    if (ValidatePaymentCallbackProviderBoundary(
+        provider,
+        callback,
+        paymentCallbackOptions.Value,
+        out var normalizedProvider) is { } denied)
+    {
+        return denied;
+    }
+
     var signature = http.Headers["X-XiaoLou-Signature"].FirstOrDefault() ?? callback.Signature;
-    var signatureValid = verifier.Verify(provider, rawBody, signature);
+    var signatureValid = verifier.Verify(normalizedProvider, rawBody, signature);
     var result = await ledger.ProcessCallbackAsync(callback with
     {
-        Provider = provider,
+        Provider = normalizedProvider,
         SignatureValid = signatureValid,
         RawBody = rawBody,
     }, ct);
@@ -416,6 +430,134 @@ static bool IsRejected(Dictionary<string, object?> result)
         && result.ContainsKey("error");
 }
 
+static IResult? ValidatePaymentCallbackProviderBoundary(
+    string routeProvider,
+    PaymentCallbackRequest callback,
+    PaymentCallbackOptions options,
+    out string normalizedProvider)
+{
+    normalizedProvider = NormalizePaymentProvider(routeProvider) ?? "";
+    if (string.IsNullOrWhiteSpace(normalizedProvider))
+    {
+        return Results.BadRequest(new
+        {
+            error = "payment callback provider is invalid",
+        });
+    }
+
+    var rawBodyProvider = NormalizeBlank(callback.Provider);
+    if (rawBodyProvider is not null)
+    {
+        var bodyProvider = NormalizePaymentProvider(rawBodyProvider);
+        if (bodyProvider is null)
+        {
+            return Results.BadRequest(new
+            {
+                error = "payment callback body provider is invalid",
+            });
+        }
+
+        if (!string.Equals(bodyProvider, normalizedProvider, StringComparison.Ordinal))
+        {
+            return Results.BadRequest(new
+            {
+                error = "payment callback provider mismatch",
+                routeProvider = normalizedProvider,
+                bodyProvider,
+            });
+        }
+    }
+
+    if (!IsPaymentCallbackProviderAllowed(normalizedProvider, options))
+    {
+        return Results.Json(new
+        {
+            error = "payment callback provider is not enabled",
+            provider = normalizedProvider,
+        }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    if (!IsPaymentCallbackAccountAllowed(callback, options))
+    {
+        return Results.Json(new
+        {
+            error = "payment callback account is not enabled",
+            accountId = NormalizeGuidText(callback.AccountId),
+            accountOwnerType = NormalizeOwnerType(callback.AccountOwnerType) ?? "user",
+            accountOwnerId = NormalizeBlank(callback.AccountOwnerId),
+        }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    return null;
+}
+
+static bool IsPaymentCallbackProviderAllowed(string provider, PaymentCallbackOptions options)
+{
+    var allowedProviders = GetConfiguredPaymentCallbackAllowedProviders(options);
+    if (string.IsNullOrWhiteSpace(allowedProviders))
+    {
+        return !ShouldRequirePaymentCallbackAllowedProvider(options);
+    }
+
+    return ContainsCsvGrant(allowedProviders, provider);
+}
+
+static string? GetConfiguredPaymentCallbackAllowedProviders(PaymentCallbackOptions options)
+{
+    return string.IsNullOrWhiteSpace(options.AllowedProviders)
+        ? Environment.GetEnvironmentVariable("PAYMENT_CALLBACK_ALLOWED_PROVIDERS")
+        : options.AllowedProviders;
+}
+
+static bool ShouldRequirePaymentCallbackAllowedProvider(PaymentCallbackOptions options)
+{
+    return ReadBoolOption("PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER", options.RequireAllowedProvider);
+}
+
+static bool IsPaymentCallbackAccountAllowed(PaymentCallbackRequest callback, PaymentCallbackOptions options)
+{
+    var allowedAccountIds = GetConfiguredPaymentCallbackAllowedAccountIds(options);
+    var allowedOwnerIds = GetConfiguredPaymentCallbackAllowedAccountOwnerIds(options);
+    var hasConfiguredGrant = !string.IsNullOrWhiteSpace(allowedAccountIds)
+        || !string.IsNullOrWhiteSpace(allowedOwnerIds);
+    if (!hasConfiguredGrant)
+    {
+        return !ShouldRequirePaymentCallbackAccountGrant(options);
+    }
+
+    var accountId = NormalizeGuidText(callback.AccountId);
+    if (accountId is not null && ContainsCsvGrant(allowedAccountIds, accountId))
+    {
+        return true;
+    }
+
+    var ownerType = NormalizeOwnerType(callback.AccountOwnerType) ?? "user";
+    var ownerId = NormalizeBlank(callback.AccountOwnerId);
+    return ownerId is not null
+        && (ContainsCsvGrant(allowedOwnerIds, ownerId)
+            || ContainsCsvGrant(allowedOwnerIds, $"{ownerType}:{ownerId}")
+            || ContainsCsvGrant(allowedOwnerIds, $"{ownerType}:*"));
+}
+
+static string? GetConfiguredPaymentCallbackAllowedAccountIds(PaymentCallbackOptions options)
+{
+    return string.IsNullOrWhiteSpace(options.AllowedAccountIds)
+        ? Environment.GetEnvironmentVariable("PAYMENT_CALLBACK_ALLOWED_ACCOUNT_IDS")
+        : options.AllowedAccountIds;
+}
+
+static string? GetConfiguredPaymentCallbackAllowedAccountOwnerIds(PaymentCallbackOptions options)
+{
+    return string.IsNullOrWhiteSpace(options.AllowedAccountOwnerIds)
+        ? Environment.GetEnvironmentVariable("PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS")
+        : options.AllowedAccountOwnerIds;
+}
+
+static bool ShouldRequirePaymentCallbackAccountGrant(PaymentCallbackOptions options)
+{
+    return ReadBoolOption("PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT", options.RequireAccountGrant);
+}
+
 static bool IsInternalRequestAllowed(HttpContext context, InternalApiOptions options)
 {
     var configuredToken = string.IsNullOrWhiteSpace(options.Token)
@@ -452,7 +594,7 @@ static bool IsPublicClientApiRequest(HttpContext context)
 
 static IResult? AuthorizeAccountScope(HttpContext context, ClientApiOptions options, AccountScope scope)
 {
-    if (!IsClientTokenModeEnabled(options) || !ShouldRequireAccountScope(options))
+    if (!IsClientAuthModeEnabled(options) || !ShouldRequireAccountScope(options))
     {
         return null;
     }
@@ -467,7 +609,7 @@ static IResult? AuthorizeAccountScope(HttpContext context, ClientApiOptions opti
 
 static IResult? AuthorizeAccountId(HttpContext context, ClientApiOptions options, Guid? accountId)
 {
-    if (!IsClientTokenModeEnabled(options) || !ShouldRequireAccountScope(options))
+    if (!IsClientAuthModeEnabled(options) || !ShouldRequireAccountScope(options))
     {
         return null;
     }
@@ -483,13 +625,15 @@ static IResult? AuthorizeAccountRow(
     ClientApiOptions options,
     Dictionary<string, object?> row)
 {
-    if (!IsClientTokenModeEnabled(options) || !ShouldRequireAccountScope(options))
+    if (!IsClientAuthModeEnabled(options) || !ShouldRequireAccountScope(options))
     {
         return null;
     }
 
+    var ownerType = TryReadRowString(row, "account_owner_type") ?? "user";
+    var ownerId = TryReadRowString(row, "account_owner_id");
     return TryReadAccountId(row, out var accountId)
-        && IsAccountScopeAllowed(context, options, accountId.ToString("D"), null, null)
+        && IsAccountScopeAllowed(context, options, accountId.ToString("D"), ownerType, ownerId)
         ? null
         : AccountForbidden();
 }
@@ -502,40 +646,85 @@ static IResult AccountForbidden()
     }, statusCode: StatusCodes.Status403Forbidden);
 }
 
-static bool IsClientRequestAllowed(HttpContext context, ClientApiOptions options)
+static ClientAuthenticationResult AuthenticateClientRequest(HttpContext context, ClientApiOptions options)
 {
+    var authProviderEnabled = IsClientAuthProviderEnabled(options);
+    var authProviderRequired = ShouldRequireAuthProvider(options);
+    if (authProviderEnabled && ReadAuthorizationBearerToken(context) is { } bearerToken)
+    {
+        if (TryValidateClientAuthProviderToken(options, bearerToken, out var providerPrincipal))
+        {
+            return ClientAuthenticationResult.Allowed(providerPrincipal);
+        }
+
+        if (authProviderRequired)
+        {
+            return ClientAuthenticationResult.Unauthorized("client auth provider token is required or invalid");
+        }
+    }
+
+    if (authProviderRequired)
+    {
+        return ClientAuthenticationResult.Unauthorized("client auth provider token is required or invalid");
+    }
+
     var expectedToken = GetConfiguredClientToken(options);
     if (expectedToken is not null)
     {
         var supplied = ReadClientToken(context, options);
-        return supplied is not null && FixedTimeEquals(expectedToken, supplied);
+        return supplied is not null && FixedTimeEquals(expectedToken, supplied)
+            ? ClientAuthenticationResult.Allowed(ClientPrincipal.ForStaticToken(
+                GetConfiguredAllowedAccountIds(options),
+                GetConfiguredAllowedAccountOwnerIds(options),
+                GetConfiguredAllowedPermissions(options)))
+            : ClientAuthenticationResult.Unauthorized("client API token is required or invalid");
+    }
+
+    if (authProviderEnabled)
+    {
+        return ClientAuthenticationResult.Unauthorized("client auth provider token is required or invalid");
     }
 
     if (HasExternalForwardedAddress(context))
     {
-        return false;
+        return ClientAuthenticationResult.Forbidden("client API is not available from this request context");
     }
 
     var remoteIp = context.Connection.RemoteIpAddress;
-    return remoteIp is null || IPAddress.IsLoopback(remoteIp);
+    return remoteIp is null || IPAddress.IsLoopback(remoteIp)
+        ? ClientAuthenticationResult.Allowed(null)
+        : ClientAuthenticationResult.Forbidden("client API is not available from this request context");
 }
 
 static bool IsClientPermissionAllowed(HttpContext context, ClientApiOptions options)
 {
-    if (!IsClientTokenModeEnabled(options))
-    {
-        return true;
-    }
-
-    var allowedPermissions = GetConfiguredAllowedPermissions(options);
-    if (string.IsNullOrWhiteSpace(allowedPermissions))
+    if (!IsClientAuthModeEnabled(options))
     {
         return true;
     }
 
     var requiredPermission = GetRequiredClientPermission(context);
-    return requiredPermission is not null
-        && ContainsCsvGrant(allowedPermissions, requiredPermission);
+    if (requiredPermission is null)
+    {
+        return false;
+    }
+
+    var principal = GetClientPrincipal(context);
+    if (principal?.FromAuthProvider == true)
+    {
+        if (!ContainsCsvGrant(principal.AllowedPermissions, requiredPermission))
+        {
+            return false;
+        }
+
+        var configuredPermissions = GetConfiguredAllowedPermissions(options);
+        return string.IsNullOrWhiteSpace(configuredPermissions)
+            || ContainsCsvGrant(configuredPermissions, requiredPermission);
+    }
+
+    var allowedPermissions = principal?.AllowedPermissions ?? GetConfiguredAllowedPermissions(options);
+    return string.IsNullOrWhiteSpace(allowedPermissions)
+        || ContainsCsvGrant(allowedPermissions, requiredPermission);
 }
 
 static string? GetRequiredClientPermission(HttpContext context)
@@ -584,9 +773,29 @@ static string? GetRequiredClientPermission(HttpContext context)
     return null;
 }
 
-static bool IsClientTokenModeEnabled(ClientApiOptions options)
+static bool IsClientAuthModeEnabled(ClientApiOptions options)
 {
-    return GetConfiguredClientToken(options) is not null;
+    return GetConfiguredClientToken(options) is not null
+        || IsClientAuthProviderEnabled(options);
+}
+
+static bool IsClientAuthProviderEnabled(ClientApiOptions options)
+{
+    return string.Equals(GetConfiguredClientAuthProvider(options), "hs256-jwt", StringComparison.OrdinalIgnoreCase);
+}
+
+static string? GetConfiguredClientAuthProvider(ClientApiOptions options)
+{
+    var configuredProvider = string.IsNullOrWhiteSpace(options.AuthProvider)
+        ? Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER")
+        : options.AuthProvider;
+    var provider = string.IsNullOrWhiteSpace(configuredProvider) ? null : configuredProvider.Trim();
+    if (provider is not null && string.Equals(provider, "jwt-hs256", StringComparison.OrdinalIgnoreCase))
+    {
+        return "hs256-jwt";
+    }
+
+    return provider;
 }
 
 static string? GetConfiguredClientToken(ClientApiOptions options)
@@ -621,6 +830,11 @@ static bool ShouldRequireConfiguredAccountGrant(ClientApiOptions options)
     return ReadBoolOption("CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT", options.RequireConfiguredAccountGrant);
 }
 
+static bool ShouldRequireAuthProvider(ClientApiOptions options)
+{
+    return ReadBoolOption("CLIENT_API_REQUIRE_AUTH_PROVIDER", options.RequireAuthProvider);
+}
+
 static bool ReadBoolOption(string envName, bool configuredDefault)
 {
     var raw = Environment.GetEnvironmentVariable(envName);
@@ -653,6 +867,15 @@ static string? ReadClientToken(HttpContext context, ClientApiOptions options)
         : null;
 }
 
+static string? ReadAuthorizationBearerToken(HttpContext context)
+{
+    var authorization = ReadHeader(context, "Authorization");
+    const string bearerPrefix = "Bearer ";
+    return authorization is not null && authorization.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)
+        ? authorization[bearerPrefix.Length..].Trim()
+        : null;
+}
+
 static bool IsAccountScopeAllowed(
     HttpContext context,
     ClientApiOptions options,
@@ -665,6 +888,18 @@ static bool IsAccountScopeAllowed(
     var headerOwnerId = NormalizeBlank(ReadHeader(context, "X-XiaoLou-Account-Owner-Id"));
     var headerOwnerType = NormalizeOwnerType(ReadHeader(context, "X-XiaoLou-Account-Owner-Type"));
     var normalizedOwnerType = ownerType ?? "user";
+    var principal = GetClientPrincipal(context);
+    if (principal?.FromAuthProvider == true)
+    {
+        if (!IsPrincipalAccountGrantAllowed(principal, normalizedAccountId, normalizedOwnerType, ownerId))
+        {
+            return false;
+        }
+
+        return !ShouldRequireConfiguredAccountGrant(options)
+            || IsConfiguredAccountGrantAllowed(options, normalizedAccountId, normalizedOwnerType, ownerId);
+    }
+
     var configuredGrantAllowed = IsConfiguredAccountGrantAllowed(options, normalizedAccountId, normalizedOwnerType, ownerId);
     if (ShouldRequireConfiguredAccountGrant(options))
     {
@@ -685,6 +920,28 @@ static bool IsAccountScopeAllowed(
     {
         return string.Equals(headerOwnerId, ownerId, StringComparison.Ordinal)
             && (ownerType is null || headerOwnerType is null || string.Equals(headerOwnerType, ownerType, StringComparison.Ordinal));
+    }
+
+    return false;
+}
+
+static bool IsPrincipalAccountGrantAllowed(
+    ClientPrincipal principal,
+    string? accountId,
+    string ownerType,
+    string? ownerId)
+{
+    if (accountId is not null && ContainsCsvGrant(principal.AllowedAccountIds, accountId))
+    {
+        return true;
+    }
+
+    if (ownerId is not null
+        && (ContainsCsvGrant(principal.AllowedAccountOwnerIds, ownerId)
+            || ContainsCsvGrant(principal.AllowedAccountOwnerIds, $"{ownerType}:{ownerId}")
+            || ContainsCsvGrant(principal.AllowedAccountOwnerIds, $"{ownerType}:*")))
+    {
+        return true;
     }
 
     return false;
@@ -734,6 +991,279 @@ static string? GetConfiguredAllowedPermissions(ClientApiOptions options)
         : options.AllowedPermissions;
 }
 
+static string? GetConfiguredClientAuthProviderSecret(ClientApiOptions options)
+{
+    return string.IsNullOrWhiteSpace(options.AuthProviderSecret)
+        ? Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_SECRET")
+        : options.AuthProviderSecret;
+}
+
+static string? GetConfiguredClientAuthProviderIssuer(ClientApiOptions options)
+{
+    return string.IsNullOrWhiteSpace(options.AuthProviderIssuer)
+        ? Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_ISSUER")
+        : options.AuthProviderIssuer;
+}
+
+static string? GetConfiguredClientAuthProviderAudience(ClientApiOptions options)
+{
+    return string.IsNullOrWhiteSpace(options.AuthProviderAudience)
+        ? Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_AUDIENCE")
+        : options.AuthProviderAudience;
+}
+
+static int GetClientAuthProviderClockSkewSeconds(ClientApiOptions options)
+{
+    var raw = Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS");
+    if (int.TryParse(raw, out var envValue))
+    {
+        return Math.Clamp(envValue, 0, 300);
+    }
+
+    return Math.Clamp(options.AuthProviderClockSkewSeconds, 0, 300);
+}
+
+static bool TryValidateClientAuthProviderToken(
+    ClientApiOptions options,
+    string token,
+    out ClientPrincipal? principal)
+{
+    principal = null;
+    var secret = GetConfiguredClientAuthProviderSecret(options);
+    if (string.IsNullOrWhiteSpace(secret))
+    {
+        return false;
+    }
+
+    var parts = token.Split('.');
+    if (parts.Length != 3 || parts.Any(string.IsNullOrWhiteSpace))
+    {
+        return false;
+    }
+
+    byte[] headerBytes;
+    byte[] payloadBytes;
+    byte[] signatureBytes;
+    try
+    {
+        headerBytes = DecodeBase64Url(parts[0]);
+        payloadBytes = DecodeBase64Url(parts[1]);
+        signatureBytes = DecodeBase64Url(parts[2]);
+    }
+    catch (FormatException)
+    {
+        return false;
+    }
+
+    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret.Trim()));
+    var expectedSignature = hmac.ComputeHash(Encoding.ASCII.GetBytes($"{parts[0]}.{parts[1]}"));
+    if (signatureBytes.Length != expectedSignature.Length
+        || !CryptographicOperations.FixedTimeEquals(signatureBytes, expectedSignature))
+    {
+        return false;
+    }
+
+    try
+    {
+        using var headerJson = JsonDocument.Parse(headerBytes);
+        if (!headerJson.RootElement.TryGetProperty("alg", out var alg)
+            || !string.Equals(alg.GetString(), "HS256", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        using var payloadJson = JsonDocument.Parse(payloadBytes);
+        var payload = payloadJson.RootElement;
+        if (!IsClientAuthProviderIssuerAllowed(options, payload)
+            || !IsClientAuthProviderAudienceAllowed(options, payload)
+            || !IsClientAuthProviderTimeWindowAllowed(options, payload))
+        {
+            return false;
+        }
+
+        var subject = ReadStringClaim(payload, "sub");
+        var ownerType = ReadStringClaim(payload, "xiaolou_account_owner_type") ?? "user";
+        var accountOwnerIds = ReadClaimGrantList(
+            payload,
+            "xiaolou_account_owner_ids",
+            "account_owner_ids",
+            "owner_ids",
+            "owner_id");
+        if (!string.IsNullOrWhiteSpace(subject))
+        {
+            accountOwnerIds = JoinGrantLists(accountOwnerIds, subject, $"{ownerType}:{subject}");
+        }
+
+        principal = new ClientPrincipal(
+            Subject: subject,
+            FromAuthProvider: true,
+            AllowedAccountIds: ReadClaimGrantList(payload, "xiaolou_account_ids", "account_ids", "account_id"),
+            AllowedAccountOwnerIds: accountOwnerIds,
+            AllowedPermissions: ReadClaimGrantList(payload, "xiaolou_permissions", "permissions", "scope", "scp"));
+        return true;
+    }
+    catch (JsonException)
+    {
+        return false;
+    }
+}
+
+static bool IsClientAuthProviderIssuerAllowed(ClientApiOptions options, JsonElement payload)
+{
+    var configuredIssuer = NormalizeBlank(GetConfiguredClientAuthProviderIssuer(options));
+    if (configuredIssuer is null)
+    {
+        return true;
+    }
+
+    return string.Equals(ReadStringClaim(payload, "iss"), configuredIssuer, StringComparison.Ordinal);
+}
+
+static bool IsClientAuthProviderAudienceAllowed(ClientApiOptions options, JsonElement payload)
+{
+    var configuredAudience = NormalizeBlank(GetConfiguredClientAuthProviderAudience(options));
+    if (configuredAudience is null)
+    {
+        return true;
+    }
+
+    if (!payload.TryGetProperty("aud", out var aud))
+    {
+        return false;
+    }
+
+    if (aud.ValueKind == JsonValueKind.String)
+    {
+        return string.Equals(aud.GetString(), configuredAudience, StringComparison.Ordinal);
+    }
+
+    if (aud.ValueKind == JsonValueKind.Array)
+    {
+        foreach (var item in aud.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String
+                && string.Equals(item.GetString(), configuredAudience, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static bool IsClientAuthProviderTimeWindowAllowed(ClientApiOptions options, JsonElement payload)
+{
+    if (!payload.TryGetProperty("exp", out var exp) || !TryReadUnixSeconds(exp, out var expiresAt))
+    {
+        return false;
+    }
+
+    var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    var skew = GetClientAuthProviderClockSkewSeconds(options);
+    if (now - skew > expiresAt)
+    {
+        return false;
+    }
+
+    if (!payload.TryGetProperty("nbf", out var nbf))
+    {
+        return true;
+    }
+
+    return TryReadUnixSeconds(nbf, out var notBefore)
+        && now + skew >= notBefore;
+}
+
+static bool TryReadUnixSeconds(JsonElement element, out long value)
+{
+    value = 0;
+    return element.ValueKind switch
+    {
+        JsonValueKind.Number => element.TryGetInt64(out value),
+        JsonValueKind.String => long.TryParse(element.GetString(), out value),
+        _ => false,
+    };
+}
+
+static string? ReadStringClaim(JsonElement payload, string name)
+{
+    return payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+        ? NormalizeBlank(value.GetString())
+        : null;
+}
+
+static string? ReadClaimGrantList(JsonElement payload, params string[] names)
+{
+    var grants = new List<string>();
+    foreach (var name in names)
+    {
+        if (!payload.TryGetProperty(name, out var value))
+        {
+            continue;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            AddGrantValues(grants, value.GetString());
+        }
+        else if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    AddGrantValues(grants, item.GetString());
+                }
+            }
+        }
+    }
+
+    return grants.Count == 0
+        ? null
+        : string.Join(",", grants.Distinct(StringComparer.OrdinalIgnoreCase));
+}
+
+static void AddGrantValues(List<string> grants, string? raw)
+{
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        return;
+    }
+
+    grants.AddRange(raw.Split(
+            new[] { ',', ';', ' ', '\r', '\n', '\t' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(item => !string.IsNullOrWhiteSpace(item)));
+}
+
+static string? JoinGrantLists(params string?[] values)
+{
+    var grants = new List<string>();
+    foreach (var value in values)
+    {
+        AddGrantValues(grants, value);
+    }
+
+    return grants.Count == 0
+        ? null
+        : string.Join(",", grants.Distinct(StringComparer.OrdinalIgnoreCase));
+}
+
+static byte[] DecodeBase64Url(string value)
+{
+    var padded = value.Replace('-', '+').Replace('_', '/');
+    padded = padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '=');
+    return Convert.FromBase64String(padded);
+}
+
+static ClientPrincipal? GetClientPrincipal(HttpContext context)
+{
+    return context.Items.TryGetValue(ClientPrincipal.ItemKey, out var value)
+        ? value as ClientPrincipal
+        : null;
+}
+
 static bool TryReadAccountId(Dictionary<string, object?> row, out Guid accountId)
 {
     accountId = default;
@@ -749,6 +1279,13 @@ static bool TryReadAccountId(Dictionary<string, object?> row, out Guid accountId
     }
 
     return Guid.TryParse(value.ToString(), out accountId);
+}
+
+static string? TryReadRowString(Dictionary<string, object?> row, string key)
+{
+    return row.TryGetValue(key, out var value) && value is not null
+        ? NormalizeBlank(value.ToString())
+        : null;
 }
 
 static string? ReadHeader(HttpContext context, string name)
@@ -771,6 +1308,25 @@ static string? NormalizeOwnerType(string? value)
     return string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
 }
 
+static string? NormalizePaymentProvider(string? value)
+{
+    var provider = NormalizeBlank(value)?.ToLowerInvariant();
+    if (provider is null || provider.Length > 64)
+    {
+        return null;
+    }
+
+    foreach (var ch in provider)
+    {
+        if (!char.IsAsciiLetterOrDigit(ch) && ch is not '-' and not '_')
+        {
+            return null;
+        }
+    }
+
+    return provider;
+}
+
 static bool ContainsCsvGrant(string? csv, string value)
 {
     if (string.IsNullOrWhiteSpace(csv))
@@ -778,7 +1334,9 @@ static bool ContainsCsvGrant(string? csv, string value)
         return false;
     }
 
-    return csv.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    return csv.Split(
+            new[] { ',', ';', ' ', '\r', '\n', '\t' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Any(item => item == "*"
             || string.Equals(item, value, StringComparison.OrdinalIgnoreCase)
             || IsPrefixGrantMatch(item, value));
@@ -838,6 +1396,18 @@ internal sealed class ClientApiOptions
 
     public string TokenHeader { get; init; } = "X-XiaoLou-Client-Token";
 
+    public string? AuthProvider { get; init; }
+
+    public string? AuthProviderSecret { get; init; }
+
+    public string? AuthProviderIssuer { get; init; }
+
+    public string? AuthProviderAudience { get; init; }
+
+    public int AuthProviderClockSkewSeconds { get; init; } = 60;
+
+    public bool RequireAuthProvider { get; init; }
+
     public bool RequireAccountScope { get; init; } = true;
 
     public bool RequireConfiguredAccountGrant { get; init; }
@@ -847,6 +1417,59 @@ internal sealed class ClientApiOptions
     public string? AllowedAccountOwnerIds { get; init; }
 
     public string? AllowedPermissions { get; init; }
+}
+
+internal sealed class PaymentCallbackOptions
+{
+    public string? AllowedProviders { get; init; }
+
+    public bool RequireAllowedProvider { get; init; }
+
+    public string? AllowedAccountIds { get; init; }
+
+    public string? AllowedAccountOwnerIds { get; init; }
+
+    public bool RequireAccountGrant { get; init; }
+}
+
+internal sealed record ClientAuthenticationResult(
+    bool IsAllowed,
+    int StatusCode,
+    string Error,
+    ClientPrincipal? Principal)
+{
+    public static ClientAuthenticationResult Allowed(ClientPrincipal? principal)
+    {
+        return new ClientAuthenticationResult(true, StatusCodes.Status200OK, "", principal);
+    }
+
+    public static ClientAuthenticationResult Unauthorized(string error)
+    {
+        return new ClientAuthenticationResult(false, StatusCodes.Status401Unauthorized, error, null);
+    }
+
+    public static ClientAuthenticationResult Forbidden(string error)
+    {
+        return new ClientAuthenticationResult(false, StatusCodes.Status403Forbidden, error, null);
+    }
+}
+
+internal sealed record ClientPrincipal(
+    string? Subject,
+    bool FromAuthProvider,
+    string? AllowedAccountIds,
+    string? AllowedAccountOwnerIds,
+    string? AllowedPermissions)
+{
+    public const string ItemKey = "xiaolou.client.principal";
+
+    public static ClientPrincipal ForStaticToken(
+        string? allowedAccountIds,
+        string? allowedAccountOwnerIds,
+        string? allowedPermissions)
+    {
+        return new ClientPrincipal(null, false, allowedAccountIds, allowedAccountOwnerIds, allowedPermissions);
+    }
 }
 
 internal sealed class LeaseRecoveryService(

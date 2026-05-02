@@ -64,7 +64,17 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
     public async Task<Dictionary<string, object?>?> GetJobAsync(Guid jobId, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand("SELECT * FROM jobs WHERE id = @id", connection);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              j.*,
+              a.legacy_owner_type AS account_owner_type,
+              a.legacy_owner_id AS account_owner_id
+            FROM jobs j
+            JOIN accounts a ON a.id = j.account_id
+            WHERE j.id = @id
+            """,
+            connection);
         command.Parameters.AddWithValue("id", NpgsqlDbType.Uuid, jobId);
         return await PostgresRows.ReadSingleAsync(command, cancellationToken);
     }
@@ -82,25 +92,36 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
 
         if (accountId is not null)
         {
-            filters.Add("account_id = @accountId");
+            filters.Add("j.account_id = @accountId");
             command.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(lane))
         {
-            filters.Add("lane = @lane");
+            filters.Add("j.lane = @lane");
             command.Parameters.AddWithValue("lane", NpgsqlDbType.Text, AccountLanes.Normalize(lane));
         }
 
         if (!string.IsNullOrWhiteSpace(status))
         {
-            filters.Add("status = CAST(@status AS job_status)");
+            filters.Add("j.status = CAST(@status AS job_status)");
             command.Parameters.AddWithValue("status", NpgsqlDbType.Text, status.Trim());
         }
 
         command.Parameters.AddWithValue("limit", NpgsqlDbType.Integer, Math.Clamp(limit, 1, 200));
         var where = filters.Count == 0 ? "" : $"WHERE {string.Join(" AND ", filters)}";
-        command.CommandText = $"SELECT * FROM jobs {where} ORDER BY created_at DESC LIMIT @limit";
+        command.CommandText =
+            $"""
+            SELECT
+              j.*,
+              a.legacy_owner_type AS account_owner_type,
+              a.legacy_owner_id AS account_owner_id
+            FROM jobs j
+            JOIN accounts a ON a.id = j.account_id
+            {where}
+            ORDER BY j.created_at DESC
+            LIMIT @limit
+            """;
         return await PostgresRows.ReadManyAsync(command, cancellationToken);
     }
 

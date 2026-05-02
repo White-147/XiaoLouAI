@@ -5,18 +5,95 @@ param(
   [string]$PythonExe = "",
   [string]$PaymentWebhookSecret = "",
   [string]$ClientApiToken = "",
+  [string]$AccountOwnerId = "",
   [switch]$Build,
   [switch]$SkipWorkers
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not $BaseUrl) {
-  $BaseUrl = if ($env:CONTROL_API_BASE_URL) { $env:CONTROL_API_BASE_URL } else { "http://127.0.0.1:4100" }
-}
-
 if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
+}
+
+function Import-EnvFileDefaults {
+  param([string]$EnvFile)
+
+  if (-not (Test-Path -LiteralPath $EnvFile)) {
+    return
+  }
+
+  foreach ($line in Get-Content -LiteralPath $EnvFile) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $parts = $trimmed.Split("=", 2)
+    if ($parts.Count -ne 2) {
+      continue
+    }
+
+    $name = $parts[0].Trim()
+    $value = $parts[1].Trim()
+    if (-not [Environment]::GetEnvironmentVariable($name, "Process")) {
+      [Environment]::SetEnvironmentVariable($name, $value, "Process")
+    }
+  }
+}
+
+function Import-MachineEnvDefaults {
+  param([string[]]$Names)
+
+  foreach ($name in $Names) {
+    if ([Environment]::GetEnvironmentVariable($name, "Process")) {
+      continue
+    }
+
+    $value = [Environment]::GetEnvironmentVariable($name, "Machine")
+    if ($value) {
+      [Environment]::SetEnvironmentVariable($name, $value, "Process")
+    }
+  }
+}
+
+Import-EnvFileDefaults (Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows")
+Import-EnvFileDefaults (Join-Path $RepoRoot "scripts\windows\.env.windows")
+Import-MachineEnvDefaults @(
+  "DATABASE_URL",
+  "PAYMENT_WEBHOOK_SECRET",
+  "INTERNAL_API_TOKEN",
+  "CLIENT_API_TOKEN",
+  "CLIENT_API_TOKEN_HEADER",
+  "CLIENT_API_AUTH_PROVIDER",
+  "CLIENT_API_AUTH_PROVIDER_SECRET",
+  "CLIENT_API_AUTH_PROVIDER_ISSUER",
+  "CLIENT_API_AUTH_PROVIDER_AUDIENCE",
+  "CLIENT_API_AUTH_PROVIDER_TTL_SECONDS",
+  "CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS",
+  "CLIENT_API_REQUIRE_AUTH_PROVIDER",
+  "CLIENT_API_REQUIRE_ACCOUNT_SCOPE",
+  "CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT",
+  "CLIENT_API_ALLOWED_ACCOUNT_IDS",
+  "CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS",
+  "CLIENT_API_ALLOWED_PERMISSIONS",
+  "PAYMENT_CALLBACK_ALLOWED_PROVIDERS",
+  "PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER",
+  "PAYMENT_CALLBACK_ALLOWED_ACCOUNT_IDS",
+  "PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS",
+  "PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT",
+  "Payments__AllowedProviders",
+  "Payments__RequireAllowedProvider",
+  "Payments__AllowedAccountIds",
+  "Payments__AllowedAccountOwnerIds",
+  "Payments__RequireAccountGrant",
+  "DOTNET_EXE",
+  "PYTHON_EXE",
+  "CONTROL_API_BASE_URL"
+)
+
+if (-not $BaseUrl) {
+  $BaseUrl = if ($env:CONTROL_API_BASE_URL) { $env:CONTROL_API_BASE_URL } else { "http://127.0.0.1:4100" }
 }
 
 if (-not $DotnetExe) {
@@ -47,8 +124,95 @@ if (-not $ClientApiToken) {
   $ClientApiToken = if ($env:CLIENT_API_TOKEN) { $env:CLIENT_API_TOKEN } else { "" }
 }
 
+if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+  throw "DATABASE_URL must be set in process, Machine env, or .runtime\app\scripts\windows\.env.windows for worker verification"
+}
+
+function Get-FirstConfiguredPaymentCallbackOwnerId {
+  $requireGrant = if ($env:PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT) {
+    $env:PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT
+  } elseif ([Environment]::GetEnvironmentVariable("Payments__RequireAccountGrant", "Process")) {
+    [Environment]::GetEnvironmentVariable("Payments__RequireAccountGrant", "Process")
+  } else {
+    ""
+  }
+
+  if ($requireGrant -notmatch "^(1|true|yes|on)$") {
+    return $null
+  }
+
+  $allowedOwners = if ($env:PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS) {
+    $env:PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS
+  } elseif ([Environment]::GetEnvironmentVariable("Payments__AllowedAccountOwnerIds", "Process")) {
+    [Environment]::GetEnvironmentVariable("Payments__AllowedAccountOwnerIds", "Process")
+  } else {
+    ""
+  }
+
+  foreach ($entry in ($allowedOwners -split "[,;]")) {
+    $trimmed = $entry.Trim()
+    if (-not $trimmed -or $trimmed -match "\*$") {
+      continue
+    }
+
+    $parts = $trimmed.Split(":", 2)
+    if ($parts.Count -eq 2 -and $parts[1].Trim()) {
+      return $parts[1].Trim()
+    }
+
+    return $trimmed
+  }
+
+  return $null
+}
+
+function Get-FirstConfiguredClientApiOwnerId {
+  $allowedOwners = if ($env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS) {
+    $env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS
+  } else {
+    ""
+  }
+
+  $fallbackOwner = $null
+  foreach ($entry in ($allowedOwners -split "[,;]")) {
+    $trimmed = $entry.Trim()
+    if (-not $trimmed -or $trimmed -match "\*$") {
+      continue
+    }
+
+    $parts = $trimmed.Split(":", 2)
+    if ($parts.Count -eq 2 -and $parts[1].Trim()) {
+      $ownerType = $parts[0].Trim().ToLowerInvariant()
+      $ownerId = $parts[1].Trim()
+      if ($ownerType -eq "user") {
+        return $ownerId
+      }
+      if (-not $fallbackOwner) {
+        $fallbackOwner = $ownerId
+      }
+      continue
+    }
+
+    if (-not $fallbackOwner) {
+      $fallbackOwner = $trimmed
+    }
+  }
+
+  return $fallbackOwner
+}
+
 $RunId = "p0-" + [Guid]::NewGuid().ToString("N")
-$AccountOwnerId = "verify-" + $RunId
+if (-not $AccountOwnerId) {
+  $configuredPaymentOwner = Get-FirstConfiguredPaymentCallbackOwnerId
+  $configuredClientOwner = Get-FirstConfiguredClientApiOwnerId
+  $AccountOwnerId = if ($configuredPaymentOwner) {
+    $configuredPaymentOwner
+  } elseif ($configuredClientOwner) {
+    $configuredClientOwner
+  } else {
+    "verify-" + $RunId
+  }
+}
 $ManualProviderRoute = "verify-script-$RunId"
 $RecoveryProviderRoute = "verify-recovery-$RunId"
 $RetryProviderRoute = "verify-retry-$RunId"
@@ -91,6 +255,118 @@ function ConvertTo-Array {
   return ,[object[]]@($Value)
 }
 
+function Test-TruthyEnvValue {
+  param([string]$Value)
+  return $Value -match "^(1|true|yes|on)$"
+}
+
+function Get-ConfiguredPaymentCallbackProvider {
+  $allowedProviders = if ($env:PAYMENT_CALLBACK_ALLOWED_PROVIDERS) {
+    $env:PAYMENT_CALLBACK_ALLOWED_PROVIDERS
+  } elseif ([Environment]::GetEnvironmentVariable("Payments__AllowedProviders", "Process")) {
+    [Environment]::GetEnvironmentVariable("Payments__AllowedProviders", "Process")
+  } else {
+    ""
+  }
+
+  foreach ($entry in ($allowedProviders -split "[,;]")) {
+    $provider = $entry.Trim().ToLowerInvariant()
+    if ($provider -and $provider -ne "*") {
+      return $provider
+    }
+  }
+
+  return "testpay"
+}
+
+function Get-PaymentWebhookSecretForProvider {
+  param([string]$Provider)
+
+  $providerSecret = [Environment]::GetEnvironmentVariable("Payments__${Provider}__WebhookSecret", "Process")
+  if ($providerSecret) {
+    return $providerSecret
+  }
+
+  return $PaymentWebhookSecret
+}
+
+function ConvertTo-Base64Url {
+  param([byte[]]$Bytes)
+  return [Convert]::ToBase64String($Bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+}
+
+function New-ClientAuthProviderAssertion {
+  param(
+    [string]$OwnerType,
+    [string]$OwnerId,
+    [string]$AccountId = ""
+  )
+
+  $secret = if ($env:CLIENT_API_AUTH_PROVIDER_SECRET) { $env:CLIENT_API_AUTH_PROVIDER_SECRET } else { "" }
+  if (-not $secret) {
+    return ""
+  }
+
+  if (-not $OwnerType) { $OwnerType = "user" }
+  $ownerGrants = New-Object System.Collections.Generic.List[string]
+  if ($OwnerId) {
+    $ownerGrants.Add("${OwnerType}:$OwnerId") | Out-Null
+  }
+
+  $accountGrants = New-Object System.Collections.Generic.List[string]
+  if ($AccountId) {
+    $accountGrants.Add($AccountId) | Out-Null
+  }
+
+  $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  $ttl = 600
+  if ($env:CLIENT_API_AUTH_PROVIDER_TTL_SECONDS) {
+    $parsedTtl = 0
+    if ([int]::TryParse($env:CLIENT_API_AUTH_PROVIDER_TTL_SECONDS, [ref]$parsedTtl) -and $parsedTtl -gt 0) {
+      $ttl = [Math]::Min($parsedTtl, 3600)
+    }
+  }
+
+  $payload = [ordered]@{
+    sub = if ($OwnerId) { $OwnerId } else { $AccountOwnerId }
+    iat = $now
+    nbf = $now
+    exp = $now + $ttl
+    jti = [Guid]::NewGuid().ToString("N")
+    xiaolou_account_owner_type = $OwnerType
+    xiaolou_account_owner_ids = @($ownerGrants.ToArray())
+    xiaolou_account_ids = @($accountGrants.ToArray())
+    xiaolou_permissions = @(
+      "accounts:ensure",
+      "jobs:create",
+      "jobs:read",
+      "jobs:cancel",
+      "media:read",
+      "media:write"
+    )
+  }
+
+  if ($env:CLIENT_API_AUTH_PROVIDER_ISSUER) {
+    $payload["iss"] = $env:CLIENT_API_AUTH_PROVIDER_ISSUER
+  }
+  if ($env:CLIENT_API_AUTH_PROVIDER_AUDIENCE) {
+    $payload["aud"] = $env:CLIENT_API_AUTH_PROVIDER_AUDIENCE
+  }
+
+  $headerJson = @{ alg = "HS256"; typ = "JWT" } | ConvertTo-Json -Compress
+  $payloadJson = $payload | ConvertTo-Json -Compress -Depth 8
+  $headerSegment = ConvertTo-Base64Url ([System.Text.Encoding]::UTF8.GetBytes($headerJson))
+  $payloadSegment = ConvertTo-Base64Url ([System.Text.Encoding]::UTF8.GetBytes($payloadJson))
+  $signingInput = "$headerSegment.$payloadSegment"
+  $hmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($secret))
+  try {
+    $signature = ConvertTo-Base64Url ($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($signingInput)))
+    return "$signingInput.$signature"
+  } finally {
+    $hmac.Dispose()
+  }
+}
+
 function Invoke-ApiJson {
   param(
     [string]$Method,
@@ -116,6 +392,7 @@ function Invoke-ApiJson {
   }
   if ($requiresClientToken) {
     Add-ClientAccountScopeHeaders -Path $Path -Body $Body -Headers $effectiveHeaders
+    Add-ClientAuthProviderHeaders -Body $Body -Headers $effectiveHeaders
   }
 
   $parameters = @{
@@ -203,6 +480,48 @@ function Add-ClientAccountScopeHeaders {
   }
 }
 
+function Add-ClientAuthProviderHeaders {
+  param(
+    $Body,
+    [hashtable]$Headers
+  )
+
+  if ($Headers.ContainsKey("Authorization")) {
+    return
+  }
+
+  $provider = if ($env:CLIENT_API_AUTH_PROVIDER) { $env:CLIENT_API_AUTH_PROVIDER } else { "" }
+  $requiresProvider = Test-TruthyEnvValue $env:CLIENT_API_REQUIRE_AUTH_PROVIDER
+  if (-not $requiresProvider -and $provider -notmatch "^(hs256-jwt|jwt-hs256)$") {
+    return
+  }
+
+  $ownerType = if ($Headers.ContainsKey("X-XiaoLou-Account-Owner-Type")) {
+    [string]$Headers["X-XiaoLou-Account-Owner-Type"]
+  } else {
+    "user"
+  }
+  $ownerId = if ($Headers.ContainsKey("X-XiaoLou-Account-Owner-Id")) {
+    [string]$Headers["X-XiaoLou-Account-Owner-Id"]
+  } else {
+    [string](Get-BodyValue $Body "accountOwnerId")
+  }
+  $accountId = if ($Headers.ContainsKey("X-XiaoLou-Account-Id")) {
+    [string]$Headers["X-XiaoLou-Account-Id"]
+  } else {
+    [string](Get-BodyValue $Body "accountId")
+  }
+
+  if (-not $ownerId) {
+    $ownerId = $AccountOwnerId
+  }
+
+  $assertion = New-ClientAuthProviderAssertion -OwnerType $ownerType -OwnerId $ownerId -AccountId $accountId
+  if ($assertion) {
+    $Headers["Authorization"] = "Bearer $assertion"
+  }
+}
+
 function Remember-JobAccount {
   param($Job)
 
@@ -243,7 +562,7 @@ function Invoke-PaymentCallbackBadRequest {
 
   $badRequest = $false
   $responseText = ""
-  $signature = New-HmacSignature $RawBody $PaymentWebhookSecret
+  $signature = New-HmacSignature $RawBody $PaymentCallbackSecret
   try {
     Invoke-ApiJson "Post" "/api/payments/callbacks/$Provider" $RawBody @{ "X-XiaoLou-Signature" = $signature } | Out-Null
   } catch {
@@ -462,6 +781,9 @@ if ($Build) {
   Assert-True ($LASTEXITCODE -eq 0) "dotnet build failed"
 }
 
+$PaymentCallbackProvider = Get-ConfiguredPaymentCallbackProvider
+$PaymentCallbackSecret = Get-PaymentWebhookSecretForProvider $PaymentCallbackProvider
+
 Write-Step "Checking Control API health at $BaseUrl"
 $health = Invoke-ApiJson "Get" "/healthz"
 Assert-True ($health.status -eq "ok") "Control API health check failed"
@@ -626,7 +948,7 @@ $invalidBody = @{
 } | ConvertTo-Json -Compress -Depth 10
 $invalidRejected = $false
 try {
-  Invoke-ApiJson "Post" "/api/payments/callbacks/testpay" $invalidBody @{ "X-XiaoLou-Signature" = "bad-signature" } | Out-Null
+  Invoke-ApiJson "Post" "/api/payments/callbacks/$PaymentCallbackProvider" $invalidBody @{ "X-XiaoLou-Signature" = "bad-signature" } | Out-Null
 } catch {
   $statusCode = $_.Exception.Response.StatusCode.value__
   if ($statusCode -eq 400) {
@@ -652,10 +974,10 @@ $paymentBody = [ordered]@{
   paidAt = $paidAt
   data = @{ verifier = "valid-signature" }
 } | ConvertTo-Json -Compress -Depth 10
-$signature = New-HmacSignature $paymentBody $PaymentWebhookSecret
-$payment = Invoke-ApiJson "Post" "/api/payments/callbacks/testpay" $paymentBody @{ "X-XiaoLou-Signature" = $signature }
+$signature = New-HmacSignature $paymentBody $PaymentCallbackSecret
+$payment = Invoke-ApiJson "Post" "/api/payments/callbacks/$PaymentCallbackProvider" $paymentBody @{ "X-XiaoLou-Signature" = $signature }
 Assert-True ($payment.ledger_inserted -eq $true) "Valid payment callback did not insert ledger"
-$paymentReplay = Invoke-ApiJson "Post" "/api/payments/callbacks/testpay" $paymentBody @{ "X-XiaoLou-Signature" = $signature }
+$paymentReplay = Invoke-ApiJson "Post" "/api/payments/callbacks/$PaymentCallbackProvider" $paymentBody @{ "X-XiaoLou-Signature" = $signature }
 Assert-True ($paymentReplay.duplicate -eq $true) "Payment replay was not idempotent"
 
 Write-Step "Verifying payment callback signed negative cases"
@@ -672,7 +994,7 @@ $duplicateMismatchBody = [ordered]@{
   paidAt = $paidAt
   data = @{ verifier = "duplicate-body-mismatch" }
 } | ConvertTo-Json -Compress -Depth 10
-Invoke-PaymentCallbackBadRequest "testpay" $duplicateMismatchBody "callback event body mismatch"
+Invoke-PaymentCallbackBadRequest $PaymentCallbackProvider $duplicateMismatchBody "callback event body mismatch"
 
 $providerTradeMismatchBody = [ordered]@{
   accountOwnerType = "user"
@@ -687,7 +1009,7 @@ $providerTradeMismatchBody = [ordered]@{
   paidAt = $paidAt
   data = @{ verifier = "provider-trade-mismatch" }
 } | ConvertTo-Json -Compress -Depth 10
-Invoke-PaymentCallbackBadRequest "testpay" $providerTradeMismatchBody "payment order provider trade number mismatch"
+Invoke-PaymentCallbackBadRequest $PaymentCallbackProvider $providerTradeMismatchBody "payment order provider trade number mismatch"
 
 $amountMismatchBody = [ordered]@{
   accountOwnerType = "user"
@@ -702,7 +1024,7 @@ $amountMismatchBody = [ordered]@{
   paidAt = $paidAt
   data = @{ verifier = "amount-mismatch" }
 } | ConvertTo-Json -Compress -Depth 10
-Invoke-PaymentCallbackBadRequest "testpay" $amountMismatchBody "payment order amount mismatch"
+Invoke-PaymentCallbackBadRequest $PaymentCallbackProvider $amountMismatchBody "payment order amount mismatch"
 
 $regionRejectedBody = [ordered]@{
   accountOwnerType = "user"
@@ -717,7 +1039,7 @@ $regionRejectedBody = [ordered]@{
   paidAt = $paidAt
   data = @{ verifier = "region-rejected" }
 } | ConvertTo-Json -Compress -Depth 10
-Invoke-PaymentCallbackBadRequest "testpay" $regionRejectedBody "payment callback region is not allowed"
+Invoke-PaymentCallbackBadRequest $PaymentCallbackProvider $regionRejectedBody "payment callback region is not allowed"
 
 $sensitivityRejectedBody = [ordered]@{
   accountOwnerType = "user"
@@ -732,7 +1054,7 @@ $sensitivityRejectedBody = [ordered]@{
   paidAt = $paidAt
   data = @{ dataSensitivity = "restricted"; verifier = "sensitivity-rejected" }
 } | ConvertTo-Json -Compress -Depth 10
-Invoke-PaymentCallbackBadRequest "testpay" $sensitivityRejectedBody "payment callback data sensitivity is not allowed"
+Invoke-PaymentCallbackBadRequest $PaymentCallbackProvider $sensitivityRejectedBody "payment callback data sensitivity is not allowed"
 
 Write-Step "Verifying object-storage media metadata"
 $upload = Invoke-ApiJson "Post" "/api/media/upload-begin" @{

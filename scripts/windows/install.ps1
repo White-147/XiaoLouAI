@@ -9,7 +9,8 @@ param(
   [switch]$RegisterServices,
   [switch]$UpdateExisting,
   [switch]$StartServices,
-  [switch]$AssertDDrive
+  [switch]$AssertDDrive,
+  [switch]$AllowPlaceholderSecrets
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,7 +44,8 @@ if ($RegisterServices) {
     -Root $Root `
     -DotnetExe $DotnetExe `
     -PythonExe $PythonExe `
-    -UpdateExisting:$UpdateExisting
+    -UpdateExisting:$UpdateExisting `
+    -AllowPlaceholderSecrets:$AllowPlaceholderSecrets
 }
 
 if ($StartServices) {

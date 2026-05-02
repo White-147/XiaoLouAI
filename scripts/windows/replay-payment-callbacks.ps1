@@ -24,8 +24,14 @@ if (-not $BaseUrl) {
 
 if (-not $ReportPath) {
   $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-  $repoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
-  $ReportPath = Join-Path $repoRoot ".runtime\xiaolou-logs\payment-callback-replay-$stamp.json"
+  $scriptBase = (Resolve-Path "$PSScriptRoot\..\..").Path
+  $scriptBaseParent = Split-Path -Parent $scriptBase
+  if ((Split-Path -Leaf $scriptBase) -eq "app" -and (Split-Path -Leaf $scriptBaseParent) -eq ".runtime") {
+    $runtimeStateRoot = $scriptBaseParent
+  } else {
+    $runtimeStateRoot = Join-Path $scriptBase ".runtime"
+  }
+  $ReportPath = Join-Path $runtimeStateRoot "xiaolou-logs\payment-callback-replay-$stamp.json"
 }
 
 function New-HmacSignature {

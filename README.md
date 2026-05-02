@@ -34,6 +34,11 @@ scripts/windows/       Windows install, service, backup, and runtime scripts
 docs/                  local handoff and Windows-native operations notes
 ```
 
+Some legacy or upstream subdirectories keep their own README files for
+migration/reference work. Those files are not production deployment guides when
+they mention Docker, Linux, Celery, Redis, RabbitMQ, or container startup.
+Production operations are defined by this README and `deploy/windows/ops-runbook.md`.
+
 ## Development Setup
 
 Frontend:
@@ -79,6 +84,7 @@ Publish the .NET services:
 cd control-plane-dotnet
 dotnet publish .\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj -c Release -o D:\code\XiaoLouAI\.runtime\app\publish\control-api
 dotnet publish .\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj -c Release -o D:\code\XiaoLouAI\.runtime\app\publish\closed-api-worker
+dotnet publish .\src\XiaoLou.LocalModelWorkerService\XiaoLou.LocalModelWorkerService.csproj -c Release -o D:\code\XiaoLouAI\.runtime\app\publish\local-model-worker-service
 ```
 
 Use `scripts/windows/register-services.ps1` to register:
@@ -86,6 +92,11 @@ Use `scripts/windows/register-services.ps1` to register:
 - `XiaoLou-ControlApi`
 - `XiaoLou-LocalModelWorker`
 - `XiaoLou-ClosedApiWorker`
+
+The registered services use service-aware `.NET` hosts with direct
+`dotnet.exe <published dll>` `binPath` values. `XiaoLou-LocalModelWorker` is a
+small `.NET` Windows Service wrapper that supervises the Python local model
+adapter process; Python remains limited to local model inference execution.
 
 Caddy or IIS should serve `XIAOLOU-main/dist` directly and reverse-proxy
 only the approved public Control API routes to `127.0.0.1:4100`:
@@ -102,13 +113,106 @@ only the approved public Control API routes to `127.0.0.1:4100`:
 `/api/internal/*`, `/api/schema/*`, `/api/providers/health`, and unlisted
 legacy API paths must not be exposed through the public reverse proxy.
 
-For production, set both `INTERNAL_API_TOKEN` and `CLIENT_API_TOKEN`.
-`/api/accounts/ensure`, `/api/jobs*`, and `/api/media*` require the client token
-plus account-scope headers. Before cutover, enable
+For production, set `INTERNAL_API_TOKEN` and protect public client routes with
+either a static `CLIENT_API_TOKEN` or provider-signed client assertions. The
+new provider path uses `CLIENT_API_AUTH_PROVIDER=hs256-jwt`,
+`CLIENT_API_AUTH_PROVIDER_SECRET`, and `CLIENT_API_REQUIRE_AUTH_PROVIDER=true`.
+The compatibility login layer signs `controlApiClientAssertion` on email/admin/
+Google login and personal/enterprise registration when the provider secret is
+configured. The frontend stores that assertion separately from the legacy
+`xiaolou-auth-token` and only sends it to Windows-native Control API client
+routes. Assertions must carry account or owner grants plus route permissions;
+`CLIENT_API_AUTH_PROVIDER_TTL_SECONDS` controls the issued `exp` window and
+defaults to 3600 seconds. Static tokens should additionally enable
 `CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT=true` and explicitly grant the
-intended accounts or owners. Also keep `CLIENT_API_ALLOWED_PERMISSIONS` to the
-minimal public actions needed by the frontend token. `/api/payments/callbacks/*`
-remains protected by provider callback signature verification.
+intended accounts or owners. Provider cutover can use the same configured-grant
+flag as a non-wildcard gray-release upper bound. In both modes, keep
+`CLIENT_API_ALLOWED_PERMISSIONS` to the minimal public actions needed by the
+frontend. `/api/payments/callbacks/*` remains protected by provider callback
+signature verification.
+
+After publishing and editing `.runtime\app\scripts\windows\.env.windows`, run
+the strict production preflight:
+
+```powershell
+.\scripts\windows\rehearse-production-cutover.ps1 -StrictProduction
+```
+
+Strict mode blocks placeholder secrets, missing static-token or auth-provider
+client protection, wildcard client permissions or account grants, a configured
+grant flag without concrete grants, unsafe static-token grant settings, and any
+legacy `core-api` public allowlist wider than `GET /healthz;GET /api/windows-native/status`.
+
+Latest Windows rehearsal checkpoint: `scripts/windows/rehearse-production-cutover.ps1
+-ExecutePublish -RegisterServices -UpdateExisting -StartServices -StrictProduction`
+completed to `D:\code\XiaoLouAI\.runtime\app` from an elevated PowerShell
+session. `XiaoLou-ControlApi`, `XiaoLou-LocalModelWorker`, and
+`XiaoLou-ClosedApiWorker` are registered as `Automatic` Windows services and
+are running with direct `dotnet.exe <dll>` service paths. The strict service P0
+passed with run `p0-4d788b349b6f4fe7aea06aa9fb99825e`; report:
+`D:\code\XiaoLouAI\.runtime\xiaolou-logs\p1-cutover-admin-services-20260502-101430.json`,
+P0 log:
+`D:\code\XiaoLouAI\.runtime\xiaolou-logs\p1-cutover-admin-p0-20260502-101430.out.log`.
+The P0 verifier now signs HS256 provider assertions when
+`CLIENT_API_REQUIRE_AUTH_PROVIDER=true`, so strict auth-provider service smoke
+does not fall back to the static client token. Real payment-provider captures
+are not bundled and are not required to finish the P1 engineering cutover; they
+are merchant-onboarding evidence to collect when a real Alipay or WeChat Pay
+account is available.
+The P0/P1 risk scan also hardened cross-host deployment: publishing now preserves
+existing runtime env values, service registration refuses placeholder or
+smoke/test secrets by default, `rehearse -RunP0` imports runtime auth-provider
+env and picks a configured owner grant, and `StrictProduction` intentionally
+blocks the current local smoke env until real production secrets are installed.
+
+## Payment Provider Onboarding
+
+Payment provider integration is prepared, but real Alipay/WeChat Pay merchant
+material is not a P1 engineering blocker. The repository intentionally does not
+contain real merchant accounts, private keys, certificates, provider public
+keys, production secrets, or raw callback captures. Treat those as
+operator-supplied merchant-onboarding evidence, stored only under `.runtime`.
+
+Current Windows-native Control API callbacks accept normalized canonical JSON
+signed with the configured HMAC secret
+(`Payments:{provider}:WebhookSecret` / `X-XiaoLou-Signature`). Native Alipay
+RSA2 and WeChat Pay v3 inputs are handled by the Windows adapter/normalizer
+tooling under `scripts/windows/`; the legacy
+`core-api/src/payments/alipay.js` and `core-api/src/payments/wechat.js` files
+are migration references only, not the long-term production control plane.
+
+To connect a real provider account:
+
+1. Store key/certificate files under
+   `D:\code\XiaoLouAI\.runtime\app\credentials\payment\`.
+2. Store reviewed JSONL/NDJSON captures under
+   `D:\code\XiaoLouAI\.runtime\xiaolou-replay\`.
+3. Fill provider secrets and allowlists in
+   `D:\code\XiaoLouAI\.runtime\app\scripts\windows\.env.windows`; never commit
+   real values.
+4. Enable explicit canary intake before routing public callbacks:
+   `PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT=true` plus
+   `PAYMENT_CALLBACK_ALLOWED_ACCOUNT_IDS` or
+   `PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS` with non-wildcard grants.
+5. Run adapter/normalizer smoke before replaying raw native captures:
+   `verify-payment-provider-native-adapters.ps1` and
+   `verify-payment-provider-normalizers.ps1`.
+6. Run discovery, dry-run, then staging execute/idempotency:
+
+```powershell
+.\scripts\windows\stage-payment-provider-replay.ps1 -DiscoverOnly
+.\scripts\windows\stage-payment-provider-replay.ps1 `
+  -InputFile D:\code\XiaoLouAI\.runtime\xiaolou-replay\<capture>.jsonl
+.\scripts\windows\stage-payment-provider-replay.ps1 `
+  -InputFile D:\code\XiaoLouAI\.runtime\xiaolou-replay\<capture>.jsonl `
+  -Execute `
+  -StopOnFailure
+```
+
+When real material is unavailable, keep the synthetic provider
+adapter/normalizer smoke, provider boundary smoke, P0/canary, wallet ledger
+audit, and non-payment P1 cutover gates green; continue the Windows-native
+refactor toward P2.
 
 ## Runtime Rules
 

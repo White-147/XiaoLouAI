@@ -46,10 +46,19 @@ function allowEmptyBootstrap() {
   return String(process.env.POSTGRES_ALLOW_EMPTY_BOOTSTRAP || "0").trim() === "1";
 }
 
+function envFlag(name) {
+  return ["1", "true", "yes", "on"].includes(String(process.env[name] || "").trim().toLowerCase());
+}
+
+function isCompatReadOnlyMode() {
+  return envFlag("CORE_API_COMPAT_READ_ONLY");
+}
+
 class PostgresStore extends MockStore {
   constructor(options = {}) {
     super();
     this.mode = "postgres";
+    this.compatReadOnly = options.compatReadOnly ?? isCompatReadOnlyMode();
     this.connectionString = options.connectionString || process.env.DATABASE_URL || DEFAULT_DATABASE_URL;
     this.pool = options.pool || new Pool({
       connectionString: this.connectionString,
@@ -78,10 +87,17 @@ class PostgresStore extends MockStore {
       const snapshot = await this.loadSnapshot(client);
       if (snapshot) {
         this.state = snapshot;
-        if (this.normalizeState()) {
+        if (this.normalizeState() && !this.compatReadOnly) {
           await this.saveSnapshot({ source: "startup-normalize" });
         }
       } else {
+        if (this.compatReadOnly) {
+          this.normalizeState();
+          console.warn(
+            "[postgres-store] CORE_API_COMPAT_READ_ONLY=1: no legacy snapshot found; using in-memory seed state and skipping PostgreSQL bootstrap/projection writes.",
+          );
+          return;
+        }
         if (!allowEmptyBootstrap()) {
           throw new Error(
             "PostgreSQL snapshot is empty. Run npm run db:import-sqlite before starting core-api, or set POSTGRES_ALLOW_EMPTY_BOOTSTRAP=1 for a brand-new demo database.",
@@ -106,6 +122,10 @@ class PostgresStore extends MockStore {
   }
 
   async persistSerializedSnapshot(serialized, source) {
+    if (this.compatReadOnly) {
+      throw new Error("Refusing to persist core-api legacy snapshot while CORE_API_COMPAT_READ_ONLY=1");
+    }
+
     const snapshot = JSON.parse(serialized);
     if (snapshot?._snapshotError || snapshot?._snapshotTruncated) {
       throw new Error("Refusing to persist truncated or errored snapshot to PostgreSQL");
@@ -138,6 +158,7 @@ class PostgresStore extends MockStore {
   }
 
   saveSnapshot(options = {}) {
+    if (this.compatReadOnly) return Promise.resolve();
     if (!this._writeQueue) return Promise.resolve();
     if (this._closed) return this._writeQueue;
     let serialized;
@@ -163,11 +184,13 @@ class PostgresStore extends MockStore {
   }
 
   queueSnapshotSave(source = "runtime") {
+    if (this.compatReadOnly) return;
     if (!this._writeQueue) return;
     this.saveSnapshot({ source }).catch(() => {});
   }
 
   async flushSnapshot() {
+    if (this.compatReadOnly) return;
     await this._writeQueue;
     if (this.lastWriteError) {
       throw this.lastWriteError;
@@ -347,5 +370,6 @@ for (const [methodName, predicate] of MUTATING_METHODS) {
 
 module.exports = {
   DEFAULT_DATABASE_URL,
+  isCompatReadOnlyMode,
   PostgresStore,
 };

@@ -27,10 +27,22 @@ core-api，应把它作为只读兼容面：
 CORE_API_COMPAT_READ_ONLY=1
 ```
 
+当没有 legacy snapshot 时，只读兼容模式只在内存中保留 seed state，并跳过 PostgreSQL
+snapshot/projection 写入。因此它可以直接对接 Windows-native canonical 测试库做
+完整进程 smoke，不再要求 `users.platform_role` 这类 legacy projection 字段。
+
+Windows smoke 命令：
+
+```powershell
+..\scripts\windows\verify-core-api-compat-readonly.ps1
+```
+
 该模式下，core-api 会用 `CORE_API_COMPAT_READ_ONLY` 拒绝 `POST` / `PUT` /
 `PATCH` / `DELETE`。如果未设置 `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST`，
 只读模式只暴露 `GET /healthz` 和 `GET /api/windows-native/status`；其他
 legacy public read route 默认关闭，直到被显式 allowlist 或代理到 .NET 控制面。
+Windows smoke 也会覆盖 P2 关闭 legacy 支付、任务、媒体 metadata 和上传主写入口的
+代表性路径。
 
 ## 快速开始
 
@@ -160,6 +172,46 @@ npm run verify
 该命令会随机端口启动服务，并检查 `/healthz`、`/api/projects`、
 `/api/projects/:id/overview` 和 `/api/toolbox/capabilities`。它还会创建项目、
 重启并确认持久化。
+
+P1 兼容边界验证优先使用非写入 smoke：
+
+```powershell
+npm run verify:compat-readonly
+```
+
+该脚本会以 `CORE_API_COMPAT_READ_ONLY=1` 启动完整 core-api 进程，检查 D 盘
+Node runtime、`pg` 依赖、`/healthz`、`/api/windows-native/status`，并确认 legacy
+读写路由被兼容保护关闭。默认关闭读验证覆盖 wallet、jobs、projects/assets、
+chat model discovery、auth providers、legacy payment checkout、canvas/agent-canvas
+project reads、canvas library reads 和 `/uploads/*`。
+默认关闭写验证已显式覆盖 P2 legacy 主写关闭集合：`/api/jobs`、`/api/tasks`、
+`/api/wallet/recharge-orders`、`/api/payments/alipay/notify`、
+`/api/media/upload-begin` 和 `/api/uploads`。
+
+legacy -> canonical cutover 闸门优先使用非写入投影报告：
+
+```powershell
+npm run verify:legacy-canonical-projection
+```
+
+该脚本会检查 legacy snapshot/table 是否存在、canonical 表是否齐全、旧任务是否仍有
+非终态行、充值订单/支付事件是否已映射到 canonical 支付表，以及 wallet ledger 是否具备
+canonical 账务字段。`-AllowMissingLegacy` 只允许在没有真实 legacy source 的本机
+canonical smoke 库上直接调用 PowerShell 脚本时使用，不作为生产证据。
+
+如果报告显示 account/job/wallet projection 缺失，先生成 dry-run 计划，再执行：
+
+```powershell
+npm run project:legacy-canonical -- -DatabaseUrl <staging-database-url>
+npm run project:legacy-canonical -- -DatabaseUrl <staging-database-url> -Execute
+```
+
+`-Execute` 默认只允许 `legacy_projection_staging_*` schema。生产 projection 必须先冻结
+legacy 写入、完成备份，并显式使用 PowerShell `-AllowNonStaging`。
+
+旧 legacy 写入路径和旧 worker 冻结后，使用 `-LegacyWritesFrozen` 重跑 gate；已经具备
+canonical job 投影证明的非终态 legacy job 不会继续产生 warning。该开关不会绕过缺失投影的
+blocker。
 
 ## 常用请求
 

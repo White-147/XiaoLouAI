@@ -106,7 +106,12 @@ internal sealed class ClosedApiWorkerService(
         {
             if (PayloadRequestsFailure(job))
             {
-                throw new InvalidOperationException("forced closed API worker failure requested by job payload");
+                const string message = "forced closed API worker failure requested by job payload";
+                logger.LogInformation(
+                    "Closed API worker intentionally failed job {JobId} for negative-path verification.",
+                    jobId);
+                await jobs.FailOrRetryAsync(jobId, message, retry: true, retryDelaySeconds: null, cancellationToken);
+                return;
             }
 
             // P0 worker skeleton: real provider calls are added behind provider router.

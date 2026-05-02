@@ -36,6 +36,7 @@ const {
   calculateRechargeCredits,
   normalizeRechargeAmount,
 } = require("./payments/recharge-pricing");
+const { createControlApiClientAssertion } = require("./control-api-client-assertion");
 
 function clone(value) {
   return structuredClone(value);
@@ -8794,12 +8795,14 @@ function normalizeGoogleProfile(profile = {}) {
 
 MockStore.prototype.createLoginResultForUser = function createLoginResultForUser(user) {
   this.ensureDefaultProjectForActor(user.id);
+  const permissionContext = this.getPermissionContext(user.id);
   return clone({
     actorId: user.id,
     token: generateAuthToken(user.id),
     displayName: user.displayName,
     email: user.email,
-    permissionContext: this.getPermissionContext(user.id),
+    permissionContext,
+    controlApiClientAssertion: createControlApiClientAssertion(permissionContext),
   });
 };
 
@@ -10759,11 +10762,13 @@ MockStore.prototype.registerPersonalUser = function registerPersonalUser(input =
   });
   this.syncLegacyWalletState();
   this.ensureDefaultProjectForActor(user.id);
+  const permissionContext = this.getPermissionContext(user.id);
 
   return clone({
     actorId: user.id,
     token: generateAuthToken(user.id),
-    permissionContext: this.getPermissionContext(user.id),
+    permissionContext,
+    controlApiClientAssertion: createControlApiClientAssertion(permissionContext),
     wallets: this.listWallets(user.id),
     wallet: this.toPublicWallet(personalWallet),
     organization: null,
@@ -10858,11 +10863,13 @@ MockStore.prototype.registerEnterpriseAdmin = function registerEnterpriseAdmin(i
 
   this.syncLegacyWalletState();
   this.ensureDefaultProjectForActor(user.id);
+  const permissionContext = this.getPermissionContext(user.id);
 
   return clone({
     actorId: user.id,
     token: generateAuthToken(user.id),
-    permissionContext: this.getPermissionContext(user.id),
+    permissionContext,
+    controlApiClientAssertion: createControlApiClientAssertion(permissionContext),
     wallets: this.listWallets(user.id),
     wallet: this.toPublicWallet(organizationWallet),
     organization: {

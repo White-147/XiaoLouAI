@@ -31,6 +31,18 @@ In that mode, core-api rejects `POST` / `PUT` / `PATCH` / `DELETE` with
 not set, read-only mode exposes only `GET /healthz` and
 `GET /api/windows-native/status`; all other legacy public reads are closed until
 they are deliberately allowlisted or proxied to the .NET control plane.
+The Windows smoke also checks representative P2 shutdown paths for legacy
+payment, job/task, media metadata, and upload writes.
+When no legacy snapshot is present, read-only mode keeps the seed state in
+memory and skips PostgreSQL snapshot/projection writes, so it can smoke test
+against the Windows-native canonical test database without requiring legacy
+columns such as `users.platform_role`.
+
+Windows smoke command:
+
+```powershell
+..\scripts\windows\verify-core-api-compat-readonly.ps1
+```
 
 ## Quick start
 
@@ -265,6 +277,51 @@ Starts on a random port, checks:
 - `/api/toolbox/capabilities`
 
 Also creates a project, restarts, and confirms persistence.
+
+For the P1 compatibility boundary, prefer the non-mutating Windows smoke:
+
+```powershell
+npm run verify:compat-readonly
+```
+
+It starts a full core-api process with `CORE_API_COMPAT_READ_ONLY=1`, verifies
+the D: Node runtime and installed `pg` dependency, checks `/healthz` and
+`/api/windows-native/status`, and confirms legacy reads/writes are closed by
+the compatibility guards. The default closed-read checks cover wallet, jobs,
+projects/assets, chat model discovery, auth providers, legacy payment checkout,
+canvas/agent-canvas project reads, canvas library reads, and `/uploads/*`.
+The default closed-write checks now explicitly cover the P2 legacy main-write
+shutdown set: `/api/jobs`, `/api/tasks`, `/api/wallet/recharge-orders`,
+`/api/payments/alipay/notify`, `/api/media/upload-begin`, and `/api/uploads`.
+
+For the legacy-to-canonical cutover gate, generate the non-mutating projection
+report before closing old write paths:
+
+```powershell
+npm run verify:legacy-canonical-projection
+```
+
+This checks legacy snapshot/table presence, canonical table readiness,
+non-terminal legacy jobs, recharge order/payment event projection, and wallet
+ledger canonical fields. Use `-AllowMissingLegacy` only when calling the
+PowerShell script directly against a local canonical smoke database with no real
+legacy source.
+
+If the report shows missing account/job/wallet projection, create a reviewed
+dry-run plan before writing anything:
+
+```powershell
+npm run project:legacy-canonical -- -DatabaseUrl <staging-database-url>
+npm run project:legacy-canonical -- -DatabaseUrl <staging-database-url> -Execute
+```
+
+`-Execute` is restricted to `legacy_projection_staging_*` schemas by default.
+Production projection needs a frozen legacy write window, backup, and the
+explicit PowerShell `-AllowNonStaging` switch.
+
+Once old legacy write paths and workers are frozen, rerun the gate with
+`-LegacyWritesFrozen` so already projected non-terminal legacy jobs do not keep
+showing as warnings. The switch does not bypass missing projection blockers.
 
 ## Handy requests
 

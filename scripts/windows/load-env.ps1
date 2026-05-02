@@ -126,4 +126,18 @@ if ($pipConfigFile) {
   }
 }
 
-$env:PATH = "$env:DOTNET_ROOT;D:\soft\program\nodejs;D:\soft\program\Python\Python312;" + $env:PATH
+$pathPrefixes = New-Object System.Collections.Generic.List[string]
+foreach ($candidate in @(
+  [Environment]::GetEnvironmentVariable("DOTNET_ROOT", "Process"),
+  (Split-Path -Parent ([Environment]::GetEnvironmentVariable("NODE_EXE", "Process"))),
+  (Split-Path -Parent ([Environment]::GetEnvironmentVariable("NPM_CMD", "Process"))),
+  (Split-Path -Parent ([Environment]::GetEnvironmentVariable("PYTHON_EXE", "Process")))
+)) {
+  if ($candidate -and (Test-Path -LiteralPath $candidate) -and -not $pathPrefixes.Contains($candidate)) {
+    $pathPrefixes.Add($candidate) | Out-Null
+  }
+}
+
+if ($pathPrefixes.Count -gt 0) {
+  $env:PATH = ($pathPrefixes -join ";") + ";" + $env:PATH
+}

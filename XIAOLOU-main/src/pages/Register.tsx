@@ -19,7 +19,12 @@ import {
   type RegisterEnterpriseAdminInput,
   type RegisterPersonalInput,
 } from "../lib/api";
-import { rememberKnownActor, setAuthToken, setCurrentActorId } from "../lib/actor-session";
+import {
+  rememberKnownActor,
+  setAuthToken,
+  setControlApiClientAssertion,
+  setCurrentActorId,
+} from "../lib/actor-session";
 import { setCurrentProjectId } from "../lib/session";
 import { cn } from "../lib/utils";
 import { isLocalLoopbackAccess } from "../lib/local-loopback";
@@ -136,10 +141,13 @@ export default function Register() {
         id: result.actorId,
         label: result.permissionContext.actor.displayName,
         detail: mode === "personal" ? "注册用户" : "企业管理员",
+        token: result.token ?? null,
+        controlApiClientAssertion: result.controlApiClientAssertion ?? null,
       });
       if (result.token) {
         setAuthToken(result.token);
       }
+      setControlApiClientAssertion(result.controlApiClientAssertion);
       setCurrentActorId(result.actorId);
       try {
         const projectResponse = await listProjects();
