@@ -1,10 +1,4 @@
-/**
- * assetService.ts
- * 
- * Service for managing assets (images/videos) via the backend API.
- */
-
-import { buildCanvasApiUrl } from '../integrations/twitcanvaRuntimePaths';
+import { uploadDataUrlAsFile } from '../../lib/api';
 
 /**
  * Uploads a base64 data URL to the server and returns the file path URL.
@@ -12,7 +6,7 @@ import { buildCanvasApiUrl } from '../integrations/twitcanvaRuntimePaths';
  * @param dataUrl The base64 data URL to upload
  * @param type 'image' | 'video'
  * @param prompt Optional prompt associated with the asset
- * @returns Promise resolving to the server-side URL (e.g., /library/images/xyz.png)
+ * @returns Promise resolving to the Control API signed media URL.
  */
 export const uploadAsset = async (
     dataUrl: string,
@@ -25,28 +19,8 @@ export const uploadAsset = async (
             return dataUrl;
         }
 
-        const endpoint = type === 'image'
-            ? buildCanvasApiUrl('/assets/images')
-            : buildCanvasApiUrl('/assets/videos');
-
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                data: dataUrl,
-                prompt: prompt
-            }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to upload asset');
-        }
-
-        const result = await response.json();
-        return result.url;
+        const uploaded = await uploadDataUrlAsFile(dataUrl, `canvas-${type}`, prompt || `canvas-${type}`);
+        return uploaded.urlPath || uploaded.url;
     } catch (error) {
         console.error('Asset upload failed:', error);
         throw error;

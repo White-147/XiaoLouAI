@@ -47,6 +47,7 @@ import {
   type CanvasProjectSummary,
 } from "../lib/api";
 import { useActorId } from "../lib/actor-session";
+import { isRetiredLegacyMediaUrl } from "../lib/media-url-policy";
 import { useCurrentProjectId } from "../lib/session";
 import { useNavigate } from "react-router-dom";
 import { generateGridThumbnail } from "../lib/grid-thumbnail";
@@ -511,20 +512,10 @@ export default function Assets() {
                 node.type === "Image" &&
                 node.status === "success" &&
                 node.resultUrl &&
+                !isRetiredLegacyMediaUrl(node.resultUrl) &&
                 !node.resultUrl.startsWith("data:"),
             )
-            .map((node) => {
-              const url = node.resultUrl!;
-              if (/^https?:\/\//i.test(url)) {
-                try {
-                  const parsed = new URL(url);
-                  if (parsed.pathname.startsWith("/uploads/")) return parsed.pathname;
-                } catch {
-                  /* keep url */
-                }
-              }
-              return url;
-            })
+            .map((node) => node.resultUrl!)
             .slice(0, 4);
 
           if (imageUrls.length === 0) continue;
@@ -575,20 +566,10 @@ export default function Assets() {
                 node.type === "Image" &&
                 node.status === "success" &&
                 node.resultUrl &&
+                !isRetiredLegacyMediaUrl(node.resultUrl) &&
                 !node.resultUrl.startsWith("data:"),
             )
-            .map((node) => {
-              const url = node.resultUrl!;
-              if (/^https?:\/\//i.test(url)) {
-                try {
-                  const parsed = new URL(url);
-                  if (parsed.pathname.startsWith("/uploads/")) return parsed.pathname;
-                } catch {
-                  /* keep url */
-                }
-              }
-              return url;
-            })
+            .map((node) => node.resultUrl!)
             .slice(0, 4);
 
           if (imageUrls.length === 0) continue;

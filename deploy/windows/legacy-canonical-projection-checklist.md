@@ -34,13 +34,16 @@ Windows-native canonical database.
 For routine P2 cutover audit, use the consolidated entrypoint first:
 
 ```powershell
-D:\code\XiaoLouAI\scripts\windows\verify-p2-cutover-audit.ps1
+D:\code\XiaoLouAI\scripts\windows\verify-p2-cutover-audit.ps1 -FailOnFrontendLegacyWriteDependency
 ```
 
 It runs the synthetic projection fixture, the legacy projection verifier, wallet
 ledger audit, the `core-api` read-only compatibility smoke, and the
 frontend/reverse-proxy legacy dependency audit. Without a supplied real legacy
-source, missing legacy evidence is reported as a warning rather than a blocker.
+source, missing legacy evidence is reported under `evidence_pending` rather
+than as an engineering blocker. Frontend legacy route literals that are guarded
+from mutating network calls are reported under `review_items`. The hard gate is
+still the absence of `blockers` and live frontend legacy write candidates.
 
 Run this before any legacy write shutdown:
 
@@ -57,7 +60,10 @@ D:\code\XiaoLouAI\scripts\windows\verify-legacy-canonical-projection.ps1 -AllowM
 
 The script writes a JSON report under
 `D:\code\XiaoLouAI\.runtime\xiaolou-logs`. In strict mode, blockers fail the
-command. Warnings are still operator review items.
+command. Routine evidence gaps should be reported under `evidence_pending`, and
+guarded legacy literals should be reported under `review_items`; top-level
+`warnings` are reserved for engineering issues that still need operator
+attention before cutover.
 
 ## Projection Dry Run
 
@@ -133,10 +139,9 @@ D:\code\XiaoLouAI\scripts\windows\verify-frontend-legacy-dependencies.ps1
 
 The scanner verifies that Caddy/IIS only expose explicit Control API public
 routes and that unlisted `/api/*` routes remain blocked. It also scans frontend
-source for non-Control API legacy route references. Existing legacy mutating
-references are reported as migration warnings by default; use
-`-FailOnLegacyWriteDependency` only when the corresponding frontend flows have
-been migrated to `.NET` Control API or intentionally retired.
+source for non-Control API legacy route references. Guarded legacy literals are
+reported under `review_items`; live legacy mutating references become blockers
+when `-FailOnLegacyWriteDependency` is enabled.
 
 Current P2 guard expectation: `XIAOLOU-main/src/lib/api.ts` blocks retired
 legacy mutating frontend calls before network with `LEGACY_WRITE_DISABLED`, so
@@ -180,7 +185,9 @@ D:\code\XiaoLouAI\.runtime\app\scripts\windows\audit-wallet-ledger.ps1 -FailOnMi
 
 ## Blockers
 
-- No real legacy source was supplied for a real cutover.
+- No real legacy source was supplied for a real cutover. During routine P2
+  engineering audit this remains `evidence_pending`, not a blocker; it becomes
+  a blocker only for final cutover evidence with `-StrictLegacySource`.
 - Canonical required tables are missing.
 - Legacy jobs are still active and not represented by canonical `jobs`.
 - `provider_jobs` or `video_replace_jobs` are active but only generic

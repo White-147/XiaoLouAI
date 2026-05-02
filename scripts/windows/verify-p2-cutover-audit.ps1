@@ -83,15 +83,18 @@ function Get-ReportSummary {
     $json = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     $blockerCount = 0
     $warningCount = 0
-    if ($null -ne $json.blockers) {
-      $blockerCount += @($json.blockers).Count
+    $blockersProperty = $json.PSObject.Properties["blockers"]
+    if ($blockersProperty -and $null -ne $blockersProperty.Value) {
+      $blockerCount += @($blockersProperty.Value).Count
     }
-    if ($null -ne $json.warnings) {
-      $warningCount += @($json.warnings).Count
+    $warningsProperty = $json.PSObject.Properties["warnings"]
+    if ($warningsProperty -and $null -ne $warningsProperty.Value) {
+      $warningCount += @($warningsProperty.Value).Count
     }
-    if ($null -ne $json.findings) {
-      $blockerCount += @($json.findings | Where-Object { $_.severity -match "^(blocker|error|failed)$" }).Count
-      $warningCount += @($json.findings | Where-Object { $_.severity -eq "warning" }).Count
+    $findingsProperty = $json.PSObject.Properties["findings"]
+    if ($findingsProperty -and $null -ne $findingsProperty.Value) {
+      $blockerCount += @($findingsProperty.Value | Where-Object { $_.severity -match "^(blocker|error|failed)$" }).Count
+      $warningCount += @($findingsProperty.Value | Where-Object { $_.severity -eq "warning" }).Count
     }
     return [ordered]@{
       status = $json.status
@@ -104,6 +107,136 @@ function Get-ReportSummary {
       parse_error = $_.Exception.Message
     }
   }
+}
+
+function Get-ReportIssues {
+  param([string]$Path)
+
+  $issues = New-List
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return $issues
+  }
+
+  try {
+    $json = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    foreach ($propertyName in @("warnings", "findings")) {
+      $property = $json.PSObject.Properties[$propertyName]
+      if (-not $property -or $null -eq $property.Value) {
+        continue
+      }
+
+      foreach ($item in @($property.Value)) {
+        if ($null -eq $item) {
+          continue
+        }
+        $issues.Add([ordered]@{
+          source = $propertyName
+          severity = $item.severity
+          code = $item.code
+          name = $item.name
+          status = $item.status
+          message = if ($item.message) { $item.message } else { $item.detail }
+        }) | Out-Null
+      }
+    }
+  } catch {
+    $issues.Add([ordered]@{
+      source = "report"
+      severity = "warning"
+      code = "report-parse-error"
+      message = $_.Exception.Message
+    }) | Out-Null
+  }
+
+  return $issues
+}
+
+function Get-ReportCollection {
+  param(
+    [string]$Path,
+    [string]$PropertyName
+  )
+
+  $items = New-List
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return $items
+  }
+
+  try {
+    $json = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $property = $json.PSObject.Properties[$PropertyName]
+    if ($property -and $null -ne $property.Value) {
+      foreach ($item in @($property.Value)) {
+        $items.Add($item) | Out-Null
+      }
+    }
+  } catch {
+    $items.Add([ordered]@{
+      name = "report-parse-error"
+      status = "warning"
+      detail = $_.Exception.Message
+    }) | Out-Null
+  }
+
+  return $items
+}
+
+function Test-EvidenceOnlyProjectionWarning {
+  param([object]$Step)
+
+  if ($Step.name -ne "projection-verifier") {
+    return $false
+  }
+  if ($databaseUrlSupplied -or $StrictLegacySource) {
+    return $false
+  }
+  if (-not $Step.data.report) {
+    return $false
+  }
+
+  $allowedCodes = @(
+    "missing-legacy-snapshot",
+    "missing-legacy-source"
+  )
+  $issues = @(Get-ReportIssues $Step.data.report)
+  if ($issues.Count -eq 0) {
+    return $false
+  }
+
+  foreach ($issue in $issues) {
+    if (-not $issue.code -or $allowedCodes -notcontains $issue.code) {
+      return $false
+    }
+  }
+
+  return $true
+}
+
+function Test-ReviewOnlyFrontendWarning {
+  param([object]$Step)
+
+  if ($Step.name -ne "frontend-reverse-proxy-legacy-dependencies") {
+    return $false
+  }
+  if (-not $FailOnFrontendLegacyWriteDependency) {
+    return $false
+  }
+  if (-not $Step.data.report) {
+    return $false
+  }
+
+  $issues = @(Get-ReportIssues $Step.data.report)
+  if ($issues.Count -eq 0) {
+    return $false
+  }
+
+  foreach ($issue in $issues) {
+    if ($issue.name -ne "frontend-legacy-api-references") {
+      return $false
+    }
+  }
+
+  return $true
 }
 
 function Invoke-AuditStep {
@@ -144,6 +277,8 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $steps = New-List
 $warnings = New-List
 $blockers = New-List
+$evidencePending = New-List
+$reviewItems = New-List
 $databaseUrlSupplied = -not [string]::IsNullOrWhiteSpace($DatabaseUrl)
 
 if (-not $DatabaseUrl) {
@@ -248,8 +383,50 @@ foreach ($step in $steps) {
   if ($step.status -ne "ok") {
     continue
   }
+
+  if ($step.data.report) {
+    foreach ($item in @(Get-ReportCollection $step.data.report "evidence_pending")) {
+      $evidencePending.Add([ordered]@{
+        name = "$($step.name):$($item.name)"
+        status = if ($item.status) { $item.status } else { "pending-evidence" }
+        detail = if ($item.detail) { $item.detail } else { "Nested report has pending final evidence." }
+        report = if ($item.report) { $item.report } else { $step.data.report }
+      }) | Out-Null
+    }
+
+    foreach ($item in @(Get-ReportCollection $step.data.report "review_items")) {
+      $reviewItems.Add([ordered]@{
+        name = "$($step.name):$($item.name)"
+        status = if ($item.status) { $item.status } else { "review" }
+        detail = if ($item.detail) { $item.detail } else { "Nested report has review item." }
+        report = $step.data.report
+      }) | Out-Null
+    }
+  }
+
   $summary = $step.data.summary
   if ($summary -and $summary.warnings -gt 0) {
+    if (Test-EvidenceOnlyProjectionWarning $step) {
+      $evidencePending.Add([ordered]@{
+        name = $step.name
+        status = "pending-evidence"
+        detail = "Real legacy source was not supplied for this routine audit; this is final cutover evidence, not an engineering blocker."
+        report = $step.data.report
+        codes = @((Get-ReportIssues $step.data.report) | ForEach-Object { $_.code } | Where-Object { $_ })
+      }) | Out-Null
+      continue
+    }
+
+    if (Test-ReviewOnlyFrontendWarning $step) {
+      $reviewItems.Add([ordered]@{
+        name = $step.name
+        status = "review"
+        detail = "Frontend still contains legacy route literals, but live mutating candidates are blocked by the hard gate."
+        report = $step.data.report
+      }) | Out-Null
+      continue
+    }
+
     $warnings.Add([ordered]@{
       name = $step.name
       status = "warning"
@@ -277,6 +454,8 @@ $report = [ordered]@{
   legacy_writes_frozen = [bool]$LegacyWritesFrozen
   blockers = $blockers
   warnings = $warnings
+  evidence_pending = $evidencePending
+  review_items = $reviewItems
   steps = $steps
 }
 

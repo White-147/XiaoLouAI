@@ -19,8 +19,9 @@ Use code truth over older architecture reports: `src/server.js` currently calls
 instantiate the old `SqliteStore`. SQLite scripts in `scripts/*sqlite*.js` are
 migration-only utilities and must not be used as runtime persistence.
 
-New production work should land in `control-plane-dotnet/` first. During P1
-cutover, run core-api as a read-only compatibility surface:
+New production work should land in `control-plane-dotnet/` first. During P1/P2
+cutover, core-api defaults to a read-only compatibility surface; keep this
+explicit in runtime env:
 
 ```text
 CORE_API_COMPAT_READ_ONLY=1
@@ -83,7 +84,7 @@ DATABASE_PUBLIC_URL=postgres://root:root@218.92.180.214:5432/xiaolou
 VR_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
 PYTHON_API_INTERNAL_BASE_URL=http://127.0.0.1:8000
 JAAZ_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
-PGPOOL_MAX=10
+PGPOOL_MAX=2
 POSTGRES_ALLOW_EMPTY_BOOTSTRAP=0
 CORE_API_DB_PATH=./data/demo.sqlite  # migration-only import source; never runtime
 CORE_API_UPLOAD_DIR=./uploads        # upload directory, relative to core-api/
@@ -148,7 +149,7 @@ DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
 DATABASE_PUBLIC_URL=postgres://root:root@218.92.180.214:5432/xiaolou
 VR_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
 JAAZ_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
-PGPOOL_MAX=10
+PGPOOL_MAX=2
 POSTGRES_ALLOW_EMPTY_BOOTSTRAP=0
 ```
 

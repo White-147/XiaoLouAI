@@ -16,6 +16,7 @@ import {
   recoverGenerationWithXiaolou,
   findStrayGenerationWithXiaolou,
 } from '../integrations/xiaolouGenerationBridge';
+import { isRetiredLegacyMediaUrl } from '../../lib/media-url-policy';
 
 // Re-exports so recovery hooks import from one stable place.
 export {
@@ -122,13 +123,16 @@ function shouldInlineReferenceImageUrl(value: string) {
     return true;
   }
 
+  if (isRetiredLegacyMediaUrl(value)) {
+    return false;
+  }
+
   try {
     const parsed = new URL(value);
     if (
       parsed.pathname.startsWith('/canvas-library/') ||
       parsed.pathname.startsWith('/twitcanva-library/') ||
-      parsed.pathname.startsWith('/library/') ||
-      parsed.pathname.startsWith('/uploads/')
+      parsed.pathname.startsWith('/library/')
     ) {
       return true;
     }

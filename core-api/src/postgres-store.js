@@ -46,12 +46,16 @@ function allowEmptyBootstrap() {
   return String(process.env.POSTGRES_ALLOW_EMPTY_BOOTSTRAP || "0").trim() === "1";
 }
 
-function envFlag(name) {
-  return ["1", "true", "yes", "on"].includes(String(process.env[name] || "").trim().toLowerCase());
+function envFlag(name, defaultValue = false) {
+  const raw = String(process.env[name] || "").trim().toLowerCase();
+  if (!raw) return defaultValue;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return defaultValue;
 }
 
 function isCompatReadOnlyMode() {
-  return envFlag("CORE_API_COMPAT_READ_ONLY");
+  return envFlag("CORE_API_COMPAT_READ_ONLY", true);
 }
 
 class PostgresStore extends MockStore {
@@ -62,7 +66,7 @@ class PostgresStore extends MockStore {
     this.connectionString = options.connectionString || process.env.DATABASE_URL || DEFAULT_DATABASE_URL;
     this.pool = options.pool || new Pool({
       connectionString: this.connectionString,
-      max: Number(process.env.PGPOOL_MAX || 10),
+      max: Number(process.env.PGPOOL_MAX || 2),
       ssl: resolveSslConfig(),
     });
     this.snapshotKey = options.snapshotKey || "snapshot";

@@ -9,7 +9,7 @@
  *
  *   1. stripCanvasRuntimeCacheBust(url)
  *        Low-level helper: removes the `?t=<ts>` cache-buster we add to local
- *        /uploads / /library URLs for in-memory reload.
+ *        library URLs for in-memory reload.
  *
  *   2. sanitizePersistedCanvasString(value)
  *        Synchronous guard. Returns the input unchanged if it is a safe
@@ -47,30 +47,26 @@
 
 import { uploadAsset } from '../services/assetService';
 import { NodeData, NodeGroup, NodeStatus, NodeType } from '../types';
+import { isRetiredLegacyMediaUrl } from '../../lib/media-url-policy';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LOCAL_CANVAS_MEDIA_PREFIXES = [
-  '/uploads/',
   '/library/',
   '/canvas-library/',
   '/twitcanva-library/',
 ];
 
 /**
- * Path prefixes that are safe to persist long-term. Mirrors what the backend
- * knows how to serve (see core-api/src/canvas-library.js and
- * core-api/src/uploads.js) plus an explicit `/vr-*` allowlist for the
- * video-replace module.
+ * Path prefixes that are safe to persist long-term. Retired local upload and
+ * video-replace paths are filtered by isRetiredLegacyMediaUrl below.
  */
 const PERSISTED_PATH_PREFIXES = [
-  '/uploads/',
   '/library/',
   '/canvas-library/',
   '/twitcanva-library/',
-  '/vr-',
 ];
 
 /** Matches the serialization placeholder that sqlite-store.js emits when a
@@ -103,8 +99,8 @@ function isLocalCanvasMediaUrl(value: string): boolean {
 }
 
 /**
- * Strip the `?t=<ts>` cache-busting query our runtime adds to /uploads,
- * /library, /canvas-library, /twitcanva-library URLs. Non-local (remote http)
+ * Strip the `?t=<ts>` cache-busting query our runtime adds to local
+ * library URLs. Non-local (remote http)
  * URLs are returned unchanged because their query strings are often the
  * signing data (e.g. OSS/CDN tokens) and must be preserved.
  */
@@ -143,6 +139,7 @@ type CanvasUrlClass =
   | 'http'
   | 'data'
   | 'blob'
+  | 'retired-legacy'
   | 'truncated'
   | 'oversized'
   | 'garbage';
@@ -156,6 +153,7 @@ export function classifyCanvasPersistedUrl(value: unknown): CanvasUrlClass {
   if (trimmed.startsWith('data:')) return 'data';
   if (trimmed.startsWith('blob:')) return 'blob';
   if (trimmed.length > PERSISTED_URL_MAX_LEN) return 'oversized';
+  if (isRetiredLegacyMediaUrl(trimmed)) return 'retired-legacy';
   if (/^https?:\/\//i.test(trimmed)) return 'http';
   if (PERSISTED_PATH_PREFIXES.some((p) => trimmed.startsWith(p))) {
     return 'path-persisted';
@@ -303,8 +301,7 @@ export function sanitizeCanvasGroupsForPersistence(groups: NodeGroup[]): NodeGro
 
 export interface CanvasSaveUploaderDeps {
   /**
-   * Upload a `data:` URL and return a server-side path URL (e.g.
-   * `/library/images/xxx.png` or `/uploads/xxx.png`). Must NOT return the
+   * Upload a `data:` URL and return a Control API media URL. Must NOT return the
    * input data URL unchanged; implementations should throw on failure so this
    * module can decide whether to drop the field to null.
    */

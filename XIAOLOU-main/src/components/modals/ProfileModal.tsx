@@ -53,10 +53,7 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
 
     try {
       const uploaded = await uploadFile(file, "avatar");
-      // Use urlPath ("/uploads/xxx.jpg") so it works through the Vite proxy
-      // on both local and external access, instead of the absolute URL
-      // which points directly to the core-api port.
-      setAvatar(uploaded.urlPath);
+      setAvatar(uploaded.urlPath || uploaded.url);
     } catch (error) {
       console.error("Avatar upload failed:", error);
       setAvatar(null);

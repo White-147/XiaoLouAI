@@ -17,7 +17,9 @@ if (-not $env:CONTROL_API_DLL) {
 }
 
 $env:ASPNETCORE_URLS = $env:CONTROL_API_URLS
-$env:Postgres__ApplySchemaOnStartup = $env:POSTGRES_APPLY_SCHEMA_ON_STARTUP
+if ($env:POSTGRES_APPLY_SCHEMA_ON_STARTUP) {
+  $env:Postgres__ApplySchemaOnStartup = $env:POSTGRES_APPLY_SCHEMA_ON_STARTUP
+}
 $env:ObjectStorage__Provider = $env:OBJECT_STORAGE_PROVIDER
 $env:ObjectStorage__Bucket = $env:OBJECT_STORAGE_BUCKET
 $env:ObjectStorage__PublicBaseUrl = $env:OBJECT_STORAGE_PUBLIC_BASE_URL

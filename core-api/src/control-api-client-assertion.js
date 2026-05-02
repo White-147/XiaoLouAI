@@ -5,6 +5,7 @@ const DEFAULT_PERMISSIONS = Object.freeze([
   "jobs:create",
   "jobs:read",
   "jobs:cancel",
+  "wallet:read",
   "media:read",
   "media:write",
 ]);

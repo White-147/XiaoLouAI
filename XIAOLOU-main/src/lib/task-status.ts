@@ -1,7 +1,7 @@
 import type { Task } from "./api";
 
 const FAILED_STATUSES = new Set(["failed", "cancelled", "canceled", "error"]);
-const ACTIVE_STATUSES = new Set(["queued", "running", "pending", "processing"]);
+const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "retry_waiting", "pending", "processing"]);
 
 export function isTaskFailed(task: Pick<Task, "status">): boolean {
   return FAILED_STATUSES.has(String(task.status || "").toLowerCase());
@@ -18,7 +18,9 @@ export function formatTaskStatusLabel(task: Pick<Task, "status">): string {
   const status = String(task.status || "").toLowerCase();
   switch (status) {
     case "queued":
+    case "retry_waiting":
       return "排队中";
+    case "leased":
     case "running":
     case "processing":
       return "生成中";

@@ -19,12 +19,16 @@ const { startJaazKeepAlive } = require("./jaaz-services");
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const DEFAULT_COMPAT_PUBLIC_ROUTE_ALLOWLIST = "GET /healthz;GET /api/windows-native/status";
 
-function envFlag(name) {
-  return ["1", "true", "yes", "on"].includes(String(process.env[name] || "").trim().toLowerCase());
+function envFlag(name, defaultValue = false) {
+  const raw = String(process.env[name] || "").trim().toLowerCase();
+  if (!raw) return defaultValue;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return defaultValue;
 }
 
 function isCompatReadOnlyMode() {
-  return envFlag("CORE_API_COMPAT_READ_ONLY");
+  return envFlag("CORE_API_COMPAT_READ_ONLY", true);
 }
 
 function parseCompatPublicRouteAllowlist() {

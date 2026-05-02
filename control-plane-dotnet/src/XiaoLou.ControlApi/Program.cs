@@ -2,8 +2,10 @@ using System.Text;
 using System.Text.Json;
 using System.Net;
 using System.Security.Cryptography;
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using XiaoLou.Domain;
 using XiaoLou.Infrastructure.Postgres;
 using XiaoLou.Infrastructure.Storage;
@@ -99,6 +101,71 @@ app.MapGet("/healthz", () => Results.Ok(new
     architecture = "windows-native-dotnet-postgresql",
 }));
 
+app.MapGet("/livez", () => Results.Ok(new
+{
+    service = "xiaolou-control-api",
+    status = "alive",
+}));
+
+app.MapGet("/readyz", async (NpgsqlDataSource dataSource, CancellationToken ct) =>
+{
+    try
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(ct);
+        await using var command = new NpgsqlCommand("select 1", connection);
+        await command.ExecuteScalarAsync(ct);
+
+        return Results.Ok(new
+        {
+            service = "xiaolou-control-api",
+            status = "ready",
+            dependency = "postgresql",
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new
+        {
+            service = "xiaolou-control-api",
+            status = "not_ready",
+            dependency = "postgresql",
+            error = ex.GetType().Name,
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
+
+app.MapGet("/metrics", () =>
+{
+    using var process = Process.GetCurrentProcess();
+    var uptimeSeconds = Math.Max(0, (DateTimeOffset.UtcNow - new DateTimeOffset(process.StartTime.ToUniversalTime())).TotalSeconds);
+    var lines = new[]
+    {
+        "# HELP xiaolou_controlapi_up Control API process up signal.",
+        "# TYPE xiaolou_controlapi_up gauge",
+        "xiaolou_controlapi_up 1",
+        "# HELP xiaolou_controlapi_uptime_seconds Control API process uptime in seconds.",
+        "# TYPE xiaolou_controlapi_uptime_seconds gauge",
+        $"xiaolou_controlapi_uptime_seconds {uptimeSeconds:F0}",
+        "# HELP xiaolou_controlapi_working_set_bytes Control API process working set.",
+        "# TYPE xiaolou_controlapi_working_set_bytes gauge",
+        $"xiaolou_controlapi_working_set_bytes {process.WorkingSet64}",
+        "# HELP xiaolou_controlapi_gc_total_memory_bytes Managed memory reported by GC.",
+        "# TYPE xiaolou_controlapi_gc_total_memory_bytes gauge",
+        $"xiaolou_controlapi_gc_total_memory_bytes {GC.GetTotalMemory(false)}",
+    };
+
+    return Results.Text(string.Join('\n', lines) + "\n", "text/plain; version=0.0.4; charset=utf-8");
+});
+
+app.MapGet("/api/windows-native/status", () => Results.Ok(new
+{
+    enabled = true,
+    service = "xiaolou-control-api",
+    productionTarget = "windows-native-dotnet-postgresql",
+    asyncFoundation = "postgresql",
+    coreApiRole = "compat-readonly",
+}));
+
 app.MapPost("/api/schema/apply", async (PostgresSchemaMigrator migrator, CancellationToken ct) =>
 {
     await migrator.ApplyAsync(ct);
@@ -139,6 +206,8 @@ app.MapPost("/api/jobs", async (
 
 app.MapGet("/api/jobs", async (
     string? accountId,
+    string? accountOwnerType,
+    string? accountOwnerId,
     string? lane,
     string? status,
     int? limit,
@@ -148,12 +217,30 @@ app.MapGet("/api/jobs", async (
     CancellationToken ct) =>
 {
     Guid? parsedAccountId = Guid.TryParse(accountId, out var accountGuid) ? accountGuid : null;
-    if (AuthorizeAccountId(httpContext, clientApi.Value, parsedAccountId) is { } denied)
+    var normalizedOwnerType = NormalizeOwnerType(accountOwnerType);
+    var normalizedOwnerId = NormalizeBlank(accountOwnerId);
+
+    IResult? denied = parsedAccountId is not null
+        ? AuthorizeAccountId(httpContext, clientApi.Value, parsedAccountId)
+        : AuthorizeAccountScope(httpContext, clientApi.Value, new AccountScope
+        {
+            AccountOwnerType = normalizedOwnerType,
+            AccountOwnerId = normalizedOwnerId,
+        });
+
+    if (denied is not null)
     {
         return denied;
     }
 
-    return Results.Ok(await jobs.ListJobsAsync(parsedAccountId, lane, status, limit ?? 50, ct));
+    return Results.Ok(await jobs.ListJobsAsync(
+        parsedAccountId,
+        normalizedOwnerType,
+        normalizedOwnerId,
+        lane,
+        status,
+        limit ?? 50,
+        ct));
 });
 
 app.MapGet("/api/jobs/{jobId:guid}", async (
@@ -200,6 +287,93 @@ app.MapPost("/api/jobs/{jobId:guid}/cancel", async (
     return job is null ? Results.NotFound() : Results.Ok(job);
 });
 
+app.MapGet("/api/wallet", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresWalletStore wallets,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var wallet = await wallets.GetWalletByOwnerAsync(scope.AccountOwnerType, scope.AccountOwnerId, ct);
+    return wallet is null
+        ? Results.NotFound(new { error = "wallet not found" })
+        : Results.Ok(wallet);
+});
+
+app.MapGet("/api/wallets", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresWalletStore wallets,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new
+    {
+        items = await wallets.ListWalletsByOwnerAsync(scope.AccountOwnerType, scope.AccountOwnerId, 20, ct),
+    });
+});
+
+app.MapGet("/api/wallets/{walletId:guid}/ledger", async (
+    Guid walletId,
+    int? limit,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresWalletStore wallets,
+    CancellationToken ct) =>
+{
+    var wallet = await wallets.GetWalletByAccountIdAsync(walletId, ct);
+    if (wallet is null)
+    {
+        return Results.NotFound(new { error = "wallet not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, wallet) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new
+    {
+        items = await wallets.ListLedgerAsync(walletId, limit ?? 50, ct),
+    });
+});
+
+app.MapGet("/api/wallet/usage-stats", async (
+    string? mode,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresWalletStore wallets,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId, mode);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await wallets.GetUsageStatsAsync(
+        scope.AccountOwnerType,
+        scope.AccountOwnerId,
+        mode,
+        ct));
+});
+
 app.MapPost("/api/internal/jobs/lease", async (
     LeaseJobsRequest request,
     PostgresJobQueue jobs,
@@ -232,7 +406,14 @@ app.MapPost("/api/internal/jobs/recover-expired", async (
     PostgresJobQueue jobs,
     CancellationToken ct) =>
 {
-    return Results.Ok(await jobs.RecoverExpiredLeasesAsync(ct));
+    return await HandleRecoverExpiredJobsAsync(jobs, ct);
+});
+
+app.MapPost("/api/internal/jobs/recover-expired-leases", async (
+    PostgresJobQueue jobs,
+    CancellationToken ct) =>
+{
+    return await HandleRecoverExpiredJobsAsync(jobs, ct);
 });
 
 app.MapGet("/api/internal/jobs/{jobId:guid}/attempts", async (
@@ -249,8 +430,16 @@ app.MapPost("/api/internal/jobs/{jobId:guid}/succeed", async (
     PostgresJobQueue jobs,
     CancellationToken ct) =>
 {
-    var job = await jobs.SucceedAsync(jobId, JsonbFrom(request.Result), ct);
-    return job is null ? Results.NotFound() : Results.Ok(job);
+    return await HandleJobSucceedAsync(jobId, request, jobs, ct);
+});
+
+app.MapPost("/api/internal/jobs/{jobId:guid}/succeeded", async (
+    Guid jobId,
+    CompleteJobRequest request,
+    PostgresJobQueue jobs,
+    CancellationToken ct) =>
+{
+    return await HandleJobSucceedAsync(jobId, request, jobs, ct);
 });
 
 app.MapPost("/api/internal/jobs/{jobId:guid}/fail", async (
@@ -259,13 +448,16 @@ app.MapPost("/api/internal/jobs/{jobId:guid}/fail", async (
     PostgresJobQueue jobs,
     CancellationToken ct) =>
 {
-    var job = await jobs.FailOrRetryAsync(
-        jobId,
-        request.Error ?? "job failed",
-        request.Retry,
-        request.RetryDelaySeconds,
-        ct);
-    return job is null ? Results.NotFound() : Results.Ok(job);
+    return await HandleJobFailAsync(jobId, request, jobs, ct);
+});
+
+app.MapPost("/api/internal/jobs/{jobId:guid}/failed", async (
+    Guid jobId,
+    FailJobRequest request,
+    PostgresJobQueue jobs,
+    CancellationToken ct) =>
+{
+    return await HandleJobFailAsync(jobId, request, jobs, ct);
 });
 
 app.MapGet("/api/internal/jobs/wait-signal", async (
@@ -290,31 +482,48 @@ app.MapPost("/api/payments/callbacks/{provider}", async (
     IPaymentSignatureVerifier verifier,
     CancellationToken ct) =>
 {
-    using var reader = new StreamReader(http.Body, Encoding.UTF8);
-    var rawBody = await reader.ReadToEndAsync(ct);
-    var callback = JsonSerializer.Deserialize<PaymentCallbackRequest>(rawBody, jsonOptions)
-        ?? new PaymentCallbackRequest();
-    if (ValidatePaymentCallbackProviderBoundary(
+    return await HandlePaymentCallbackAsync(
         provider,
-        callback,
+        http,
         paymentCallbackOptions.Value,
-        out var normalizedProvider) is { } denied)
-    {
-        return denied;
-    }
+        ledger,
+        verifier,
+        jsonOptions,
+        ct);
+});
 
-    var signature = http.Headers["X-XiaoLou-Signature"].FirstOrDefault() ?? callback.Signature;
-    var signatureValid = verifier.Verify(normalizedProvider, rawBody, signature);
-    var result = await ledger.ProcessCallbackAsync(callback with
-    {
-        Provider = normalizedProvider,
-        SignatureValid = signatureValid,
-        RawBody = rawBody,
-    }, ct);
+app.MapPost("/api/payments/alipay/notify", async (
+    HttpRequest http,
+    IOptions<PaymentCallbackOptions> paymentCallbackOptions,
+    PostgresPaymentLedger ledger,
+    IPaymentSignatureVerifier verifier,
+    CancellationToken ct) =>
+{
+    return await HandlePaymentCallbackAsync(
+        "alipay",
+        http,
+        paymentCallbackOptions.Value,
+        ledger,
+        verifier,
+        jsonOptions,
+        ct);
+});
 
-    return signatureValid && !IsRejected(result)
-        ? Results.Ok(result)
-        : Results.BadRequest(result);
+app.MapPost("/api/payments/wechat/notify", async (
+    HttpRequest http,
+    IOptions<PaymentCallbackOptions> paymentCallbackOptions,
+    PostgresPaymentLedger ledger,
+    IPaymentSignatureVerifier verifier,
+    CancellationToken ct) =>
+{
+    return await HandlePaymentCallbackAsync(
+        "wechat",
+        http,
+        paymentCallbackOptions.Value,
+        ledger,
+        verifier,
+        jsonOptions,
+        ct);
 });
 
 app.MapPost("/api/media/upload-begin", async (
@@ -420,6 +629,87 @@ static string JsonbFrom(JsonElement element)
     return element.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
         ? "{}"
         : element.GetRawText();
+}
+
+static async Task<IResult> HandleRecoverExpiredJobsAsync(
+    PostgresJobQueue jobs,
+    CancellationToken ct)
+{
+    return Results.Ok(await jobs.RecoverExpiredLeasesAsync(ct));
+}
+
+static async Task<IResult> HandleJobSucceedAsync(
+    Guid jobId,
+    CompleteJobRequest request,
+    PostgresJobQueue jobs,
+    CancellationToken ct)
+{
+    var job = await jobs.SucceedAsync(jobId, JsonbFrom(request.Result), ct);
+    return job is null ? Results.NotFound() : Results.Ok(job);
+}
+
+static async Task<IResult> HandleJobFailAsync(
+    Guid jobId,
+    FailJobRequest request,
+    PostgresJobQueue jobs,
+    CancellationToken ct)
+{
+    var job = await jobs.FailOrRetryAsync(
+        jobId,
+        request.Error ?? "job failed",
+        request.Retry,
+        request.RetryDelaySeconds,
+        ct);
+    return job is null ? Results.NotFound() : Results.Ok(job);
+}
+
+static async Task<IResult> HandlePaymentCallbackAsync(
+    string provider,
+    HttpRequest http,
+    PaymentCallbackOptions paymentCallbackOptions,
+    PostgresPaymentLedger ledger,
+    IPaymentSignatureVerifier verifier,
+    JsonSerializerOptions jsonOptions,
+    CancellationToken ct)
+{
+    using var reader = new StreamReader(http.Body, Encoding.UTF8);
+    var rawBody = await reader.ReadToEndAsync(ct);
+    PaymentCallbackRequest callback;
+    try
+    {
+        callback = JsonSerializer.Deserialize<PaymentCallbackRequest>(rawBody, jsonOptions)
+            ?? new PaymentCallbackRequest();
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new
+        {
+            error = "payment callback body must be normalized JSON before ledger processing",
+            provider = NormalizePaymentProvider(provider) ?? provider,
+        });
+    }
+
+    if (ValidatePaymentCallbackProviderBoundary(
+        provider,
+        callback,
+        paymentCallbackOptions,
+        out var normalizedProvider) is { } denied)
+    {
+        return denied;
+    }
+
+    var signature = http.Headers["X-XiaoLou-Signature"].FirstOrDefault() ?? callback.Signature;
+    var signatureValid = verifier.Verify(normalizedProvider, rawBody, signature);
+    var result = await ledger.ProcessCallbackAsync(callback with
+    {
+        Provider = normalizedProvider,
+        SignatureValid = signatureValid,
+        RawBody = rawBody,
+    }, ct);
+
+    return signatureValid && !IsRejected(result)
+        ? Results.Ok(result)
+        : Results.BadRequest(result);
 }
 
 static bool IsRejected(Dictionary<string, object?> result)
@@ -582,14 +872,42 @@ static bool IsInternalRequestAllowed(HttpContext context, InternalApiOptions opt
 static bool IsOperationalRequest(HttpContext context)
 {
     return context.Request.Path.StartsWithSegments("/api/schema")
-        || context.Request.Path.StartsWithSegments("/api/providers/health");
+        || context.Request.Path.StartsWithSegments("/api/providers/health")
+        || context.Request.Path.StartsWithSegments("/metrics");
 }
 
 static bool IsPublicClientApiRequest(HttpContext context)
 {
-    return context.Request.Path.StartsWithSegments("/api/accounts/ensure")
-        || context.Request.Path.StartsWithSegments("/api/jobs")
-        || context.Request.Path.StartsWithSegments("/api/media");
+    var path = context.Request.Path;
+    return path.StartsWithSegments("/api/accounts/ensure")
+        || path.StartsWithSegments("/api/jobs")
+        || path.StartsWithSegments("/api/media")
+        || string.Equals(path.Value, "/api/wallet", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(path.Value, "/api/wallet/usage-stats", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWithSegments("/api/wallets");
+}
+
+static AccountScope ResolvePublicOwnerScope(
+    HttpContext context,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    string? mode = null)
+{
+    var ownerType = NormalizeOwnerType(accountOwnerType)
+        ?? (string.Equals(mode, "organization", StringComparison.OrdinalIgnoreCase) ? "organization" : "user");
+    var ownerId = NormalizeBlank(accountOwnerId)
+        ?? NormalizeBlank(ReadHeader(context, "X-Actor-Id"))
+        ?? NormalizeBlank(GetClientPrincipal(context)?.Subject)
+        ?? "guest";
+
+    return new AccountScope
+    {
+        AccountOwnerType = ownerType,
+        AccountOwnerId = ownerId,
+        RegionCode = "CN",
+        Currency = "CNY",
+    };
 }
 
 static IResult? AuthorizeAccountScope(HttpContext context, ClientApiOptions options, AccountScope scope)
@@ -754,6 +1072,15 @@ static string? GetRequiredClientPermission(HttpContext context)
         {
             return "jobs:cancel";
         }
+    }
+
+    if (HttpMethods.IsGet(method)
+        && (string.Equals(path.Value, "/api/wallet", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path.Value, "/api/wallet/usage-stats", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWithSegments("/api/wallets")))
+    {
+        return "wallet:read";
     }
 
     if (path.StartsWithSegments("/api/media"))

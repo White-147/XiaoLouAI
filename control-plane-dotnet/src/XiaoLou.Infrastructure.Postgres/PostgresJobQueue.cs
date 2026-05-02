@@ -81,6 +81,8 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
 
     public async Task<IReadOnlyList<Dictionary<string, object?>>> ListJobsAsync(
         Guid? accountId,
+        string? accountOwnerType,
+        string? accountOwnerId,
         string? lane,
         string? status,
         int limit,
@@ -94,6 +96,16 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
         {
             filters.Add("j.account_id = @accountId");
             command.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId.Value);
+        }
+        else if (!string.IsNullOrWhiteSpace(accountOwnerId))
+        {
+            filters.Add("a.legacy_owner_type = @accountOwnerType");
+            filters.Add("a.legacy_owner_id = @accountOwnerId");
+            command.Parameters.AddWithValue(
+                "accountOwnerType",
+                NpgsqlDbType.Text,
+                string.IsNullOrWhiteSpace(accountOwnerType) ? "user" : accountOwnerType.Trim().ToLowerInvariant());
+            command.Parameters.AddWithValue("accountOwnerId", NpgsqlDbType.Text, accountOwnerId.Trim());
         }
 
         if (!string.IsNullOrWhiteSpace(lane))

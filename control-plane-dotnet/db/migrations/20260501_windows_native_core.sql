@@ -180,6 +180,12 @@ CREATE INDEX IF NOT EXISTS ix_jobs_lease_timeout
 CREATE INDEX IF NOT EXISTS ix_jobs_account_status
   ON jobs(account_id, status, created_at DESC);
 
+-- Supports the lease query that excludes already-active jobs for the same
+-- account/lane before picking the next PostgreSQL queued job.
+CREATE INDEX IF NOT EXISTS ix_jobs_account_lane_active
+  ON jobs(account_id, lane, status, lease_until)
+  WHERE status IN ('leased', 'running');
+
 CREATE TABLE IF NOT EXISTS job_attempts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id uuid NOT NULL REFERENCES jobs(id),

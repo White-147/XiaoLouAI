@@ -47,6 +47,8 @@ started from an elevated PowerShell session, and verified by P0 run
 D:\code\XiaoLouAI\.runtime\app\scripts\windows\start-services.ps1
 Get-Service XiaoLou-ControlApi,XiaoLou-ClosedApiWorker,XiaoLou-LocalModelWorker
 Invoke-RestMethod http://127.0.0.1:4100/healthz
+Invoke-RestMethod http://127.0.0.1:4100/livez
+Invoke-RestMethod http://127.0.0.1:4100/readyz
 ```
 
 4. Run the P0 smoke verification against the production-style local endpoint before opening public traffic:
@@ -88,6 +90,10 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 
 - `/api/internal/*` is worker-only. Public reverse proxies must block it before general `/api/*` forwarding.
 - `/api/schema/*` and `/api/providers/health` are operational APIs. Public reverse proxies must block them too.
+- `/healthz`, `/livez`, and `/readyz` are the only public health probes. `/readyz` checks PostgreSQL with a minimal `select 1`; keep it out of high-frequency public scraping.
+- `/metrics` is an internal operational endpoint. It requires the same internal
+  boundary as `/api/schema/*` and `/api/providers/health`; Caddy/IIS examples
+  return 404 for public `/metrics`.
 - `deploy/windows/Caddyfile.windows.example` and `deploy/windows/iis-web.config.example` include the public block rules.
 - `INTERNAL_API_TOKEN` should be set in production. Workers send it as `X-XiaoLou-Internal-Token`.
 - If the token is absent, the Control API only allows internal endpoints from loopback requests with no external forwarding headers. This is for local verification only, not production.
@@ -106,6 +112,24 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 - `CLIENT_API_ALLOWED_ACCOUNT_IDS=*` and owner wildcards such as `user:*` are broad grants. Use them only for temporary staging or deliberate canary windows with a rollback plan.
 - `/api/payments/callbacks/*` remains provider-signature protected and is not a client-token route.
 
+## Provider Health, Outbox, and Worker Boundaries
+
+- `PostgresProviderHealthStore` owns provider health snapshots in PostgreSQL.
+  Control API exposes `/api/providers/health` as an operational endpoint only;
+  public reverse proxies must not expose it.
+- `PostgresOutboxStore` owns outbox leasing and completion under
+  `/api/internal/outbox/*`. Outbox state is retry/publish coordination, not a
+  source of truth. Canonical PostgreSQL tables remain authoritative.
+- `XiaoLou-ClosedApiWorker` leases `account-media` jobs for closed API provider
+  routes, applies provider-specific retry/backoff behavior, and writes job
+  completion back through internal routes.
+- `XiaoLou-LocalModelWorker` is a .NET Windows Service wrapper around the local
+  Python adapter. Python stays inside the local model execution boundary and
+  does not become the control plane or queue coordinator.
+- Provider fallback policy should be expressed through PostgreSQL provider health
+  rows and job routing decisions. Do not add Redis/Celery or process-local
+  queues to coordinate provider state.
+
 ## Legacy core-api Compatibility Boundary
 
 - Do not expose `core-api/` as the long-term production control plane.
@@ -113,6 +137,7 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 - In read-only mode, unspecified `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST` now defaults to `GET /healthz;GET /api/windows-native/status`; all other legacy public GET routes are closed unless deliberately allowlisted.
 - Read-only mode must not seed or project legacy snapshots into the Windows-native canonical test database. Use `scripts/windows/verify-core-api-compat-readonly.ps1` to start the full process and verify `/healthz`, `/api/windows-native/status`, closed legacy reads, and blocked writes. The default closed-read smoke covers wallet, jobs, projects/assets, chat model discovery, auth providers, legacy payment checkout, canvas/agent-canvas project reads, canvas library reads, and `/uploads/*`.
 - Use `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=*` only for local debugging, not production cutover.
+- Keep `docs/core-api-cutover.md` current whenever a legacy alias is added or retired.
 
 ## Legacy to Canonical Projection Gate
 
@@ -127,11 +152,23 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 ## Payment Gray Replay
 
 1. Keep `wallet_ledger` immutable. Do not repair production balances with manual SQL updates.
+   The built-in HMAC payment verifier is for normalized sandbox/replay payloads only.
+   Real Alipay and WeChat Pay callbacks must go through the provider-specific native
+   verifier/decrypt adapter before ledger processing.
 2. Before replay, back up PostgreSQL and run:
 
 ```powershell
 D:\code\XiaoLouAI\.runtime\app\scripts\windows\audit-wallet-ledger.ps1 -FailOnMismatch
 D:\code\XiaoLouAI\.runtime\app\scripts\windows\rebuild-wallet-balances-from-ledger.ps1
+```
+
+Verify at least one `pg_dump -Fc` artifact in an isolated temporary database
+before trusting it for rollback:
+
+```powershell
+D:\code\XiaoLouAI\.runtime\app\scripts\windows\verify-postgres-backup.ps1 `
+  -DumpFile D:\code\XiaoLouAI\.runtime\xiaolou-backups\xiaolou-YYYYMMDD-HHMMSS.dump `
+  -PgBin D:\soft\program\PostgreSQL\18\bin
 ```
 
 3. Replay captured payment callbacks into a staging database first. Use the same provider, raw body, and signature headers used by production callbacks.
@@ -153,7 +190,16 @@ Without `-Execute`, the staging wrapper runs wallet audit and dry-run parsing on
 ```powershell
 Get-Service XiaoLou-ControlApi,XiaoLou-ClosedApiWorker,XiaoLou-LocalModelWorker
 Invoke-RestMethod http://127.0.0.1:4100/healthz
+Invoke-RestMethod http://127.0.0.1:4100/livez
+Invoke-RestMethod http://127.0.0.1:4100/readyz
 ```
+
+`/healthz` confirms the ASP.NET Core process is responding. `/livez` is a
+minimal liveness probe for service managers and reverse proxies. `/readyz`
+checks PostgreSQL readiness. `/metrics` is available only as an internal
+operational endpoint and currently exposes process-level gauges; use Windows
+Event Log plus `D:\code\XiaoLouAI\.runtime\xiaolou-logs` for structured
+operational evidence.
 
 ## Windows Service Ops Drill
 

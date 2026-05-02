@@ -1,5 +1,6 @@
 import { Image as ImageIcon, Video } from "lucide-react";
 import { API_BASE_URL } from "../../lib/api";
+import { isRetiredLegacyMediaUrl } from "../../lib/media-url-policy";
 import { cn } from "../../lib/utils";
 
 type GeneratedMediaPlaceholderProps = {
@@ -39,6 +40,10 @@ export function getGeneratedMediaUrl(url?: string | null) {
     return normalized;
   }
 
+  if (isRetiredLegacyMediaUrl(normalized)) {
+    return null;
+  }
+
   // A real upload path / http URL is almost always < 512 chars. Any
   // "non-data" string this long is very likely a bare base64 payload that
   // slipped through, and rendering it as <img src> would either crash the
@@ -47,17 +52,7 @@ export function getGeneratedMediaUrl(url?: string | null) {
     return null;
   }
 
-  if (/^https?:\/\//i.test(normalized)) {
-    try {
-      const parsed = new URL(normalized);
-      if (parsed.pathname.startsWith("/uploads/")) {
-        return parsed.pathname;
-      }
-    } catch {
-      // fall through
-    }
-    return normalized;
-  }
+  if (/^https?:\/\//i.test(normalized)) return normalized;
 
   const apiBaseUrl = API_BASE_URL.replace(/\/+$/, "");
   if (normalized.startsWith("/")) {

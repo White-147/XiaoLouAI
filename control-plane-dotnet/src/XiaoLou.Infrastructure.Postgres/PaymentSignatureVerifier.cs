@@ -13,6 +13,9 @@ public sealed class HmacPaymentSignatureVerifier(IConfiguration configuration) :
 {
     public bool Verify(string provider, string rawBody, string? signature)
     {
+        // Sandbox/stub verifier for normalized replay payloads. Real Alipay or
+        // WeChat callbacks must pass provider-specific verification/decryption
+        // before they reach ledger processing.
         var secret = configuration[$"Payments:{provider}:WebhookSecret"]
             ?? configuration["Payments:WebhookSecret"];
 

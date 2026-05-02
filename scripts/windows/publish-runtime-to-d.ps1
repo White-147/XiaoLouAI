@@ -108,6 +108,7 @@ if (-not $SkipRollbackSnapshot) {
     [ordered]@{ path = "publish\local-model-worker-service"; exclude = @() },
     [ordered]@{ path = "XIAOLOU-main\dist"; exclude = @() },
     [ordered]@{ path = "scripts\windows"; exclude = @(".env.windows") },
+    [ordered]@{ path = "docs"; exclude = @() },
     [ordered]@{ path = "deploy"; exclude = @() },
     [ordered]@{ path = "services\local-model-worker"; exclude = @() }
   )) {
@@ -143,6 +144,7 @@ $paths = @(
   "$RuntimeRoot\publish\closed-api-worker",
   "$RuntimeRoot\publish\local-model-worker-service",
   "$RuntimeRoot\scripts\windows",
+  "$RuntimeRoot\docs",
   "$RuntimeRoot\services\local-model-worker",
   "$RuntimeRoot\XIAOLOU-main\dist",
   "$runtimeStateRoot\xiaolou-cache",
@@ -156,6 +158,22 @@ $paths = @(
 
 foreach ($path in $paths) {
   New-Item -ItemType Directory -Force -Path $path | Out-Null
+}
+
+function Assert-DDrivePath {
+  param(
+    [string]$Path,
+    [string]$Name
+  )
+
+  $fullPath = [System.IO.Path]::GetFullPath($Path)
+  if (-not $fullPath.StartsWith("D:\", [StringComparison]::OrdinalIgnoreCase)) {
+    throw "$Name must stay on D:, got: $fullPath"
+  }
+}
+
+foreach ($path in @($RuntimeRoot, $runtimeStateRoot, "$runtimeStateRoot\xiaolou-logs", "$runtimeStateRoot\xiaolou-backups", "$runtimeStateRoot\xiaolou-temp", "$runtimeStateRoot\xiaolou-cache")) {
+  Assert-DDrivePath -Path $path -Name "runtime path"
 }
 
 if (-not $SkipDotnetPublish) {
@@ -198,6 +216,9 @@ if (-not $SkipFrontend) {
 }
 
 Copy-Item -Path "$SourceRoot\scripts\windows\*" -Destination "$RuntimeRoot\scripts\windows" -Recurse -Force
+if (Test-Path -LiteralPath "$SourceRoot\docs") {
+  Copy-Item -Path "$SourceRoot\docs" -Destination "$RuntimeRoot" -Recurse -Force
+}
 Copy-Item -Path "$SourceRoot\deploy" -Destination "$RuntimeRoot" -Recurse -Force
 Copy-Item -Path "$SourceRoot\services\local-model-worker\*" -Destination "$RuntimeRoot\services\local-model-worker" -Recurse -Force
 
@@ -266,6 +287,16 @@ function Set-EnvFileValue {
 
 $cacheRoot = "$runtimeStateRoot\xiaolou-cache"
 $tempRoot = "$runtimeStateRoot\xiaolou-temp"
+$connectionStringsPostgres = Resolve-EnvValue -Text $envText -Name "ConnectionStrings__Postgres"
+$postgresConnectionString = Resolve-EnvValue -Text $envText -Name "Postgres__ConnectionString"
+$postgresApplySchemaOnStartup = Resolve-EnvValue -Text $envText -Name "POSTGRES_APPLY_SCHEMA_ON_STARTUP" -DefaultValue (Resolve-EnvValue -Text $envText -Name "Postgres__ApplySchemaOnStartup" -DefaultValue "false")
+$postgresMinimumPoolSize = Resolve-EnvValue -Text $envText -Name "Postgres__MinimumPoolSize"
+$postgresMaximumPoolSize = Resolve-EnvValue -Text $envText -Name "Postgres__MaximumPoolSize"
+$postgresTimeoutSeconds = Resolve-EnvValue -Text $envText -Name "Postgres__TimeoutSeconds"
+$postgresCommandTimeoutSeconds = Resolve-EnvValue -Text $envText -Name "Postgres__CommandTimeoutSeconds"
+$postgresKeepAliveSeconds = Resolve-EnvValue -Text $envText -Name "Postgres__KeepAliveSeconds"
+$pgBin = Resolve-EnvValue -Text $envText -Name "PG_BIN" -DefaultValue "D:\soft\program\PostgreSQL\18\bin"
+$coreApiPgPoolMax = Resolve-EnvValue -Text $envText -Name "PGPOOL_MAX" -DefaultValue "2"
 $clientApiToken = Resolve-EnvValue -Text $envText -Name "CLIENT_API_TOKEN" -DefaultValue "change-me-client-token"
 $clientApiTokenHeader = Resolve-EnvValue -Text $envText -Name "CLIENT_API_TOKEN_HEADER" -DefaultValue "X-XiaoLou-Client-Token"
 $clientApiAuthProvider = Resolve-EnvValue -Text $envText -Name "CLIENT_API_AUTH_PROVIDER"
@@ -279,7 +310,7 @@ $clientApiRequireAccountScope = Resolve-EnvValue -Text $envText -Name "CLIENT_AP
 $clientApiRequireConfiguredAccountGrant = Resolve-EnvValue -Text $envText -Name "CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT" -DefaultValue "false"
 $clientApiAllowedAccountIds = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_ACCOUNT_IDS"
 $clientApiAllowedAccountOwnerIds = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS"
-$clientApiAllowedPermissions = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_PERMISSIONS" -DefaultValue "accounts:ensure,jobs:create,jobs:read,jobs:cancel,media:read,media:write"
+$clientApiAllowedPermissions = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_PERMISSIONS" -DefaultValue "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write"
 $coreApiCompatReadOnly = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_READ_ONLY" -DefaultValue "1"
 $coreApiCompatPublicRouteAllowlist = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST" -DefaultValue "GET /healthz;GET /api/windows-native/status"
 $paymentCallbackAllowedProviders = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_ALLOWED_PROVIDERS" -DefaultValue "testpay,alipay,wechat"
@@ -346,6 +377,17 @@ $envValues = [ordered]@{
   CLIENT_API_ALLOWED_ACCOUNT_IDS = $clientApiAllowedAccountIds
   CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS = $clientApiAllowedAccountOwnerIds
   CLIENT_API_ALLOWED_PERMISSIONS = $clientApiAllowedPermissions
+  ConnectionStrings__Postgres = $connectionStringsPostgres
+  Postgres__ConnectionString = $postgresConnectionString
+  POSTGRES_APPLY_SCHEMA_ON_STARTUP = $postgresApplySchemaOnStartup
+  Postgres__ApplySchemaOnStartup = $postgresApplySchemaOnStartup
+  Postgres__MinimumPoolSize = $postgresMinimumPoolSize
+  Postgres__MaximumPoolSize = $postgresMaximumPoolSize
+  Postgres__TimeoutSeconds = $postgresTimeoutSeconds
+  Postgres__CommandTimeoutSeconds = $postgresCommandTimeoutSeconds
+  Postgres__KeepAliveSeconds = $postgresKeepAliveSeconds
+  PG_BIN = $pgBin
+  PGPOOL_MAX = $coreApiPgPoolMax
   CORE_API_COMPAT_READ_ONLY = $coreApiCompatReadOnly
   CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST = $coreApiCompatPublicRouteAllowlist
   PAYMENT_CALLBACK_ALLOWED_PROVIDERS = $paymentCallbackAllowedProviders
@@ -366,6 +408,17 @@ foreach ($entry in $envValues.GetEnumerator()) {
 
 foreach ($name in @(
   "DATABASE_URL",
+  "ConnectionStrings__Postgres",
+  "Postgres__ConnectionString",
+  "POSTGRES_APPLY_SCHEMA_ON_STARTUP",
+  "Postgres__ApplySchemaOnStartup",
+  "Postgres__MinimumPoolSize",
+  "Postgres__MaximumPoolSize",
+  "Postgres__TimeoutSeconds",
+  "Postgres__CommandTimeoutSeconds",
+  "Postgres__KeepAliveSeconds",
+  "PG_BIN",
+  "PGPOOL_MAX",
   "PAYMENT_WEBHOOK_SECRET",
   "INTERNAL_API_TOKEN",
   "OBJECT_STORAGE_PROVIDER",
@@ -380,6 +433,29 @@ foreach ($name in @(
   }
 }
 Set-Content -LiteralPath $envFile -Value $envText -Encoding UTF8
+
+foreach ($requiredFile in @(
+  "$RuntimeRoot\scripts\windows\restore-postgres.ps1",
+  "$RuntimeRoot\scripts\windows\verify-postgres-backup.ps1",
+  "$RuntimeRoot\scripts\windows\complete-control-api-publish-restart-p0.ps1",
+  "$RuntimeRoot\deploy\windows\ops-runbook.md"
+)) {
+  if (-not (Test-Path -LiteralPath $requiredFile)) {
+    throw "Required runtime file was not published: $requiredFile"
+  }
+}
+
+if (-not $SkipDotnetPublish) {
+  foreach ($requiredDll in @(
+    "$RuntimeRoot\publish\control-api\XiaoLou.ControlApi.dll",
+    "$RuntimeRoot\publish\closed-api-worker\XiaoLou.ClosedApiWorker.dll",
+    "$RuntimeRoot\publish\local-model-worker-service\XiaoLou.LocalModelWorkerService.dll"
+  )) {
+    if (-not (Test-Path -LiteralPath $requiredDll)) {
+      throw "Required published DLL was not created: $requiredDll"
+    }
+  }
+}
 
 Write-Host "Published XiaoLouAI runtime to $RuntimeRoot"
 Write-Host "Review $envFile, then register/update Windows services:"

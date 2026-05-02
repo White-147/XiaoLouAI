@@ -20,8 +20,8 @@
 `SqliteStore`。`scripts/*sqlite*.js` 中的 SQLite 脚本只作为迁移工具，不得作为
 运行时持久化方案。
 
-新的生产工作应优先落在 `control-plane-dotnet/`。P1 切换期间，如果还需要运行
-core-api，应把它作为只读兼容面：
+新的生产工作应优先落在 `control-plane-dotnet/`。P1/P2 切换期间，core-api
+默认只能作为只读兼容面；运行时环境仍应显式保留：
 
 ```text
 CORE_API_COMPAT_READ_ONLY=1
@@ -76,6 +76,7 @@ CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=GET /healthz;GET /api/windows-native/stat
 DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
 READ_DATABASE_URL=postgres://root:root@127.0.0.1:5432/xiaolou
 PGBOUNCER_DATABASE_URL=postgres://root:root@127.0.0.1:6432/xiaolou
+PGPOOL_MAX=2
 POSTGRES_USER=root
 POSTGRES_PASSWORD=root
 POSTGRES_DB=xiaolou

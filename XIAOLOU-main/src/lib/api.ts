@@ -1,5 +1,6 @@
 import { getControlApiClientAssertion, getCurrentActorId, getAuthToken } from "./actor-session";
 import { isLocalLoopbackAccess, SUPER_ADMIN_DEMO_ACTOR_ID } from "./local-loopback";
+import { isRetiredLegacyMediaPath } from "./media-url-policy";
 import type {
   MediaCapabilitiesResponse,
   VideoInputMode,
@@ -26,6 +27,9 @@ export const API_BASE_URL =
 const CONTROL_API_CLIENT_EXACT_PATHS = new Set([
   "/api/accounts/ensure",
   "/api/jobs",
+  "/api/wallet",
+  "/api/wallets",
+  "/api/wallet/usage-stats",
   "/api/media/upload-begin",
   "/api/media/upload-complete",
   "/api/media/move-temp-to-permanent",
@@ -38,7 +42,11 @@ const ALLOW_LEGACY_MUTATIONS = ["1", "true", "yes", "on"].includes(
 
 function isControlApiClientPath(path: string) {
   const normalizedPath = path.split("?")[0];
-  return CONTROL_API_CLIENT_EXACT_PATHS.has(normalizedPath) || normalizedPath.startsWith("/api/jobs/");
+  return (
+    CONTROL_API_CLIENT_EXACT_PATHS.has(normalizedPath) ||
+    normalizedPath.startsWith("/api/jobs/") ||
+    normalizedPath.startsWith("/api/wallets/")
+  );
 }
 
 function getRequestMethod(init?: RequestInit) {
@@ -50,13 +58,11 @@ function isLegacySurfacePath(path: string) {
   return (
     normalizedPath === "/api" ||
     normalizedPath.startsWith("/api/") ||
-    normalizedPath === "/uploads" ||
-    normalizedPath.startsWith("/uploads/") ||
+    isRetiredLegacyMediaPath(normalizedPath) ||
     normalizedPath === "/jaaz" ||
     normalizedPath.startsWith("/jaaz/") ||
     normalizedPath === "/jaaz-api" ||
-    normalizedPath.startsWith("/jaaz-api/") ||
-    normalizedPath.startsWith("/vr-")
+    normalizedPath.startsWith("/jaaz-api/")
   );
 }
 
@@ -873,7 +879,35 @@ export type UploadedFile = {
   contentType: string;
   url: string;
   urlPath: string;
+  mediaObjectId?: string;
+  objectKey?: string;
+  signedReadUrl?: string;
 };
+
+type ControlMediaBeginResponse = {
+  media_object_id?: string;
+  mediaObjectId?: string;
+  upload_session_id?: string;
+  uploadSessionId?: string;
+  object_key?: string;
+  objectKey?: string;
+  upload_url?: string;
+  uploadUrl?: string;
+};
+
+type ControlMediaReadResponse = {
+  signed_read_url?: string;
+  signedReadUrl?: string;
+};
+
+type ControlMediaRequestScope = {
+  accountOwnerType: "user";
+  accountOwnerId: string;
+  regionCode: "CN";
+  currency: "CNY";
+};
+
+type ControlJobRecord = Record<string, unknown>;
 
 export type ProjectOverview = {
   project: Project & {
@@ -922,7 +956,10 @@ type TaskAccepted = {
 };
 
 function isRouteNotFoundError(error: unknown) {
-  return error instanceof Error && /route not found/i.test(error.message);
+  return (
+    (error instanceof ApiRequestError && error.status === 404) ||
+    (error instanceof Error && /route not found/i.test(error.message))
+  );
 }
 
 function buildFallbackPermissionContext(actorId: string): PermissionContext {
@@ -1103,10 +1140,159 @@ function normalizeWalletRecord(wallet: Wallet, actorId: string): Wallet {
       (ownerType === "organization"
         ? `${currentOrganization?.name || "企业"}钱包`
         : `${fallbackContext.actor.displayName}钱包`),
+    availableCredits: wallet.availableCredits ?? wallet.creditsAvailable ?? 0,
+    frozenCredits: wallet.frozenCredits ?? wallet.creditsFrozen ?? 0,
+    creditsAvailable: wallet.creditsAvailable ?? wallet.availableCredits ?? 0,
+    creditsFrozen: wallet.creditsFrozen ?? wallet.frozenCredits ?? 0,
     status: wallet.status ?? "active",
     allowNegative: wallet.allowNegative ?? false,
   };
 }
+
+function walletOwnerTypeForControlApi(ownerType: WalletOwnerType) {
+  return ownerType === "platform" ? "system" : ownerType;
+}
+
+function buildWalletQuery(ownerType: WalletOwnerType, ownerId: string, extra?: Record<string, string | undefined>) {
+  const params = new URLSearchParams({
+    accountOwnerType: walletOwnerTypeForControlApi(ownerType),
+    accountOwnerId: ownerId || "guest",
+  });
+
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    if (value) params.set(key, value);
+  }
+
+  return params.toString();
+}
+
+function createEmptyWallet(ownerType: WalletOwnerType, ownerId: string): Wallet {
+  const now = new Date().toISOString();
+  return {
+    id: `${ownerType}-${ownerId || "guest"}`,
+    ownerType,
+    walletOwnerType: ownerType,
+    ownerId: ownerId || "guest",
+    displayName: ownerType === "organization" ? "Organization wallet" : "Personal wallet",
+    availableCredits: 0,
+    frozenCredits: 0,
+    creditsAvailable: 0,
+    creditsFrozen: 0,
+    currency: "CNY",
+    status: "active",
+    allowNegative: false,
+    unlimitedCredits: false,
+    updatedAt: now,
+  };
+}
+
+function emptyCreditUsageStats(
+  subject: CreditUsageSubject,
+  mode: CreditUsageStats["mode"],
+  wallets: Wallet[] = [],
+): CreditUsageStats {
+  return {
+    subject,
+    mode,
+    windowDays: 30,
+    bucket: "day",
+    wallets,
+    summary: {
+      consumedCredits: 0,
+      todayConsumedCredits: 0,
+      refundedCredits: 0,
+      pendingFrozenCredits: 0,
+      availableCredits: wallets.reduce((sum, wallet) => sum + Number(wallet.availableCredits ?? wallet.creditsAvailable ?? 0), 0),
+      frozenCredits: wallets.reduce((sum, wallet) => sum + Number(wallet.frozenCredits ?? wallet.creditsFrozen ?? 0), 0),
+      recentTaskCount: 0,
+      lastActivityAt: null,
+    },
+    series: [],
+    recentEntries: [],
+  };
+}
+
+function currentUserSubject(): CreditUsageSubject {
+  const actorId = getCurrentActorId();
+  return {
+    type: "user",
+    id: actorId,
+    label: `User ${actorId}`,
+    detail: "canonical wallet read surface",
+  };
+}
+
+function retiredRechargeError(flow: string): never {
+  throw new ApiRequestError(
+    `${flow} is retired during the Windows-native cutover; use canonical payment callback evidence for production payment validation.`,
+    {
+      code: "RECHARGE_FLOW_RETIRED",
+      status: 410,
+    },
+  );
+}
+
+function retiredWalletRechargeCapabilities(): WalletRechargeCapabilities {
+  const unavailable = "Retired during Windows-native cutover; real provider evidence is required before reopening recharge writes.";
+  return {
+    requestHost: typeof window === "undefined" ? null : window.location.host,
+    demoMockEnabled: false,
+    demoMockAllowedHosts: [],
+    methods: [
+      {
+        paymentMethod: "wechat_pay",
+        label: "WeChat Pay",
+        detail: "Provider recharge writes are closed.",
+        live: { available: false, reason: unavailable, scenes: [] },
+        demoMock: { available: false, reason: unavailable, scenes: [] },
+      },
+      {
+        paymentMethod: "alipay",
+        label: "Alipay",
+        detail: "Provider recharge writes are closed.",
+        live: { available: false, reason: unavailable, scenes: [] },
+        demoMock: { available: false, reason: unavailable, scenes: [] },
+      },
+      {
+        paymentMethod: "bank_transfer",
+        label: "Bank transfer",
+        detail: "Manual recharge review is closed.",
+        live: { available: false, reason: unavailable, scenes: [] },
+        demoMock: { available: false, reason: unavailable, scenes: [] },
+      },
+    ],
+  };
+}
+
+const DEFAULT_PRICING_RULES: PricingRule[] = [
+  {
+    id: "storyboard-image-generate",
+    actionCode: "storyboard_image_generate",
+    label: "Storyboard image generation",
+    baseCredits: 1,
+    unitLabel: "image",
+    description: "Read-only display rule while legacy pricing writes are retired.",
+    updatedAt: "2026-05-02T00:00:00.000Z",
+  },
+  {
+    id: "canvas-image-generate",
+    actionCode: "canvas_image_generate",
+    label: "Canvas image generation",
+    baseCredits: 1,
+    unitLabel: "image",
+    description: "Read-only display rule while legacy pricing writes are retired.",
+    updatedAt: "2026-05-02T00:00:00.000Z",
+  },
+  {
+    id: "video-generate",
+    actionCode: "video_generate",
+    label: "Video generation",
+    baseCredits: 8,
+    unitLabel: "job",
+    description: "Read-only display rule while legacy pricing writes are retired.",
+    updatedAt: "2026-05-02T00:00:00.000Z",
+  },
+];
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   assertNoLegacyMutatingRequest(path, init);
@@ -1168,6 +1354,261 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return payload.data;
+}
+
+async function controlApiJsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  assertNoLegacyMutatingRequest(path, init);
+
+  const actorId = getCurrentActorId();
+  const token = getAuthToken();
+  const controlApiClientAssertion = getControlApiClientAssertion();
+  const headers = new Headers(init?.headers);
+  const isFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  if (init?.body && !isFormDataBody && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  headers.set("X-Actor-Id", actorId);
+  if (controlApiClientAssertion && isControlApiClientPath(path)) {
+    headers.set("Authorization", `Bearer ${controlApiClientAssertion}`);
+  } else if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
+
+  const text = await response.text();
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new ApiRequestError("Control API returned an invalid JSON response", {
+        code: "CONTROL_API_INVALID_RESPONSE",
+        status: response.status || 500,
+      });
+    }
+  }
+
+  if (!response.ok) {
+    const errorPayload = payload as { error?: { message?: string; code?: string }; title?: string; detail?: string } | null;
+    throw new ApiRequestError(
+      errorPayload?.error?.message || errorPayload?.detail || errorPayload?.title || "Control API request failed",
+      {
+        code: errorPayload?.error?.code,
+        status: response.status,
+      },
+    );
+  }
+
+  return payload as T;
+}
+
+function buildControlMediaScope(actorId: string): ControlMediaRequestScope {
+  return {
+    accountOwnerType: "user",
+    accountOwnerId: actorId,
+    regionCode: "CN",
+    currency: "CNY",
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readField(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function readString(record: Record<string, unknown>, ...keys: string[]) {
+  const value = readField(record, ...keys);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+}
+
+function readNumber(record: Record<string, unknown>, ...keys: string[]) {
+  const value = readField(record, ...keys);
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function readRecord(record: Record<string, unknown>, ...keys: string[]) {
+  const value = readField(record, ...keys);
+  return isRecord(value) ? value : null;
+}
+
+function progressForJobStatus(status: string) {
+  switch (status) {
+    case "succeeded":
+      return 100;
+    case "failed":
+    case "cancelled":
+    case "canceled":
+      return 100;
+    case "running":
+      return 60;
+    case "leased":
+    case "processing":
+      return 35;
+    case "retry_waiting":
+      return 20;
+    default:
+      return 0;
+  }
+}
+
+function isCancellableJobTask(task: Pick<Task, "status">) {
+  return new Set(["queued", "leased", "running", "retry_waiting", "pending", "processing"]).has(
+    String(task.status || "").toLowerCase(),
+  );
+}
+
+function mergeControlJobMetadata(
+  job: ControlJobRecord,
+  payload: Record<string, unknown>,
+  result: Record<string, unknown>,
+) {
+  const payloadMetadata = readRecord(payload, "metadata") ?? {};
+  const resultMetadata = readRecord(result, "metadata") ?? {};
+  return {
+    ...payload,
+    ...payloadMetadata,
+    ...resultMetadata,
+    controlJob: {
+      accountId: readString(job, "account_id", "accountId"),
+      lane: readString(job, "lane"),
+      providerRoute: readString(job, "provider_route", "providerRoute"),
+      idempotencyKey: readString(job, "idempotency_key", "idempotencyKey"),
+      attemptCount: readNumber(job, "attempt_count", "attemptCount"),
+      maxAttempts: readNumber(job, "max_attempts", "maxAttempts"),
+      leaseOwner: readString(job, "lease_owner", "leaseOwner"),
+      leaseUntil: readString(job, "lease_until", "leaseUntil"),
+      runAfter: readString(job, "run_after", "runAfter"),
+      completedAt: readString(job, "completed_at", "completedAt"),
+      cancelledAt: readString(job, "cancelled_at", "cancelledAt"),
+      result,
+    },
+  };
+}
+
+function mapControlJobToTask(job: ControlJobRecord): Task {
+  const payload = readRecord(job, "payload") ?? {};
+  const result = readRecord(job, "result") ?? {};
+  const metadata = mergeControlJobMetadata(job, payload, result);
+  const status = (readString(job, "status") ?? "queued").toLowerCase();
+  const taskType =
+    readString(job, "job_type", "jobType") ??
+    readString(payload, "type", "jobType", "job_type") ??
+    "generic";
+  const projectId =
+    readString(payload, "projectId", "project_id") ??
+    readString(result, "projectId", "project_id");
+  const storyboardId =
+    readString(payload, "storyboardId", "storyboard_id") ??
+    readString(result, "storyboardId", "storyboard_id");
+  const lastError = readString(job, "last_error", "lastError");
+  const outputSummary =
+    readString(result, "outputSummary", "output_summary", "summary", "message") ??
+    (status === "failed" || status === "cancelled" ? lastError : null);
+
+  return {
+    id: readString(job, "id") ?? "",
+    type: taskType,
+    domain: readString(payload, "domain") ?? readString(job, "lane") ?? "jobs",
+    projectId,
+    storyboardId,
+    actorId: readString(job, "created_by_user_id", "createdByUserId") ?? undefined,
+    actionCode: readString(payload, "actionCode", "action_code") ?? taskType,
+    walletId: readString(payload, "walletId", "wallet_id"),
+    status,
+    progressPercent: readNumber(payload, "progressPercent", "progress_percent") ?? progressForJobStatus(status),
+    currentStage: readString(payload, "currentStage", "current_stage") ?? lastError ?? status,
+    etaSeconds: readNumber(payload, "etaSeconds", "eta_seconds") ?? 0,
+    inputSummary:
+      readString(payload, "inputSummary", "input_summary", "prompt", "text") ??
+      readString(job, "idempotency_key", "idempotencyKey"),
+    outputSummary,
+    quotedCredits: readNumber(payload, "quotedCredits", "quoted_credits") ?? undefined,
+    frozenCredits: readNumber(payload, "frozenCredits", "frozen_credits") ?? undefined,
+    settledCredits: readNumber(payload, "settledCredits", "settled_credits") ?? undefined,
+    billingStatus: readString(payload, "billingStatus", "billing_status") ?? undefined,
+    metadata,
+    createdAt: readString(job, "created_at", "createdAt") ?? new Date().toISOString(),
+    updatedAt: readString(job, "updated_at", "updatedAt") ?? new Date().toISOString(),
+  };
+}
+
+function matchesTaskFilters(task: Task, projectId?: string, type?: string) {
+  if (projectId && task.projectId !== projectId && task.metadata?.projectId !== projectId) {
+    return false;
+  }
+  if (type && task.type !== type && task.metadata?.type !== type && task.metadata?.jobType !== type) {
+    return false;
+  }
+  return true;
+}
+
+function createClientId(prefix: string) {
+  const randomId =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${randomId}`;
+}
+
+function toObjectKeySegment(value: string, fallback: string) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .pop();
+  return (normalized || fallback)
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96) || fallback;
+}
+
+function inferMediaType(kind: string, file: File) {
+  const normalizedKind = String(kind || "").trim();
+  if (normalizedKind) return normalizedKind;
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type.startsWith("audio/")) return "audio";
+  return "file";
+}
+
+function fileNameForDataUrl(kind: string, nameHint: string, contentType: string) {
+  const extByType: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+    "audio/mpeg": "mp3",
+    "audio/wav": "wav",
+  };
+  const ext = extByType[contentType] || "bin";
+  return `${toObjectKeySegment(nameHint || kind, "upload")}.${ext}`;
 }
 
 // Produces a short random id usable as an Idempotency-Key for POST-based task
@@ -1617,57 +2058,87 @@ export async function createExport(projectId: string, format = "mp4") {
 
 export async function listTasks(projectId?: string, type?: string) {
   const params = new URLSearchParams();
-  if (projectId) params.set("projectId", projectId);
-  if (type) params.set("type", type);
-  const search = params.toString() ? `?${params.toString()}` : "";
-  return request<{ items: Task[] }>(`/api/tasks${search}`);
+  const actorId = getCurrentActorId();
+  params.set("accountOwnerType", "user");
+  params.set("accountOwnerId", actorId);
+  params.set("limit", "200");
+  const jobs = await controlApiJsonRequest<ControlJobRecord[]>(`/api/jobs?${params.toString()}`);
+  return {
+    items: jobs.map(mapControlJobToTask).filter((task) => matchesTaskFilters(task, projectId, type)),
+  };
 }
 
 export async function getTask(taskId: string) {
-  return request<Task>(`/api/tasks/${taskId}`);
+  const job = await controlApiJsonRequest<ControlJobRecord>(`/api/jobs/${encodeURIComponent(taskId)}`);
+  return mapControlJobToTask(job);
 }
 
 export async function deleteTask(taskId: string) {
-  return request<{ deleted: boolean; taskId: string }>(`/api/tasks/${taskId}`, {
-    method: "DELETE",
-  });
+  let task: Task;
+  try {
+    task = await getTask(taskId);
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) {
+      return { deleted: false, taskId };
+    }
+    throw error;
+  }
+
+  if (isCancellableJobTask(task)) {
+    await controlApiJsonRequest<ControlJobRecord>(`/api/jobs/${encodeURIComponent(taskId)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "frontend task dismissed" }),
+    });
+  }
+
+  return { deleted: false, taskId };
 }
 
 export async function clearTasks(projectId?: string, type?: string) {
-  const params = new URLSearchParams();
-  if (projectId) params.set("projectId", projectId);
-  if (type) params.set("type", type);
-  const search = params.toString() ? `?${params.toString()}` : "";
-  return request<{ removedCount: number }>(`/api/tasks${search}`, {
-    method: "DELETE",
-  });
+  const response = await listTasks(projectId, type);
+  const cancellable = response.items.filter(isCancellableJobTask);
+  await Promise.all(
+    cancellable.map((task) =>
+      controlApiJsonRequest<ControlJobRecord>(`/api/jobs/${encodeURIComponent(task.id)}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "frontend clear active tasks" }),
+      }),
+    ),
+  );
+  return { removedCount: response.items.length };
 }
 
-export async function getWallet() {
-  return request<Wallet>("/api/wallet");
+export async function getWallet(ownerType: WalletOwnerType = "user", ownerId = getCurrentActorId()) {
+  const query = buildWalletQuery(ownerType, ownerId);
+  const wallet = await controlApiJsonRequest<Wallet>(`/api/wallet?${query}`);
+  return normalizeWalletRecord(wallet, ownerId);
 }
 
-export async function listWallets() {
+export async function listWallets(ownerType: WalletOwnerType = "user", ownerId = getCurrentActorId()) {
   try {
-    return await request<{ items: Wallet[] }>("/api/wallets");
+    const query = buildWalletQuery(ownerType, ownerId);
+    const response = await controlApiJsonRequest<{ items: Wallet[] }>(`/api/wallets?${query}`);
+    return {
+      items: response.items.map((wallet) => normalizeWalletRecord(wallet, ownerId)),
+    };
   } catch (error) {
     if (!isRouteNotFoundError(error)) throw error;
 
-    const actorId = getCurrentActorId();
     const effectiveActorId =
-      actorId === SUPER_ADMIN_DEMO_ACTOR_ID && !isLocalLoopbackAccess() ? "guest" : actorId;
+      ownerId === SUPER_ADMIN_DEMO_ACTOR_ID && !isLocalLoopbackAccess() ? "guest" : ownerId;
     if (effectiveActorId === "guest" || effectiveActorId === "ops_demo_001" || effectiveActorId === SUPER_ADMIN_DEMO_ACTOR_ID) {
       return { items: [] };
     }
 
-    const wallet = await getWallet();
-    return { items: [normalizeWalletRecord(wallet, effectiveActorId)] };
+    return { items: [createEmptyWallet(ownerType, effectiveActorId)] };
   }
 }
 
 export async function listWalletLedger(walletId: string) {
   try {
-    return await request<{ items: WalletLedgerEntry[] }>(`/api/wallets/${walletId}/ledger`);
+    return await controlApiJsonRequest<{ items: WalletLedgerEntry[] }>(
+      `/api/wallets/${encodeURIComponent(walletId)}/ledger`,
+    );
   } catch (error) {
     if (isRouteNotFoundError(error)) {
       return { items: [] };
@@ -1677,46 +2148,70 @@ export async function listWalletLedger(walletId: string) {
 }
 
 export async function getWalletUsageStats(mode: CreditUsageMode = "personal") {
-  const params = new URLSearchParams({ mode });
-  return request<CreditUsageStats>(`/api/wallet/usage-stats?${params.toString()}`);
+  const actorId = getCurrentActorId();
+  const ownerType: WalletOwnerType = mode === "organization" ? "organization" : "user";
+  const query = buildWalletQuery(ownerType, actorId, { mode });
+  try {
+    return await controlApiJsonRequest<CreditUsageStats>(`/api/wallet/usage-stats?${query}`);
+  } catch (error) {
+    if (!isRouteNotFoundError(error)) throw error;
+    const wallet = createEmptyWallet(ownerType, actorId);
+    return emptyCreditUsageStats(
+      {
+        type: ownerType,
+        id: actorId,
+        label: ownerType === "organization" ? `Organization ${actorId}` : `User ${actorId}`,
+        detail: "canonical wallet read surface",
+      },
+      mode,
+      [wallet],
+    );
+  }
 }
 
 export async function searchCreditUsageSubjects(search?: string) {
-  const params = new URLSearchParams();
   const normalizedSearch = search?.trim();
-  if (normalizedSearch) params.set("search", normalizedSearch);
-  const query = params.toString() ? `?${params.toString()}` : "";
-  return request<{ items: CreditUsageSubject[] }>(`/api/admin/credit-usage-subjects${query}`);
+  const subject = currentUserSubject();
+  if (normalizedSearch && !subject.label.toLowerCase().includes(normalizedSearch.toLowerCase())) {
+    return { items: [] };
+  }
+  return { items: [subject] };
 }
 
 export async function getAdminCreditUsageStats(input: {
   subjectType: CreditUsageSubject["type"];
   subjectId?: string | null;
 }) {
-  const params = new URLSearchParams({ subjectType: input.subjectType });
-  if (input.subjectId) params.set("subjectId", input.subjectId);
-  return request<CreditUsageStats>(`/api/admin/credit-usage-stats?${params.toString()}`);
+  return emptyCreditUsageStats(
+    {
+      type: input.subjectType,
+      id: input.subjectId ?? null,
+      label: input.subjectId ? `${input.subjectType} ${input.subjectId}` : "Platform",
+      detail: "legacy admin billing read flow retired",
+    },
+    "admin",
+  );
 }
 
-export async function createWalletRechargeOrder(input: CreateWalletRechargeOrderInput) {
-  return request<WalletRechargeOrder>("/api/wallet/recharge-orders", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+export async function createWalletRechargeOrder(
+  input: CreateWalletRechargeOrderInput,
+): Promise<WalletRechargeOrder> {
+  void input;
+  return retiredRechargeError("Wallet recharge order creation");
 }
 
 export async function getWalletRechargeCapabilities() {
-  return request<WalletRechargeCapabilities>("/api/wallet/recharge-capabilities");
+  return retiredWalletRechargeCapabilities();
 }
 
-export async function getWalletRechargeOrder(orderId: string) {
-  return request<WalletRechargeOrder>(`/api/wallet/recharge-orders/${orderId}`);
+export async function getWalletRechargeOrder(orderId: string): Promise<WalletRechargeOrder> {
+  void orderId;
+  return retiredRechargeError("Wallet recharge order lookup");
 }
 
-export async function refreshWalletRechargeOrderStatus(orderId: string) {
-  return request<WalletRechargeOrder>(`/api/wallet/recharge-orders/${orderId}/refresh-status`, {
-    method: "POST",
-  });
+export async function refreshWalletRechargeOrderStatus(orderId: string): Promise<WalletRechargeOrder> {
+  void orderId;
+  return retiredRechargeError("Wallet recharge order refresh");
 }
 
 export async function submitWalletRechargeTransferProof(
@@ -1726,17 +2221,15 @@ export async function submitWalletRechargeTransferProof(
     note?: string;
     transferReference?: string;
   },
-) {
-  return request<WalletRechargeOrder>(`/api/wallet/recharge-orders/${orderId}/bank-transfer-proof`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+): Promise<WalletRechargeOrder> {
+  void orderId;
+  void input;
+  return retiredRechargeError("Wallet recharge transfer proof submission");
 }
 
-export async function confirmWalletRechargeOrder(orderId: string) {
-  return request<WalletRechargeOrder>(`/api/wallet/recharge-orders/${orderId}/confirm`, {
-    method: "POST",
-  });
+export async function confirmWalletRechargeOrder(orderId: string): Promise<WalletRechargeOrder> {
+  void orderId;
+  return retiredRechargeError("Wallet recharge confirmation");
 }
 
 export async function getToolboxCapabilities() {
@@ -1844,54 +2337,133 @@ export async function reverseVideoPrompt(
 }
 
 export async function uploadFile(file: File, kind = "file") {
-  assertNoLegacyMutatingRequest("/api/uploads", { method: "POST" });
-
   const actorId = getCurrentActorId();
-  const token = getAuthToken();
-  const headers: Record<string, string> = {
-    "Content-Type": file.type || "application/octet-stream",
-    "X-Upload-Filename": encodeURIComponent(file.name),
-    "X-Actor-Id": actorId,
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-  const response = await fetch(
-    `${API_BASE_URL}/api/uploads?kind=${encodeURIComponent(kind)}`,
-    {
-      method: "POST",
-      headers,
-      body: file,
-    },
-  );
+  const uploadId = createClientId("media");
+  const mediaType = inferMediaType(kind, file);
+  const contentType = file.type || "application/octet-stream";
+  const objectKey = [
+    "media",
+    "frontend",
+    toObjectKeySegment(actorId, "guest"),
+    `${uploadId}-${toObjectKeySegment(file.name, "upload.bin")}`,
+  ].join("/");
+  const scope = buildControlMediaScope(actorId);
 
-  const payload = (await response.json()) as ApiEnvelope<UploadedFile>;
-  if (!response.ok || !payload.success) {
-    throw new ApiRequestError(payload.error?.message ?? "File upload failed", {
-      code: payload.error?.code,
-      status: response.status,
+  const begin = await controlApiJsonRequest<ControlMediaBeginResponse>("/api/media/upload-begin", {
+    method: "POST",
+    body: JSON.stringify({
+      ...scope,
+      idempotencyKey: `frontend:${actorId}:${uploadId}`,
+      objectKey,
+      mediaType,
+      contentType,
+      byteSize: file.size,
+      data: {
+        originalName: file.name,
+        frontendKind: kind,
+      },
+    }),
+  });
+
+  const mediaObjectId = String(begin.media_object_id || begin.mediaObjectId || "");
+  const uploadSessionId = String(begin.upload_session_id || begin.uploadSessionId || "");
+  const uploadUrl = String(begin.upload_url || begin.uploadUrl || "");
+  if (!mediaObjectId || !uploadSessionId || !uploadUrl) {
+    throw new ApiRequestError("Control API did not return a usable media upload session", {
+      code: "MEDIA_UPLOAD_SESSION_INVALID",
+      status: 502,
     });
   }
 
-  return payload.data;
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType,
+    },
+    body: file,
+  });
+  if (!uploadResponse.ok) {
+    throw new ApiRequestError("Object storage upload failed", {
+      code: "MEDIA_OBJECT_UPLOAD_FAILED",
+      status: uploadResponse.status,
+    });
+  }
+
+  await controlApiJsonRequest<unknown>("/api/media/upload-complete", {
+    method: "POST",
+    body: JSON.stringify({
+      ...scope,
+      uploadSessionId,
+      mediaObjectId,
+      byteSize: file.size,
+    }),
+  });
+
+  await controlApiJsonRequest<unknown>("/api/media/move-temp-to-permanent", {
+    method: "POST",
+    body: JSON.stringify({
+      ...scope,
+      mediaObjectId,
+      permanentObjectKey: objectKey,
+      reason: `frontend-${mediaType}`,
+    }),
+  });
+
+  const read = await controlApiJsonRequest<ControlMediaReadResponse>("/api/media/signed-read-url", {
+    method: "POST",
+    body: JSON.stringify({
+      ...scope,
+      mediaObjectId,
+      expiresInSeconds: 3600,
+    }),
+  });
+  const signedReadUrl = String(read.signed_read_url || read.signedReadUrl || uploadUrl);
+
+  return {
+    id: mediaObjectId,
+    kind,
+    originalName: file.name,
+    storedName: objectKey.split("/").pop() || objectKey,
+    sizeBytes: file.size,
+    contentType,
+    url: signedReadUrl,
+    urlPath: signedReadUrl,
+    mediaObjectId,
+    objectKey,
+    signedReadUrl,
+  } satisfies UploadedFile;
+}
+
+export async function uploadDataUrlAsFile(dataUrl: string, kind = "file", nameHint = "upload") {
+  if (!dataUrl.startsWith("data:")) {
+    throw new ApiRequestError("Expected a data URL for media upload", {
+      code: "MEDIA_UPLOAD_INVALID_DATA_URL",
+      status: 400,
+    });
+  }
+
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  const contentType = blob.type || dataUrl.match(/^data:([^;,]+)/)?.[1] || "application/octet-stream";
+  const file = new File([blob], fileNameForDataUrl(kind, nameHint, contentType), { type: contentType });
+  return uploadFile(file, kind);
 }
 
 export async function listPricingRules() {
-  return request<{ items: PricingRule[] }>("/api/admin/pricing-rules");
+  return { items: DEFAULT_PRICING_RULES };
 }
 
 export async function listAdminOrders() {
-  return request<{ items: AdminRechargeOrder[] }>("/api/admin/orders");
+  return { items: [] };
 }
 
 export async function reviewAdminOrder(
   orderId: string,
   input: { decision: "approve" | "reject"; note?: string },
-) {
-  return request<WalletRechargeOrder>(`/api/admin/orders/${orderId}/review`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+): Promise<WalletRechargeOrder> {
+  void orderId;
+  void input;
+  return retiredRechargeError("Manual recharge review");
 }
 
 export async function listOrganizationMembers(organizationId: string) {
@@ -1909,7 +2481,12 @@ export async function createOrganizationMember(
 }
 
 export async function getOrganizationWallet(organizationId: string) {
-  return request<Wallet>(`/api/organizations/${organizationId}/wallet`);
+  try {
+    return await getWallet("organization", organizationId);
+  } catch (error) {
+    if (!isRouteNotFoundError(error)) throw error;
+    return createEmptyWallet("organization", organizationId);
+  }
 }
 
 export async function loginWithEmail(input: LoginInput) {

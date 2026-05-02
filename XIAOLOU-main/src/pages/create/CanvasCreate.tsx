@@ -36,6 +36,7 @@ import {
   type Asset,
 } from "../../lib/api";
 import { useActorId } from "../../lib/actor-session";
+import { isRetiredLegacyMediaUrl } from "../../lib/media-url-policy";
 import { useCurrentProjectId } from "../../lib/session";
 import { useTheme } from "../../lib/theme";
 import { generateGridThumbnail } from "../../lib/grid-thumbnail";
@@ -78,11 +79,8 @@ function resolveAbsoluteAssetUrl(url?: string | null) {
   const normalized = String(url || "").trim();
   if (!normalized || normalized.includes("mock.assets.local")) return null;
   if (/^(?:data:|blob:)/i.test(normalized)) return normalized;
+  if (isRetiredLegacyMediaUrl(normalized)) return null;
   if (/^https?:\/\//i.test(normalized)) {
-    try {
-      const parsed = new URL(normalized);
-      if (parsed.pathname.startsWith("/uploads/")) return parsed.pathname;
-    } catch { /* fall through */ }
     return normalized;
   }
   const apiBaseUrl = API_BASE_URL.replace(/\/+$/, "");
@@ -105,13 +103,13 @@ function shouldInlineReferenceImageUrl(url: string) {
   if (!url) return false;
   if (/^data:/i.test(url)) return true;
   if (/^blob:/i.test(url)) return true;
+  if (isRetiredLegacyMediaUrl(url)) return false;
   try {
     const parsed = new URL(url);
     if (
       parsed.pathname.startsWith("/canvas-library/") ||
       parsed.pathname.startsWith("/twitcanva-library/") ||
-      parsed.pathname.startsWith("/library/") ||
-      parsed.pathname.startsWith("/uploads/")
+      parsed.pathname.startsWith("/library/")
     ) return true;
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return true;
     return isPrivateOrLoopbackHostname(parsed.hostname);

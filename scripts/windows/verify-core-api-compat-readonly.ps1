@@ -320,6 +320,15 @@ $stderrLog = Join-Path $logDir "core-api-compat-readonly-$stamp.err.log"
 [Environment]::SetEnvironmentVariable("JAAZ_AUTO_START", "0", "Process")
 [Environment]::SetEnvironmentVariable("JAAZ_UI_MODE", "off", "Process")
 
+$processPath = [Environment]::GetEnvironmentVariable("Path", "Process")
+if (-not $processPath) {
+  $processPath = [Environment]::GetEnvironmentVariable("PATH", "Process")
+}
+if ($processPath) {
+  [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+  [Environment]::SetEnvironmentVariable("Path", $processPath, "Process")
+}
+
 $proc = $null
 try {
   $proc = Start-Process `

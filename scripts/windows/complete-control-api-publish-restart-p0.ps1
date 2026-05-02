@@ -134,6 +134,36 @@ function Invoke-DotnetBuildServerShutdown {
   }
 }
 
+function Convert-P0Output {
+  param([string]$Text)
+
+  if (-not $Text) {
+    return $null
+  }
+
+  try {
+    return $Text | ConvertFrom-Json
+  } catch {
+  }
+
+  $start = $Text.LastIndexOf("`n{")
+  if ($start -ge 0) {
+    $candidate = $Text.Substring($start + 1).Trim()
+  } else {
+    $start = $Text.LastIndexOf("{")
+    if ($start -lt 0) {
+      return $null
+    }
+    $candidate = $Text.Substring($start).Trim()
+  }
+
+  try {
+    return $candidate | ConvertFrom-Json
+  } catch {
+    return $null
+  }
+}
+
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ReportPath) | Out-Null
 $steps = New-Object System.Collections.Generic.List[object]
 $failure = $null
@@ -191,10 +221,10 @@ try {
   $p0Output = & "$SourceRoot\scripts\windows\verify-control-plane-p0.ps1" @p0Args
   $p0OutputText = ($p0Output | Out-String).Trim()
   if ($p0OutputText) {
-    try {
-      $p0Result = $p0OutputText | ConvertFrom-Json
+    $p0Result = Convert-P0Output $p0OutputText
+    if ($p0Result) {
       $p0RunId = [string]$p0Result.runId
-    } catch {
+    } else {
       Add-Step $steps "p0-output" "unparsed" $p0OutputText
     }
   }

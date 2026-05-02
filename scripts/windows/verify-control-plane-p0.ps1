@@ -341,6 +341,7 @@ function New-ClientAuthProviderAssertion {
       "jobs:create",
       "jobs:read",
       "jobs:cancel",
+      "wallet:read",
       "media:read",
       "media:write"
     )
@@ -418,6 +419,11 @@ function Test-PublicClientApiPath {
   param([string]$Path)
   return $Path.StartsWith("/api/accounts/ensure") `
     -or $Path.StartsWith("/api/jobs") `
+    -or $Path -eq "/api/wallet" `
+    -or $Path.StartsWith("/api/wallet?") `
+    -or $Path -eq "/api/wallets" `
+    -or $Path.StartsWith("/api/wallets") `
+    -or $Path.StartsWith("/api/wallet/usage-stats") `
     -or $Path.StartsWith("/api/media")
 }
 

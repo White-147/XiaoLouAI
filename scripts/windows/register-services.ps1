@@ -4,6 +4,7 @@ param(
   [string]$DotnetExe = "",
   [string]$PythonExe = "",
   [switch]$UpdateExisting,
+  [switch]$ValidateOnly,
   [switch]$AllowPlaceholderSecrets
 )
 
@@ -137,6 +138,29 @@ function Assert-ProductionPaymentGrayGate {
   }
 }
 
+function Assert-DDrivePath {
+  param(
+    [string]$Path,
+    [string]$Name
+  )
+
+  $fullPath = [System.IO.Path]::GetFullPath($Path)
+  if (-not $fullPath.StartsWith("D:\", [StringComparison]::OrdinalIgnoreCase)) {
+    throw "$Name must stay on D:, got: $fullPath"
+  }
+}
+
+function Assert-RequiredFile {
+  param(
+    [string]$Path,
+    [string]$Name
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    throw "$Name is missing: $Path"
+  }
+}
+
 $envFile = Join-Path $Root "scripts\windows\.env.windows"
 $loadEnv = Join-Path $Root "scripts\windows\load-env.ps1"
 if (Test-Path -LiteralPath $loadEnv) {
@@ -148,7 +172,15 @@ $tempRoot = Join-Path $runtimeStateRoot "xiaolou-temp"
 $controlApiUrls = if ($env:CONTROL_API_URLS) { $env:CONTROL_API_URLS } else { "http://127.0.0.1:4100" }
 $controlApiBaseUrl = if ($env:CONTROL_API_BASE_URL) { $env:CONTROL_API_BASE_URL.TrimEnd("/") } else { Get-FirstHttpUrl $controlApiUrls }
 $dotnetRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($DotnetExe))
-$postgresApplySchemaOnStartup = if ($env:POSTGRES_APPLY_SCHEMA_ON_STARTUP) { $env:POSTGRES_APPLY_SCHEMA_ON_STARTUP } else { "0" }
+$connectionStringsPostgres = if ($env:ConnectionStrings__Postgres) { $env:ConnectionStrings__Postgres } else { "" }
+$postgresConnectionString = if ($env:Postgres__ConnectionString) { $env:Postgres__ConnectionString } else { "" }
+$postgresApplySchemaOnStartup = if ($env:POSTGRES_APPLY_SCHEMA_ON_STARTUP) { $env:POSTGRES_APPLY_SCHEMA_ON_STARTUP } elseif ($env:Postgres__ApplySchemaOnStartup) { $env:Postgres__ApplySchemaOnStartup } else { "0" }
+$postgresMinimumPoolSize = if ($env:Postgres__MinimumPoolSize) { $env:Postgres__MinimumPoolSize } else { "" }
+$postgresMaximumPoolSize = if ($env:Postgres__MaximumPoolSize) { $env:Postgres__MaximumPoolSize } else { "" }
+$postgresTimeoutSeconds = if ($env:Postgres__TimeoutSeconds) { $env:Postgres__TimeoutSeconds } else { "" }
+$postgresCommandTimeoutSeconds = if ($env:Postgres__CommandTimeoutSeconds) { $env:Postgres__CommandTimeoutSeconds } else { "" }
+$postgresKeepAliveSeconds = if ($env:Postgres__KeepAliveSeconds) { $env:Postgres__KeepAliveSeconds } else { "" }
+$pgBin = if ($env:PG_BIN) { $env:PG_BIN } else { "D:\soft\program\PostgreSQL\18\bin" }
 $objectStorageProvider = if ($env:OBJECT_STORAGE_PROVIDER) { $env:OBJECT_STORAGE_PROVIDER } else { "local" }
 $objectStorageBucket = if ($env:OBJECT_STORAGE_BUCKET) { $env:OBJECT_STORAGE_BUCKET } else { "xiaolou-staging" }
 $objectStoragePublicBaseUrl = if ($env:OBJECT_STORAGE_PUBLIC_BASE_URL) { $env:OBJECT_STORAGE_PUBLIC_BASE_URL } else { "http://127.0.0.1:4100" }
@@ -172,9 +204,10 @@ $clientApiRequireAccountScope = if ($env:CLIENT_API_REQUIRE_ACCOUNT_SCOPE) { $en
 $clientApiRequireConfiguredAccountGrant = if ($env:CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT) { $env:CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT } else { "false" }
 $clientApiAllowedAccountIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_IDS) { $env:CLIENT_API_ALLOWED_ACCOUNT_IDS } else { "" }
 $clientApiAllowedAccountOwnerIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS) { $env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS } else { "" }
-$clientApiAllowedPermissions = if ($env:CLIENT_API_ALLOWED_PERMISSIONS) { $env:CLIENT_API_ALLOWED_PERMISSIONS } else { "accounts:ensure,jobs:create,jobs:read,jobs:cancel,media:read,media:write" }
+$clientApiAllowedPermissions = if ($env:CLIENT_API_ALLOWED_PERMISSIONS) { $env:CLIENT_API_ALLOWED_PERMISSIONS } else { "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write" }
 $coreApiCompatReadOnly = if ($env:CORE_API_COMPAT_READ_ONLY) { $env:CORE_API_COMPAT_READ_ONLY } else { "1" }
 $coreApiCompatPublicRouteAllowlist = if ($env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST) { $env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST } else { "GET /healthz;GET /api/windows-native/status" }
+$coreApiPgPoolMax = if ($env:PGPOOL_MAX) { $env:PGPOOL_MAX } else { "2" }
 $closedApiWorkerLane = if ($env:CLOSED_API_WORKER_LANE) { $env:CLOSED_API_WORKER_LANE } else { "account-media" }
 $closedApiWorkerProviderRoute = if ($env:CLOSED_API_WORKER_PROVIDER_ROUTE) { $env:CLOSED_API_WORKER_PROVIDER_ROUTE } else { "closed-api" }
 $localModelWorkerLane = if ($env:LOCAL_MODEL_WORKER_LANE) { $env:LOCAL_MODEL_WORKER_LANE } else { "account-media" }
@@ -205,11 +238,19 @@ $machineEnv = [ordered]@{
   LOCAL_MODEL_WORKER_SERVICE_DLL = "$Root\publish\local-model-worker-service\XiaoLou.LocalModelWorkerService.dll"
   XIAOLOU_DATA_ROOT = "$Root\data"
   DATABASE_URL = $env:DATABASE_URL
+  ConnectionStrings__Postgres = $connectionStringsPostgres
+  Postgres__ConnectionString = $postgresConnectionString
   CONTROL_API_URLS = $controlApiUrls
   CONTROL_API_BASE_URL = $controlApiBaseUrl
   ASPNETCORE_URLS = $controlApiUrls
   POSTGRES_APPLY_SCHEMA_ON_STARTUP = $postgresApplySchemaOnStartup
   Postgres__ApplySchemaOnStartup = $postgresApplySchemaOnStartup
+  Postgres__MinimumPoolSize = $postgresMinimumPoolSize
+  Postgres__MaximumPoolSize = $postgresMaximumPoolSize
+  Postgres__TimeoutSeconds = $postgresTimeoutSeconds
+  Postgres__CommandTimeoutSeconds = $postgresCommandTimeoutSeconds
+  Postgres__KeepAliveSeconds = $postgresKeepAliveSeconds
+  PG_BIN = $pgBin
   ObjectStorage__Provider = $objectStorageProvider
   ObjectStorage__Bucket = $objectStorageBucket
   ObjectStorage__PublicBaseUrl = $objectStoragePublicBaseUrl
@@ -293,10 +334,15 @@ $machineEnv = [ordered]@{
   LOCAL_MODEL_WORKER_INTERNAL_TOKEN = $localModelWorkerInternalToken
   CORE_API_COMPAT_READ_ONLY = $coreApiCompatReadOnly
   CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST = $coreApiCompatPublicRouteAllowlist
+  PGPOOL_MAX = $coreApiPgPoolMax
 }
 
-foreach ($entry in $machineEnv.GetEnumerator()) {
-  [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Machine")
+if (-not $ValidateOnly) {
+  foreach ($entry in $machineEnv.GetEnumerator()) {
+    [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Machine")
+  }
+} else {
+  Write-Host "ValidateOnly: skipping Machine environment updates."
 }
 
 foreach ($path in @(
@@ -310,8 +356,15 @@ foreach ($path in @(
   (Join-Path $runtimeStateRoot "xiaolou-replay"),
   (Join-Path $cacheRoot "pip")
 )) {
+  Assert-DDrivePath -Path $path -Name "runtime directory"
   New-Item -ItemType Directory -Force -Path $path | Out-Null
 }
+
+Assert-RequiredFile "$Root\publish\control-api\XiaoLou.ControlApi.dll" "Control API published DLL"
+Assert-RequiredFile "$Root\publish\local-model-worker-service\XiaoLou.LocalModelWorkerService.dll" "Local model worker service published DLL"
+Assert-RequiredFile "$Root\publish\closed-api-worker\XiaoLou.ClosedApiWorker.dll" "Closed API worker published DLL"
+Assert-RequiredFile "$Root\scripts\windows\verify-postgres-backup.ps1" "PostgreSQL backup verification script"
+Assert-RequiredFile "$Root\scripts\windows\restore-postgres.ps1" "PostgreSQL restore script"
 
 $services = @(
   @{
@@ -334,34 +387,62 @@ $services = @(
   }
 )
 
-foreach ($svc in $services) {
-  $binaryPath = $svc.BinaryPath
-  if (Get-Service -Name $svc.Name -ErrorAction SilentlyContinue) {
-    if ($UpdateExisting) {
-      sc.exe config $svc.Name binPath= $binaryPath start= auto | Out-Null
-      if ($svc.DependsOn.Count -gt 0) {
-        sc.exe config $svc.Name depend= ($svc.DependsOn -join "/") | Out-Null
+if (-not $ValidateOnly) {
+  foreach ($svc in $services) {
+    $binaryPath = $svc.BinaryPath
+    if (Get-Service -Name $svc.Name -ErrorAction SilentlyContinue) {
+      if ($UpdateExisting) {
+        sc.exe config $svc.Name binPath= $binaryPath start= auto | Out-Null
+        if ($svc.DependsOn.Count -gt 0) {
+          sc.exe config $svc.Name depend= ($svc.DependsOn -join "/") | Out-Null
+        }
+        sc.exe failure $svc.Name reset= 60 actions= restart/60000/restart/60000/""/60000 | Out-Null
+        Write-Host "Updated service: $($svc.Name)"
+      } else {
+        Write-Host "Service already exists: $($svc.Name). Pass -UpdateExisting to update its command line."
       }
-      sc.exe failure $svc.Name reset= 60 actions= restart/60000/restart/60000/""/60000 | Out-Null
-      Write-Host "Updated service: $($svc.Name)"
-    } else {
-      Write-Host "Service already exists: $($svc.Name). Pass -UpdateExisting to update its command line."
+
+      continue
     }
 
-    continue
+    $serviceParams = @{
+      Name = $svc.Name
+      DisplayName = $svc.DisplayName
+      BinaryPathName = $binaryPath
+      StartupType = "Automatic"
+    }
+    if ($svc.DependsOn.Count -gt 0) {
+      $serviceParams.DependsOn = $svc.DependsOn
+    }
+    New-Service @serviceParams
+
+    sc.exe failure $svc.Name reset= 60 actions= restart/60000/restart/60000/""/60000 | Out-Null
+    Write-Host "Created service: $($svc.Name)"
+  }
+} else {
+  Write-Host "ValidateOnly: skipping service create/update."
+}
+
+foreach ($svc in $services) {
+  $registered = Get-CimInstance Win32_Service -Filter "Name='$($svc.Name)'"
+  if (-not $registered) {
+    if ($ValidateOnly) {
+      Write-Host "ValidateOnly: service is not registered yet: $($svc.Name)"
+      continue
+    } else {
+      throw "Service registration failed: $($svc.Name)"
+    }
   }
 
-  $serviceParams = @{
-    Name = $svc.Name
-    DisplayName = $svc.DisplayName
-    BinaryPathName = $binaryPath
-    StartupType = "Automatic"
+  if ($registered.StartMode -ne "Auto") {
+    throw "Service $($svc.Name) must be Automatic, got $($registered.StartMode)"
   }
-  if ($svc.DependsOn.Count -gt 0) {
-    $serviceParams.DependsOn = $svc.DependsOn
-  }
-  New-Service @serviceParams
 
-  sc.exe failure $svc.Name reset= 60 actions= restart/60000/restart/60000/""/60000 | Out-Null
-  Write-Host "Created service: $($svc.Name)"
+  $expectedPath = $svc.BinaryPath.Replace('"', '')
+  $actualPath = ([string]$registered.PathName).Replace('"', '')
+  if ($actualPath -ne $expectedPath) {
+    throw "Service $($svc.Name) binPath mismatch. Expected '$expectedPath', got '$actualPath'"
+  }
+
+  Write-Host "Verified service: $($svc.Name) ($($registered.State)/$($registered.StartMode))"
 }

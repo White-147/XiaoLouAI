@@ -13,7 +13,23 @@ www.example.com {
 		respond 404
 	}
 
+	handle /metrics {
+		respond 404
+	}
+
 	handle /healthz {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /livez {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /readyz {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/windows-native/status {
 		reverse_proxy 127.0.0.1:4100
 	}
 
@@ -25,7 +41,33 @@ www.example.com {
 		reverse_proxy 127.0.0.1:4100
 	}
 
+	handle /api/wallet {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/wallet/usage-stats {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/wallets {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/wallets/* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
 	handle /api/payments/callbacks/* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	# Legacy provider callback aliases are exposed only for payment-provider
+	# cutover compatibility. Frontend legacy writes stay blocked below.
+	handle /api/payments/alipay/notify {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/payments/wechat/notify {
 		reverse_proxy 127.0.0.1:4100
 	}
 

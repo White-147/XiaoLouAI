@@ -273,8 +273,11 @@ foreach ($path in @(
   "$SourceRoot\scripts\windows\complete-control-api-publish-restart-p0.ps1",
   "$SourceRoot\scripts\windows\verify-windows-service-ops-drill.ps1",
   "$SourceRoot\scripts\windows\restore-runtime-snapshot.ps1",
+  "$SourceRoot\scripts\windows\restore-postgres.ps1",
+  "$SourceRoot\scripts\windows\verify-postgres-backup.ps1",
   "$SourceRoot\scripts\windows\audit-wallet-ledger.ps1",
   "$SourceRoot\scripts\windows\rebuild-wallet-balances-from-ledger.ps1",
+  "$SourceRoot\docs\core-api-cutover.md",
   "$SourceRoot\deploy\windows\legacy-canonical-projection-checklist.md",
   "$SourceRoot\deploy\windows\payment-provider-replay-checklist.md"
 )) {
