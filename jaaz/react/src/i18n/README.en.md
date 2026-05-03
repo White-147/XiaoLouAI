@@ -1,4 +1,4 @@
-# Internationalization (i18n) Guide
+﻿# Internationalization (i18n) Guide
 
 Language: [简体中文](README.md) | [English](README.en.md)
 

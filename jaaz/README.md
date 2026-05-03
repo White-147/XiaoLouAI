@@ -1,4 +1,4 @@
-> XiaoLouAI production note: this upstream Jaaz README is kept as a local
+﻿> XiaoLouAI production note: this upstream Jaaz README is kept as a local
 > reference only. Its Docker, Linux, cloud, or standalone deployment sections
 > are not XiaoLouAI production instructions. XiaoLouAI production stays on the
 > Windows-native `.NET` Control API, PostgreSQL, and Windows Service worker

@@ -34,6 +34,7 @@ import {
   type ApiVendor,
   type ApiVendorModel,
   type NodeModelAssignment,
+  type ProviderHealthEvidence,
 } from "../lib/api";
 import { cn } from "../lib/utils";
 
@@ -149,6 +150,10 @@ function buildModelOptions(models: ApiVendorModel[], domain: ModelDomain): Model
 function resolveModelName(modelLookup: Map<string, string>, modelId: string | null | undefined) {
   if (!modelId) return "系统链路";
   return modelLookup.get(modelId) ?? modelId;
+}
+
+function isStagedProviderHealthEvidence(providerHealth?: ProviderHealthEvidence | null) {
+  return Boolean(providerHealth?.isStagedEvidence) || providerHealth?.evidenceKind === "staged_evidence";
 }
 
 function InfoChip({
@@ -430,11 +435,11 @@ function VendorCard({
                     : "bg-white/8 text-white/60",
               )}
             >
-              {vendor.connected ? "连接正常" : hasConfiguredKey ? "已保存密钥" : "未配置"}
+              {vendor.connected ? "配置已测试" : hasConfiguredKey ? "已保存密钥" : "未配置"}
             </div>
           </div>
           <p className="mt-3 text-sm leading-6 text-white/45">
-            真实 API Key 会写入服务端环境变量。保存后可立即执行连接测试，并直接影响后端运行时配置。
+            真实 API Key 会写入服务端环境变量。连接测试只验证 API-center 配置链路，并写入阶段性健康记录。
           </p>
         </div>
 
@@ -801,7 +806,14 @@ export default function ApiCenter() {
     try {
       const result = await testApiCenterVendorConnection(vendor.id);
       replaceVendor(vendor.id, result.vendor);
-      showToast(`${vendor.name} 连接正常，发现 ${result.modelCount} 个可用模型`);
+      if (isStagedProviderHealthEvidence(result.providerHealth)) {
+        setNotice(
+          `${vendor.name} 的配置测试已完成，并写入阶段性 provider health 记录；这不代表真实供应商健康，真实 provider evidence 仍在运营侧最终验收材料中确认。`,
+        );
+        showToast(`${vendor.name} 配置测试完成，阶段性记录已写入`);
+      } else {
+        showToast(`${vendor.name} 连接测试完成，发现 ${result.modelCount} 个可用模型`);
+      }
     } catch (caughtError) {
       setNotice(caughtError instanceof Error ? caughtError.message : "连接测试失败。");
     } finally {

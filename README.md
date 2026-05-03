@@ -1,4 +1,4 @@
-# XiaoLouAI - Windows Native AI Creation Platform
+﻿# XiaoLouAI - Windows Native AI Creation Platform
 
 Language: [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -171,10 +171,10 @@ P0 log:
 `D:\code\XiaoLouAI\.runtime\xiaolou-logs\p1-cutover-admin-p0-20260502-101430.out.log`.
 The P0 verifier now signs HS256 provider assertions when
 `CLIENT_API_REQUIRE_AUTH_PROVIDER=true`, so strict auth-provider service smoke
-does not fall back to the static client token. Real payment-provider captures
-are not bundled and are not required to finish the P1 engineering cutover; they
-are merchant-onboarding evidence to collect when a real Alipay or WeChat Pay
-account is available.
+does not fall back to the static client token. Operator-supplied final
+acceptance material is tracked in the dedicated evidence section below; missing
+real captures, dumps, or provider credentials do not block routine engineering
+cutover work.
 The P0/P1 risk scan also hardened cross-host deployment: publishing now preserves
 existing runtime env values, service registration refuses placeholder or
 smoke/test secrets by default, `rehearse -RunP0` imports runtime auth-provider
@@ -229,17 +229,50 @@ and `complete-control-api-publish-restart-p0.ps1` streams P0 output live while
 suppressing the standalone registration hint, so the admin shell no longer sits
 quietly after the build step.
 
+## Operator-Supplied Final Acceptance Evidence
+
+Some production materials are intentionally absent from the repository. They are
+final acceptance or cutover evidence, not routine engineering blockers. Handoff
+files should point to this section instead of repeating missing-material TODOs.
+
+Do not commit these materials:
+
+- Real production legacy dump/source, SQLite snapshots, old PostgreSQL
+  snapshots, or restore-drill outputs.
+- Real Alipay/WeChat Pay merchant accounts, private keys, certificates,
+  provider public keys, production secrets, and raw callback captures.
+- Real closed-API/vendor account credentials, API keys, provider routing
+  approvals, or production provider health evidence.
+- Real object-storage credentials, CDN/WAF credentials, production domain
+  secrets, and operator-only audit exports.
+
+Store collected evidence only under `.runtime` on the deployment host or in an
+operator-controlled evidence store. The repository may keep sanitized examples,
+dry-run reports, verifier code, and synthetic fixtures, but not the real
+material.
+
+Final acceptance evidence should include, when available:
+
+- Strict P0 and 4100 runtime smoke reports from the real Windows services.
+- `verify-p2-cutover-audit.ps1` output with no blockers.
+- A real legacy dump restore/projection verification report from
+  `verify-legacy-dump-cutover.ps1`, if a historical legacy source exists.
+- Payment adapter/normalizer verification plus staging replay/audit reports for
+  reviewed real provider captures.
+- API-center/provider health evidence showing configured vendors are routable
+  before public real-vendor traffic is enabled.
+- PostgreSQL backup and restore-drill evidence for the intended production
+  database.
+
+When any of the real materials above are not yet available, keep the synthetic
+and staged gates green and continue the Windows-native refactor. Missing real
+material is tracked here as final acceptance evidence, not as a handoff blocker.
+
 ## Payment Provider Onboarding
 
-Payment provider integration is prepared, but real Alipay/WeChat Pay merchant
-material is not a P1 engineering blocker. Real production legacy dump/source
-material follows the same rule: it is final acceptance and cutover evidence,
-not a routine engineering next-step blocker. The repository intentionally does
-not contain real merchant accounts, private keys, certificates, provider public
-keys, production secrets, raw callback captures, production PostgreSQL dumps,
-SQLite/legacy source snapshots, or restore-drill outputs. Treat those as
-operator-supplied final acceptance evidence, stored only under `.runtime` or
-operator-controlled evidence storage.
+Payment provider integration is prepared. Real merchant material and raw
+provider captures are tracked by the operator-supplied evidence module above,
+not as source-controlled project inputs.
 
 Current Windows-native Control API callbacks accept normalized canonical JSON
 signed with the configured HMAC secret

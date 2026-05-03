@@ -1,4 +1,4 @@
-# React + TypeScript + Vite
+﻿# React + TypeScript + Vite
 
 Language: [English](README.md) | [简体中文](README.zh-CN.md)
 

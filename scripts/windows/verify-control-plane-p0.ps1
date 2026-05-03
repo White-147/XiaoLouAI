@@ -437,17 +437,37 @@ function Invoke-ApiJson {
 
 function Test-PublicClientApiPath {
   param([string]$Path)
-  return $Path.StartsWith("/api/accounts/ensure") `
-    -or $Path.StartsWith("/api/jobs") `
-    -or $Path -eq "/api/wallet" `
-    -or $Path.StartsWith("/api/wallet?") `
-    -or $Path -eq "/api/wallets" `
-    -or $Path.StartsWith("/api/wallets") `
-    -or $Path.StartsWith("/api/wallet/usage-stats") `
-    -or $Path.StartsWith("/api/media") `
-    -or $Path.StartsWith("/api/playground") `
-    -or $Path.StartsWith("/api/capabilities") `
-    -or $Path.StartsWith("/api/toolbox")
+
+  $normalizedPath = ($Path -split "[?#]", 2)[0]
+  return (Test-ApiPathSegment $normalizedPath "/api/accounts/ensure") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/auth") `
+    -or $normalizedPath -eq "/api/me" `
+    -or (Test-ApiPathSegment $normalizedPath "/api/organizations") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/api-center") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/admin") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/enterprise-applications") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/playground") `
+    -or $normalizedPath -eq "/api/capabilities" `
+    -or (Test-ApiPathSegment $normalizedPath "/api/toolbox") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/jobs") `
+    -or $normalizedPath -eq "/api/wallet" `
+    -or $normalizedPath -eq "/api/wallets" `
+    -or $normalizedPath -eq "/api/wallet/usage-stats" `
+    -or (Test-ApiPathSegment $normalizedPath "/api/wallets") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/media") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/projects") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/canvas-projects") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/agent-canvas/projects") `
+    -or (Test-ApiPathSegment $normalizedPath "/api/create")
+}
+
+function Test-ApiPathSegment {
+  param(
+    [string]$Path,
+    [string]$Prefix
+  )
+
+  return $Path -eq $Prefix -or $Path.StartsWith("$Prefix/")
 }
 
 function Get-BodyValue {
@@ -823,9 +843,15 @@ Assert-True ($schema.applied -eq $true) "Schema apply endpoint did not confirm s
 
 Write-Step "Verifying internal API boundary"
 Invoke-ApiForbidden "Get" "/api/internal/jobs/wait-signal?timeoutSeconds=1" @{ "X-Forwarded-For" = "203.0.113.10" }
+Invoke-ApiForbidden "Post" "/api/internal/outbox/lease" @{ "X-Forwarded-For" = "203.0.113.10" }
 Invoke-ApiForbidden "Post" "/api/schema/apply" @{ "X-Forwarded-For" = "203.0.113.10" }
 Invoke-ApiForbidden "Get" "/api/providers/health" @{ "X-Forwarded-For" = "203.0.113.10" }
+Invoke-ApiForbidden "Get" "/metrics" @{ "X-Forwarded-For" = "203.0.113.10" }
 Invoke-ApiForbidden "Get" "/api/jobs" @{ "X-Forwarded-For" = "203.0.113.10" } @(401, 403)
+Invoke-ApiForbidden "Get" "/api/api-center" @{ "X-Forwarded-For" = "203.0.113.10" } @(401, 403)
+Invoke-ApiForbidden "Get" "/api/admin/orders" @{ "X-Forwarded-For" = "203.0.113.10" } @(401, 403)
+Invoke-ApiForbidden "Get" "/api/playground/models" @{ "X-Forwarded-For" = "203.0.113.10" } @(401, 403)
+Invoke-ApiForbidden "Get" "/api/projects?accountOwnerType=user&accountOwnerId=$AccountOwnerId" @{ "X-Forwarded-For" = "203.0.113.10" } @(401, 403)
 
 Write-Step "Ensuring account"
 $account = Invoke-ApiJson "Post" "/api/accounts/ensure" @{
@@ -1270,6 +1296,9 @@ $provider = Invoke-ApiJson "Put" "/api/providers/health" @{
   costScore = 1.0
 }
 Assert-True ($provider.status -eq "healthy") "Provider health was not upserted"
+Assert-True ($provider.evidenceKind -eq "real_provider_health") "Provider health did not expose real/staged evidence semantics"
+Assert-True ($provider.isRealProviderHealth -eq $true) "Healthy provider health was not marked as real provider evidence"
+Assert-True ($provider.isStagedEvidence -eq $false) "Healthy provider health was incorrectly marked as staged evidence"
 $outbox = ConvertTo-Array (Invoke-ApiJson "Post" "/api/internal/outbox/lease" @{
   workerId = "verify-outbox"
   batchSize = 1

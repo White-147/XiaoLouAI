@@ -1,4 +1,4 @@
-# XiaoLouAI Local Model Worker
+﻿# XiaoLouAI Local Model Worker
 
 Language: [English](README.md) | [简体中文](README.zh-CN.md)
 

@@ -121,6 +121,11 @@ function addFinding(findings, severity, code, message, details = {}) {
   findings.push({ severity, code, message, details });
 }
 
+function isStagedProviderHealthStatus(status) {
+  const normalized = normalizeIdentifier(status) || "unknown";
+  return ["evidence_pending", "pending", "unknown", "not_checked"].includes(normalized);
+}
+
 async function tableExists(client, tableName) {
   const result = await client.query(
     `SELECT EXISTS (
@@ -643,20 +648,32 @@ async function readApiCenterHealth(client) {
   const tableExistsValue = await tableExists(client, "api_center_configs");
   const providerHealthExists = await tableExists(client, "provider_health");
   const healthProviders = new Set();
+  const realHealthProviders = new Set();
+  const stagedHealthProviders = new Set();
   let providerHealthRows = 0;
+  const providerHealthStatusCounts = {};
 
   if (providerHealthExists) {
     const providerResult = await client.query(
-      `SELECT provider
+      `SELECT provider, coalesce(status, 'unknown') AS status, count(*)::integer AS rows
        FROM provider_health
        WHERE provider IS NOT NULL
-       GROUP BY provider`,
+       GROUP BY provider, coalesce(status, 'unknown')`,
     );
-    providerHealthRows = providerResult.rows.length;
     for (const row of providerResult.rows) {
       const provider = normalizeIdentifier(row.provider);
       if (provider) {
-        healthProviders.add(provider.toLowerCase());
+        const normalizedProvider = provider.toLowerCase();
+        const status = normalizeIdentifier(row.status) || "unknown";
+        const rowCount = Number(row.rows || 0);
+        healthProviders.add(normalizedProvider);
+        providerHealthRows += rowCount;
+        providerHealthStatusCounts[status] = Number(providerHealthStatusCounts[status] || 0) + rowCount;
+        if (isStagedProviderHealthStatus(status)) {
+          stagedHealthProviders.add(normalizedProvider);
+        } else {
+          realHealthProviders.add(normalizedProvider);
+        }
       }
     }
   }
@@ -666,6 +683,10 @@ async function readApiCenterHealth(client) {
     providerHealthTableExists: providerHealthExists,
     configRows: tableExistsValue ? await queryCount(client, "api_center_configs") : null,
     providerHealthRows,
+    providerHealthStatusCounts,
+    providerHealthProviders: Array.from(healthProviders).sort(),
+    realProviderHealthProviders: Array.from(realHealthProviders).sort(),
+    stagedProviderHealthProviders: Array.from(stagedHealthProviders).sort(),
     configs: [],
     totals: {
       invalidJsonRows: 0,
@@ -680,6 +701,7 @@ async function readApiCenterHealth(client) {
       disabledDefaultModels: 0,
       apiKeyStateConflicts: 0,
       configuredVendorsMissingProviderHealth: 0,
+      configuredVendorsOnlyStagedProviderHealth: 0,
     },
   };
 
@@ -695,7 +717,11 @@ async function readApiCenterHealth(client) {
   );
 
   for (const row of result.rows) {
-    const configHealth = analyzeApiCenterConfig(row, healthProviders);
+    const configHealth = analyzeApiCenterConfig(row, {
+      any: healthProviders,
+      real: realHealthProviders,
+      staged: stagedHealthProviders,
+    });
     health.configs.push(configHealth);
     for (const key of Object.keys(health.totals)) {
       health.totals[key] += numeric(configHealth[key]);
@@ -705,7 +731,7 @@ async function readApiCenterHealth(client) {
   return health;
 }
 
-function analyzeApiCenterConfig(row, healthProviders) {
+function analyzeApiCenterConfig(row, providerHealthProviders) {
   const allowedDomains = new Set(["text", "vision", "image", "video", "audio"]);
   const health = {
     accountId: row.account_id,
@@ -735,6 +761,8 @@ function analyzeApiCenterConfig(row, healthProviders) {
     apiKeyStateConflictVendors: [],
     configuredVendorsMissingProviderHealth: 0,
     configuredVendorsMissingProviderHealthValues: [],
+    configuredVendorsOnlyStagedProviderHealth: 0,
+    configuredVendorsOnlyStagedProviderHealthValues: [],
   };
 
   let config;
@@ -790,9 +818,17 @@ function analyzeApiCenterConfig(row, healthProviders) {
       health.apiKeyStateConflictVendors.push(vendorId);
     }
 
-    if (hasConfiguredKey && !healthProviders.has(normalizedVendorId)) {
-      health.configuredVendorsMissingProviderHealth += 1;
-      health.configuredVendorsMissingProviderHealthValues.push(vendorId);
+    if (hasConfiguredKey) {
+      if (!providerHealthProviders.any.has(normalizedVendorId)) {
+        health.configuredVendorsMissingProviderHealth += 1;
+        health.configuredVendorsMissingProviderHealthValues.push(vendorId);
+      } else if (
+        !providerHealthProviders.real.has(normalizedVendorId)
+        && providerHealthProviders.staged.has(normalizedVendorId)
+      ) {
+        health.configuredVendorsOnlyStagedProviderHealth += 1;
+        health.configuredVendorsOnlyStagedProviderHealthValues.push(vendorId);
+      }
     }
 
     for (const model of asArray(vendorObject.models)) {
@@ -1347,6 +1383,20 @@ function evaluateReport(report, args) {
         "api-center-provider-health-missing",
         "Configured API-center vendors do not yet have provider_health evidence. Keep real vendor routing gated until health evidence is present.",
         { vendors: totals.configuredVendorsMissingProviderHealth, configs: apiCenterHealth.configs },
+      );
+    }
+
+    if (numeric(totals.configuredVendorsOnlyStagedProviderHealth) > 0) {
+      addFinding(
+        findings,
+        "warning",
+        "api-center-provider-health-staged-only",
+        "Configured API-center vendors only have staged provider_health evidence_pending rows. This proves canonical plumbing, not real vendor health.",
+        {
+          vendors: totals.configuredVendorsOnlyStagedProviderHealth,
+          providerHealthStatusCounts: apiCenterHealth.providerHealthStatusCounts,
+          configs: apiCenterHealth.configs,
+        },
       );
     }
   }

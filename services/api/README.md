@@ -1,4 +1,4 @@
-# XiaoLouAI Legacy Python API Reference
+﻿# XiaoLouAI Legacy Python API Reference
 
 Language: [English](README.md) | [简体中文](README.zh-CN.md)
 

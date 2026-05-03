@@ -1,4 +1,4 @@
-# 国际化 (i18n) 使用指南
+﻿# 国际化 (i18n) 使用指南
 
 语言：[简体中文](README.md) | [English](README.en.md)
 

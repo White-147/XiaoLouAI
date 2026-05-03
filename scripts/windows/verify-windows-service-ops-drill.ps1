@@ -90,6 +90,33 @@ function Get-ServiceCim {
   return Get-CimInstance Win32_Service -Filter "Name='$escaped'" -ErrorAction SilentlyContinue
 }
 
+function Get-ServiceScSnapshot {
+  param([string]$Name)
+
+  $configText = (& sc.exe qc $Name 2>&1 | Out-String)
+  $pathName = ""
+  $startMode = ""
+
+  if ($configText -match "(?m)^\s*BINARY_PATH_NAME\s*:\s*(.+?)\s*$") {
+    $pathName = $Matches[1].Trim()
+  }
+  if ($configText -match "(?m)^\s*START_TYPE\s*:\s*\d+\s+([A-Z_]+)\s*$") {
+    $startType = $Matches[1].Trim()
+    $startMode = switch ($startType) {
+      "AUTO_START" { "Auto" }
+      "DEMAND_START" { "Manual" }
+      "DISABLED" { "Disabled" }
+      default { $startType }
+    }
+  }
+
+  return [ordered]@{
+    path_name = $pathName
+    start_mode = $startMode
+    raw_config = $configText.Trim()
+  }
+}
+
 function Get-ServiceFailureActions {
   param([string]$Name)
 
@@ -214,40 +241,54 @@ foreach ($definition in $services) {
   $name = [string]$definition.name
   $expectedDll = [System.IO.Path]::GetFullPath([string]$definition.expected_dll)
   $cim = Get-ServiceCim -Name $name
+  $scSnapshot = $null
   if (-not $cim) {
-    Add-Problem "service-missing" "$name is not registered"
-    continue
+    try {
+      $service = Get-Service -Name $name -ErrorAction Stop
+      $scSnapshot = Get-ServiceScSnapshot -Name $name
+      Add-Problem "service-cim-access-limited" "$name Win32_Service metadata is unavailable from this PowerShell session; using Get-Service/sc.exe fallback. Re-run elevated for full binPath/start-mode evidence."
+    } catch {
+      Add-Problem "service-missing" "$name is not registered"
+      continue
+    }
+  } else {
+    $service = Get-Service -Name $name -ErrorAction Stop
   }
 
-  $service = Get-Service -Name $name -ErrorAction Stop
   $dependencies = @($service.ServicesDependedOn | ForEach-Object { $_.Name })
   $failureActions = Get-ServiceFailureActions -Name $name
-  $pathName = [string]$cim.PathName
+  $pathName = if ($cim) { [string]$cim.PathName } else { [string]$scSnapshot.path_name }
+  $startMode = if ($cim) { [string]$cim.StartMode } else { [string]$scSnapshot.start_mode }
+  $state = if ($cim) { [string]$cim.State } else { [string]$service.Status }
+  $processId = if ($cim) { [int]$cim.ProcessId } else { 0 }
   $report = [ordered]@{
     name = $name
-    state = [string]$cim.State
-    start_mode = [string]$cim.StartMode
-    process_id = [int]$cim.ProcessId
+    state = $state
+    start_mode = $startMode
+    process_id = $processId
     path_name = $pathName
     expected_dll = $expectedDll
     dependencies = $dependencies
     failure_actions = $failureActions
+    metadata_source = $(if ($cim) { "cim" } else { "get-service-sc" })
   }
   $serviceReports.Add($report) | Out-Null
 
-  if ($cim.StartMode -ne "Auto") {
-    Add-Problem "service-start-mode" "$name StartMode is $($cim.StartMode), expected Auto"
+  if ($startMode -ne "Auto") {
+    Add-Problem "service-start-mode" "$name StartMode is $startMode, expected Auto"
   } else {
     Add-Item $checks "service-start-mode" "ok" "$name is Automatic"
   }
 
-  if ($cim.State -ne "Running") {
-    Add-Problem "service-running" "$name state is $($cim.State), expected Running"
+  if ($state -ne "Running") {
+    Add-Problem "service-running" "$name state is $state, expected Running"
   } else {
     Add-Item $checks "service-running" "ok" "$name is Running"
   }
 
-  if ($pathName -match "powershell(\.exe)?|pwsh(\.exe)?") {
+  if (-not $pathName) {
+    Add-Problem "service-binpath-unavailable" "$name binPath could not be read from this PowerShell session"
+  } elseif ($pathName -match "powershell(\.exe)?|pwsh(\.exe)?") {
     Add-Problem "service-binpath-wrapper" "$name still points at a PowerShell wrapper: $pathName" -AlwaysBlock
   } elseif ($pathName.IndexOf("dotnet.exe", [StringComparison]::OrdinalIgnoreCase) -lt 0) {
     Add-Problem "service-binpath-dotnet" "$name binPath does not invoke dotnet.exe: $pathName"
@@ -255,15 +296,15 @@ foreach ($definition in $services) {
     Add-Item $checks "service-binpath-dotnet" "ok" "$name invokes dotnet.exe"
   }
 
-  if ($pathName.IndexOf($expectedDll, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+  if ($pathName -and $pathName.IndexOf($expectedDll, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
     Add-Problem "service-binpath-dll" "$name binPath does not point at expected published DLL: $expectedDll"
-  } else {
+  } elseif ($pathName) {
     Add-Item $checks "service-binpath-dll" "ok" "$name points at $expectedDll"
   }
 
-  if ($pathName -match "^[`"']?C:\\" -or $pathName -match "\s[`"']?C:\\") {
+  if ($pathName -and ($pathName -match "^[`"']?C:\\" -or $pathName -match "\s[`"']?C:\\")) {
     Add-Problem "service-binpath-drive" "$name binPath contains a C: runtime path: $pathName" -AlwaysBlock
-  } elseif ($pathName.IndexOf("D:\", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+  } elseif ($pathName -and $pathName.IndexOf("D:\", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
     Add-Item $checks "service-binpath-drive" "ok" "$name uses D: runtime paths"
   }
 

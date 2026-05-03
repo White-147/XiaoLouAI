@@ -202,7 +202,8 @@ function Test-EvidenceOnlyProjectionWarning {
   $allowedCodes = @(
     "missing-legacy-snapshot",
     "missing-legacy-source",
-    "api-center-provider-health-missing"
+    "api-center-provider-health-missing",
+    "api-center-provider-health-staged-only"
   )
   $issues = @(Get-ReportIssues $Step.data.report)
   if ($issues.Count -eq 0) {
@@ -277,51 +278,6 @@ function Invoke-AuditStep {
   }
 }
 
-function Get-ProjectAdjacentRuntimeLegacySqlFindings {
-  $findings = New-List
-  $sourceRoot = Join-Path $RepoRoot "control-plane-dotnet\src"
-  if (-not (Test-Path -LiteralPath $sourceRoot)) {
-    throw "Control plane source root not found: $sourceRoot"
-  }
-
-  $files = @(Get-ChildItem -Path $sourceRoot -Recurse -File -Filter "*.cs")
-  $legacySqlPattern = "(?i)\b(from|join|insert\s+into|update|delete\s+from)\s+(storyboards|videos|dubbings)\b"
-  $legacyDeleteHelperPattern = 'DeleteProjectItemAsync\("(?<table>storyboards|videos|dubbings)"'
-  foreach ($file in $files) {
-    $lineNo = 0
-    foreach ($line in Get-Content -LiteralPath $file.FullName) {
-      $lineNo += 1
-      $match = [regex]::Match($line, $legacySqlPattern)
-      if ($match.Success) {
-        $relativePath = $file.FullName.Substring($RepoRoot.Length).TrimStart([char[]]@([char]"\", [char]"/"))
-        $findings.Add([ordered]@{
-          file = $relativePath
-          line = $lineNo
-          table = $match.Groups[2].Value
-          detail = $line.Trim()
-        }) | Out-Null
-        continue
-      }
-
-      $helperMatch = [regex]::Match($line, $legacyDeleteHelperPattern)
-      if ($helperMatch.Success) {
-        $relativePath = $file.FullName.Substring($RepoRoot.Length).TrimStart([char[]]@([char]"\", [char]"/"))
-        $findings.Add([ordered]@{
-          file = $relativePath
-          line = $lineNo
-          table = $helperMatch.Groups["table"].Value
-          detail = $line.Trim()
-        }) | Out-Null
-      }
-    }
-  }
-
-  return [ordered]@{
-    scannedFiles = $files.Count
-    findings = $findings
-  }
-}
-
 $NodeExe = Resolve-DTool $NodeExe "NODE_EXE" "D:\soft\program\nodejs\node.exe" "Node.js"
 $logDir = Split-Path -Parent $ReportPath
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -367,14 +323,26 @@ if ($LegacyDumpFile) {
   }
 }
 
-Invoke-AuditStep "project-adjacent-runtime-source-guard" {
-  $guard = Get-ProjectAdjacentRuntimeLegacySqlFindings
-  $guardFindings = $guard["findings"]
-  if ($guardFindings.Count -gt 0) {
-    throw "Control plane runtime source still references legacy project-adjacent SQL tables: $($guardFindings.Count)"
+Invoke-AuditStep "legacy-runtime-dependency-isolation" {
+  $legacyRuntimeReport = Join-Path $logDir "p2-cutover-audit-legacy-runtime-dependencies-$stamp.json"
+  & "$PSScriptRoot\verify-legacy-runtime-dependencies.ps1" `
+    -RepoRoot $RepoRoot `
+    -ReportPath $legacyRuntimeReport | Out-Null
+  return [ordered]@{
+    report = $legacyRuntimeReport
+    summary = Get-ReportSummary $legacyRuntimeReport
   }
+}
 
-  return $guard
+Invoke-AuditStep "control-api-permission-matrix" {
+  $matrixReport = Join-Path $logDir "p2-cutover-audit-control-api-permission-matrix-$stamp.json"
+  & "$PSScriptRoot\verify-control-api-permission-matrix.ps1" `
+    -RepoRoot $RepoRoot `
+    -ReportPath $matrixReport | Out-Null
+  return [ordered]@{
+    report = $matrixReport
+    summary = Get-ReportSummary $matrixReport
+  }
 }
 
 if (-not $SkipProjectionFixture) {

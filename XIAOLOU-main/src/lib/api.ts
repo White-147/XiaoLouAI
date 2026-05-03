@@ -911,10 +911,26 @@ export type ApiCenterConfig = {
   toolboxAssignments?: NodeModelAssignment[];
 };
 
+export type ProviderHealthEvidence = {
+  provider?: string;
+  region_code?: string;
+  regionCode?: string;
+  model_family?: string;
+  modelFamily?: string;
+  status?: string;
+  evidenceKind?: "staged_evidence" | "real_provider_health" | string;
+  isStagedEvidence?: boolean;
+  isRealProviderHealth?: boolean;
+  acceptanceEvidenceRequired?: boolean;
+  providerHealthSemantics?: string;
+  [key: string]: unknown;
+};
+
 export type ApiVendorConnectionTestResult = {
   vendor: ApiVendor;
   checkedAt: string;
   modelCount: number;
+  providerHealth?: ProviderHealthEvidence | null;
 };
 
 export type UploadedFile = {

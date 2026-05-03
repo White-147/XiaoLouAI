@@ -1,4 +1,4 @@
-# 🧠 Jaaz – AI自动化营销Agent助手 通用智能助手
+﻿# 🧠 Jaaz – AI自动化营销Agent助手 通用智能助手
 
 语言：[English](README.md) | [维护版简体中文](README_zh.md) | [历史中文入口](README-zh.md)
 

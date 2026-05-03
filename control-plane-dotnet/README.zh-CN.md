@@ -1,4 +1,4 @@
-# XiaoLouAI 控制面（.NET）
+﻿# XiaoLouAI 控制面（.NET）
 
 语言：[English](README.md) | [简体中文](README.zh-CN.md)
 

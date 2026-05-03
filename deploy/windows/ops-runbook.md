@@ -104,13 +104,22 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 - Static tokens are sent as `X-XiaoLou-Client-Token` or `Authorization: Bearer <token>`.
 - Provider assertions are sent as `Authorization: Bearer <jwt>` and verified with `CLIENT_API_AUTH_PROVIDER=hs256-jwt`, `CLIENT_API_AUTH_PROVIDER_SECRET`, and, for cutover, `CLIENT_API_REQUIRE_AUTH_PROVIDER=true`.
 - Provider assertion claims support `sub`, `iss`, `aud`, `exp`, `nbf`, `xiaolou_account_ids`, `xiaolou_account_owner_ids`, `xiaolou_account_owner_type`, and `xiaolou_permissions`. `sub` is treated as a `user:<sub>` owner grant unless `xiaolou_account_owner_type` says otherwise.
-- Protected public client routes are `/api/accounts/ensure`, `/api/jobs*`, and `/api/media*`.
+- Public client routes are controlled by the S2 permission matrix in
+  `scripts/windows/verify-control-api-permission-matrix.ps1`. The matrix covers
+  `/api/accounts/ensure`, identity/config/admin/system surfaces, playground,
+  toolbox, jobs, wallet, media upload/signed-url, projects/canvas/create routes,
+  and their route-level permissions.
 - Keep `CLIENT_API_REQUIRE_ACCOUNT_SCOPE=true` in production so requests must carry account scope headers matching the request body/query/route.
 - For static-token cutover, set `CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT=true` once the active accounts are known. Then grant only the intended accounts with `CLIENT_API_ALLOWED_ACCOUNT_IDS`, or owner-scoped canaries with `CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS` such as `user:<id>` or `organization:<id>`.
 - For auth-provider cutover, keep configured account grants optional as an upper-bound gray-release switch. If `CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT=true` is set, provider assertion grants must also match the configured account or owner grants.
 - Set `CLIENT_API_ALLOWED_PERMISSIONS` to the exact public actions this frontend token may call, for example `accounts:ensure,jobs:create,jobs:read,jobs:cancel,media:read,media:write`. Use `jobs:*`, `media:*`, or `*` only as temporary staging grants.
 - `CLIENT_API_ALLOWED_ACCOUNT_IDS=*` and owner wildcards such as `user:*` are broad grants. Use them only for temporary staging or deliberate canary windows with a rollback plan.
-- `/api/payments/callbacks/*` remains provider-signature protected and is not a client-token route.
+- Payment callbacks remain provider-signature protected and are not client-token
+  routes. P0 verifies forbidden access for representative internal,
+  operational, and public client groups. P2 runs the permission matrix verifier
+  before projection and frontend dependency audits, so route expansions must
+  update the matrix, Control API middleware, frontend assertion paths, and
+  Caddy/IIS examples together.
 
 ## Provider Health, Outbox, and Worker Boundaries
 

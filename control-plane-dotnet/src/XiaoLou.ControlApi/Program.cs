@@ -378,6 +378,7 @@ app.MapPost("/api/api-center/vendors/{vendorId}/test", async (
     HttpContext httpContext,
     IOptions<ClientApiOptions> clientApi,
     PostgresIdentityConfigStore identity,
+    PostgresProviderHealthStore providerHealth,
     CancellationToken ct) =>
 {
     var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
@@ -386,7 +387,17 @@ app.MapPost("/api/api-center/vendors/{vendorId}/test", async (
         return denied;
     }
 
-    return Results.Ok(await identity.TestApiCenterVendorConnectionAsync(scope, vendorId, ct));
+    var result = await identity.TestApiCenterVendorConnectionAsync(scope, vendorId, ct);
+    var health = await providerHealth.UpsertAsync(new ProviderHealthRequest
+    {
+        Provider = vendorId,
+        RegionCode = NormalizeBlank(scope.RegionCode) ?? "CN",
+        ModelFamily = "api-center",
+        Status = "evidence_pending",
+        LastError = "API-center test wrote staged canonical provider health only; real provider evidence is operator-supplied final acceptance evidence.",
+    }, ct);
+    result["providerHealth"] = health;
+    return Results.Ok(result);
 });
 
 app.MapPut("/api/api-center/vendors/{vendorId}/models/{modelId}", async (

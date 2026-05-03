@@ -80,20 +80,21 @@ if (-not $Execute) {
 }
 
 if ($DropExisting) {
-  & $dropdb "--if-exists" "--host=$HostName" "--port=$Port" "--username=$Username" $Database
+  & $dropdb "--no-password" "--if-exists" "--host=$HostName" "--port=$Port" "--username=$Username" $Database
   if ($LASTEXITCODE -ne 0) {
     throw "dropdb failed with exit code $LASTEXITCODE"
   }
 }
 
 if ($CreateDatabase) {
-  & $createdb "--host=$HostName" "--port=$Port" "--username=$Username" $Database
+  & $createdb "--no-password" "--host=$HostName" "--port=$Port" "--username=$Username" $Database
   if ($LASTEXITCODE -ne 0) {
     throw "createdb failed with exit code $LASTEXITCODE"
   }
 }
 
 $restoreArgs = @(
+  "--no-password",
   "--host=$HostName",
   "--port=$Port",
   "--username=$Username",

@@ -1,4 +1,4 @@
-# XiaoLouAI 本地模型 Worker
+﻿# XiaoLouAI 本地模型 Worker
 
 语言：[English](README.md) | [简体中文](README.zh-CN.md)
 

@@ -106,7 +106,7 @@ SELECT json_build_object(
   throw
 } finally {
   if (-not $KeepDatabase) {
-    & $dropdb "--if-exists" "--host=$HostName" "--port=$Port" "--username=$Username" $Database | Out-Null
+    & $dropdb "--no-password" "--if-exists" "--host=$HostName" "--port=$Port" "--username=$Username" $Database | Out-Null
   }
 
   $report = [ordered]@{
