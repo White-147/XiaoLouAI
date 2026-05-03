@@ -19,6 +19,10 @@ await host.RunAsync();
 
 internal sealed class ClosedApiWorkerOptions
 {
+    public const string ExecutionMode = "stubbed-simulated";
+    public const string RuntimeBoundary = "canonical-queue-worker-skeleton";
+    public const string AdapterStatus = "not_connected";
+
     public string WorkerId { get; init; } = "closed-api-worker-1";
     public string Lane { get; init; } = AccountLanes.Media;
     public string ProviderRoute { get; init; } = "closed-api";
@@ -39,10 +43,11 @@ internal sealed class ClosedApiWorkerService(
     {
         var worker = options.Value;
         logger.LogInformation(
-            "Starting XiaoLou closed API worker {WorkerId} for lane {Lane} provider route {ProviderRoute}.",
+            "Starting XiaoLou closed API worker {WorkerId} for lane {Lane} provider route {ProviderRoute} in {ExecutionMode} mode; no real provider call is made by this skeleton.",
             worker.WorkerId,
             worker.Lane,
-            worker.ProviderRoute);
+            worker.ProviderRoute,
+            ClosedApiWorkerOptions.ExecutionMode);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -114,8 +119,8 @@ internal sealed class ClosedApiWorkerService(
                 return;
             }
 
-            // P0 worker skeleton: real provider calls are added behind provider router.
-            // The important behavior now is durable PostgreSQL state transitions.
+            // Boundary contract: this proves queue plumbing only. Real provider
+            // adapters must replace the simulated result with provider output metadata.
             await jobs.SucceedAsync(
                 jobId,
                 JsonSerializer.Serialize(new
@@ -124,6 +129,18 @@ internal sealed class ClosedApiWorkerService(
                     kind = "closed-api",
                     providerRoute = worker.ProviderRoute,
                     status = "stubbed",
+                    executionMode = ClosedApiWorkerOptions.ExecutionMode,
+                    runtimeBoundary = ClosedApiWorkerOptions.RuntimeBoundary,
+                    adapterStatus = ClosedApiWorkerOptions.AdapterStatus,
+                    isStubbed = true,
+                    isSimulated = true,
+                    contract = "This result proves canonical PostgreSQL job lease/running/succeed plumbing only; no real closed API provider request has been sent.",
+                    requiredForRealExecution = new[]
+                    {
+                        "provider_adapter",
+                        "credentialed_vendor_route",
+                        "object_storage_media_outputs",
+                    },
                     completedAt = DateTimeOffset.UtcNow,
                 }),
                 cancellationToken);

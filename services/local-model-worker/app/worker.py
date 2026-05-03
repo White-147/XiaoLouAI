@@ -8,6 +8,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+WORKER_KIND = "local-model"
+WORKER_EXECUTION_MODE = "stubbed-simulated"
+WORKER_RUNTIME_BOUNDARY = "canonical-queue-worker-skeleton"
+WORKER_ADAPTER_STATUS = "not_connected"
+
 
 def post_json(base_url: str, path: str, payload: dict[str, Any], internal_token: str = "") -> Any:
     data = json.dumps(payload).encode("utf-8")
@@ -33,6 +38,29 @@ def payload_requests_failure(job: dict[str, Any]) -> bool:
     return isinstance(payload, dict) and payload.get("forceFail") is True
 
 
+def build_stubbed_result(worker_id: str, provider_route: str) -> dict[str, Any]:
+    return {
+        "worker": worker_id,
+        "kind": WORKER_KIND,
+        "providerRoute": provider_route,
+        "status": "stubbed",
+        "executionMode": WORKER_EXECUTION_MODE,
+        "runtimeBoundary": WORKER_RUNTIME_BOUNDARY,
+        "adapterStatus": WORKER_ADAPTER_STATUS,
+        "isStubbed": True,
+        "isSimulated": True,
+        "contract": (
+            "This result proves canonical PostgreSQL job lease/running/succeed plumbing only; "
+            "no real local model adapter or media output has been executed."
+        ),
+        "requiredForRealExecution": [
+            "model_adapter",
+            "model_weights_or_endpoint",
+            "object_storage_media_outputs",
+        ],
+    }
+
+
 def run_worker(
     control_api: str,
     lane: str,
@@ -44,6 +72,14 @@ def run_worker(
     run_once: bool,
     internal_token: str,
 ) -> None:
+    print(
+        (
+            f"local model worker executionMode={WORKER_EXECUTION_MODE} "
+            f"adapterStatus={WORKER_ADAPTER_STATUS}; canonical queue worker skeleton only"
+        ),
+        flush=True,
+    )
+
     while True:
         try:
             leased = post_json(
@@ -72,19 +108,12 @@ def run_worker(
                     if payload_requests_failure(job):
                         raise RuntimeError("forced local model worker failure requested by job payload")
 
-                    # P0 placeholder: real adapters should run model inference here and
-                    # return media object IDs / object-storage paths in the result.
+                    # Boundary contract: this proves queue plumbing only. Real adapters
+                    # must replace the simulated result with media output metadata.
                     post_json(
                         control_api,
                         f"/api/internal/jobs/{job_id}/succeed",
-                        {
-                            "result": {
-                                "worker": worker_id,
-                                "kind": "local-model",
-                                "providerRoute": provider_route,
-                                "status": "stubbed",
-                            }
-                        },
+                        {"result": build_stubbed_result(worker_id, provider_route)},
                         internal_token,
                     )
                 except Exception as exc:

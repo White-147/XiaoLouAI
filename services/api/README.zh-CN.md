@@ -15,6 +15,10 @@
 参考。不要把该服务、Celery、RabbitMQ、Redis、Docker 或 Linux 容器作为生产
 异步基础。
 
+保留条件：仅当工程师仍需要旧路由映射、schema 对照，或历史支付/上传/video-replace
+参考代码时保留该目录。当这些参考不再需要，且最终 legacy surface gate 确认没有
+production 文案或运行时注册依赖它之后，应迁入 `legacy/` 或删除。
+
 ## 仅限本地参考
 
 如果开发者需要对照旧路由，可以本地检查或运行：
@@ -30,6 +34,8 @@ python -m venv .venv
 
 `TASK_PUBLISH_ENABLED` 默认是 `false`。Celery worker 模块和 Docker 启动文件
 已经从仓库生产路径移除。
+该目录中的 health 测试只证明归档 FastAPI 参考仍可导入，旧 health route 仍可解析
+用于对照；它们不是生产 API 回归测试。
 
 不要把 RabbitMQ、Redis、Celery、Docker Compose 或容器启动步骤重新加入生产
 文档。新工作应放在 `control-plane-dotnet/` 和 Windows 原生服务脚本中。

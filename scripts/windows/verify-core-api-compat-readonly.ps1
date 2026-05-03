@@ -11,6 +11,7 @@ param(
     "/api/windows-native/status"
   ),
   [string[]]$ClosedReadPaths = @(
+    "/api/tasks/stream",
     "/api/wallet",
     "/api/wallets",
     "/api/wallet/recharge-capabilities",
@@ -30,6 +31,7 @@ param(
     "POST /api/jobs",
     "DELETE /api/tasks",
     "POST /api/wallet/recharge-orders",
+    "POST /api/payments/wechat/notify",
     "POST /api/payments/alipay/notify",
     "POST /api/media/upload-begin",
     "POST /api/uploads"
@@ -256,6 +258,41 @@ function Get-CoreApiMutatingRoutes {
   return $routes
 }
 
+function Assert-CoreApiFinalSurfaceSource {
+  param(
+    [string]$RoutesPath,
+    [string]$ServerPath,
+    [string]$CompatPublicRouteAllowlist
+  )
+
+  $expectedAllowlist = "GET /healthz;GET /api/windows-native/status"
+  $normalizedActualAllowlist = ([string]$CompatPublicRouteAllowlist -split "[;`n,]+" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ";"
+  $normalizedExpectedAllowlist = ($expectedAllowlist -split "[;`n,]+" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ";"
+  if ($normalizedActualAllowlist -ne $normalizedExpectedAllowlist) {
+    throw "CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST must remain narrow. Expected '$expectedAllowlist' but got '$CompatPublicRouteAllowlist'."
+  }
+
+  $serverSource = Get-Content -LiteralPath $ServerPath -Raw
+  if ($serverSource -notmatch 'DEFAULT_COMPAT_PUBLIC_ROUTE_ALLOWLIST\s*=\s*"GET /healthz;GET /api/windows-native/status"') {
+    throw "server.js default core-api compatibility public allowlist has changed. Keep it to healthz and windows-native status only."
+  }
+
+  $routesSource = Get-Content -LiteralPath $RoutesPath -Raw
+  if ($routesSource -notmatch 'envFlag\(\s*"CORE_API_COMPAT_DISABLE_TASKS_STREAM"\s*,\s*true\s*\)') {
+    throw "routes.js must default CORE_API_COMPAT_DISABLE_TASKS_STREAM to true."
+  }
+  if ($routesSource -notmatch 'envFlag\(\s*"CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY"\s*,\s*false\s*\)') {
+    throw "routes.js must default CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY to false."
+  }
+
+  return [ordered]@{
+    compatPublicRouteAllowlist = $normalizedActualAllowlist
+    defaultAllowlist = $normalizedExpectedAllowlist
+    tasksStreamDefault = "closed"
+    legacyPaymentNotifyDefault = "closed"
+  }
+}
+
 $NodeExe = Resolve-DTool $NodeExe "NODE_EXE" "D:\soft\program\nodejs\node.exe" "Node.js"
 $CoreApiRoot = Join-Path $RepoRoot "core-api"
 $PackageJson = Join-Path $CoreApiRoot "package.json"
@@ -279,6 +316,12 @@ if (Test-PortOpen "127.0.0.1" $Port) {
 }
 
 $routesJs = Join-Path $CoreApiRoot "src\routes.js"
+$serverJs = Join-Path $CoreApiRoot "src\server.js"
+$finalSurfaceSource = Assert-CoreApiFinalSurfaceSource `
+  -RoutesPath $routesJs `
+  -ServerPath $serverJs `
+  -CompatPublicRouteAllowlist $CompatPublicRouteAllowlist
+
 $discoveredWriteRoutes = @()
 $writeRouteEntries = New-Object System.Collections.Generic.List[string]
 $writeRouteKeys = New-Object "System.Collections.Generic.HashSet[string]"
@@ -316,6 +359,8 @@ $stderrLog = Join-Path $logDir "core-api-compat-readonly-$stamp.err.log"
 [Environment]::SetEnvironmentVariable("JAAZ_DATABASE_URL", $DatabaseUrl, "Process")
 [Environment]::SetEnvironmentVariable("CORE_API_COMPAT_READ_ONLY", "1", "Process")
 [Environment]::SetEnvironmentVariable("CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST", $CompatPublicRouteAllowlist, "Process")
+[Environment]::SetEnvironmentVariable("CORE_API_COMPAT_DISABLE_TASKS_STREAM", "1", "Process")
+[Environment]::SetEnvironmentVariable("CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY", "0", "Process")
 [Environment]::SetEnvironmentVariable("POSTGRES_ALLOW_EMPTY_BOOTSTRAP", "0", "Process")
 [Environment]::SetEnvironmentVariable("JAAZ_AUTO_START", "0", "Process")
 [Environment]::SetEnvironmentVariable("JAAZ_UI_MODE", "off", "Process")
@@ -414,6 +459,7 @@ try {
     stdoutLog = $stdoutLog
     stderrLog = $stderrLog
     checks = [ordered]@{
+      finalSurfaceSource = $finalSurfaceSource
       allowedReads = $allowedReadChecks
       legacyPublicGetsClosed = $closedReadChecks
       mutatingWriteRouteDiscovery = [ordered]@{

@@ -15,6 +15,12 @@ Keep this directory only as a migration reference for older FastAPI, SQLAlchemy,
 payment, upload, and video-replace code. Do not use this service, Celery,
 RabbitMQ, Redis, Docker, or Linux containers as the production async foundation.
 
+Retention condition: keep this directory only while engineers still need old
+route mapping, schema comparison, or historical payment/upload/video-replace
+reference code. After those references are no longer needed and the final
+legacy-surface gate confirms no production wording or runtime registration
+depends on it, move it under `legacy/` or delete it.
+
 ## Local Reference Only
 
 If a developer needs to inspect or run legacy routes for comparison:
@@ -30,6 +36,9 @@ python -m venv .venv
 
 `TASK_PUBLISH_ENABLED` defaults to `false`. Celery worker modules and Docker
 startup files have been removed from the repository production path.
+The health tests in this directory only prove that the archived FastAPI
+reference can still be imported and that its legacy health route remains
+parseable for comparison; they are not current runtime regression tests.
 
 Do not add RabbitMQ, Redis, Celery, Docker Compose, or container startup steps
 back into production documentation. New work belongs under

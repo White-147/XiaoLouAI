@@ -17,6 +17,18 @@ python -m venv .venv
 Real model integrations should be added behind explicit adapters under `app/`
 and must write final job results back through the control API.
 
+## Current Boundary
+
+The current worker is a canonical queue skeleton. It leases jobs, marks them
+running, and writes success/failure transitions through the control API, but it
+does not execute a real local model by default.
+
+Default success results keep the existing `status=stubbed` field and add
+`executionMode=stubbed-simulated`, `isSimulated=true`, and
+`adapterStatus=not_connected`. Treat those fields as the contract that the
+queue path is healthy while real model adapters, weights/endpoints, and object
+storage media outputs are still outside this worker skeleton.
+
 For one-shot verification:
 
 ```powershell

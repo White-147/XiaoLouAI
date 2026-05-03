@@ -112,6 +112,13 @@ covers pricing rules, admin payment-order reads, enterprise application
 submission/review, and the retired admin-review 410 boundary. Verification does
 not use Docker, Linux, Celery, or Redis.
 
+Current worker success paths are skeleton contracts. They prove durable
+PostgreSQL job lease/running/succeed/fail behavior, not real provider or model
+execution. Default successful worker results keep `status=stubbed` and add
+`executionMode=stubbed-simulated`, `isSimulated=true`, and
+`adapterStatus=not_connected` until real adapters and object-storage media
+outputs are attached.
+
 ## README Language Policy
 
 Keep this README and `README.zh-CN.md` in sync. Any future README change should

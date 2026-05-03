@@ -77,6 +77,18 @@ function failure(statusCode, code, message) {
   };
 }
 
+function envFlag(name, defaultValue = false) {
+  const raw = String(process.env[name] || "").trim().toLowerCase();
+  if (!raw) return defaultValue;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return defaultValue;
+}
+
+function compatRouteClosed(message) {
+  return failure(410, "CORE_API_COMPAT_ROUTE_CLOSED", message);
+}
+
 function redirect(res, location) {
   res.writeHead(302, {
     Location: location,
@@ -364,6 +376,10 @@ function buildSystemRoutes(store) {
       return ok(store.updateMe(getActorId(req, url), body));
     }),
     route("GET", "/api/tasks/stream", ({ req, res, url }) => {
+      if (envFlag("CORE_API_COMPAT_DISABLE_TASKS_STREAM", true)) {
+        return compatRouteClosed("core-api legacy task stream is retired. Use the .NET control plane job APIs.");
+      }
+
       const actorId = getActorId(req, url);
       res.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
@@ -704,6 +720,10 @@ function buildWalletRoutes(store) {
       return undefined;
     }),
     routeWithStatus("POST", "/api/payments/wechat/notify", 200, async ({ req, res }) => {
+      if (!envFlag("CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY", false)) {
+        return compatRouteClosed("core-api legacy payment notify aliases are closed by default. Use the .NET control plane callbacks.");
+      }
+
       const rawBody = await readTextBody(req);
       try {
         const notification = parseWechatNotification(rawBody, req.headers);
@@ -746,6 +766,10 @@ function buildWalletRoutes(store) {
       return undefined;
     }),
     routeWithStatus("POST", "/api/payments/alipay/notify", 200, async ({ req, res }) => {
+      if (!envFlag("CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY", false)) {
+        return compatRouteClosed("core-api legacy payment notify aliases are closed by default. Use the .NET control plane callbacks.");
+      }
+
       const rawBody = await readTextBody(req);
       const params = Object.fromEntries(new URLSearchParams(rawBody));
       try {

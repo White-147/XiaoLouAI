@@ -38,6 +38,10 @@ Some legacy or upstream subdirectories keep their own README files for
 migration/reference work. Those files are not production deployment guides when
 they mention Docker, Linux, Celery, Redis, RabbitMQ, or container startup.
 Production operations are defined by this README and `deploy/windows/ops-runbook.md`.
+`services/api/` is retained only while old route mapping or historical
+FastAPI/SQLAlchemy/payment/upload/video-replace code is still useful for
+comparison; after final legacy-surface checks no longer need it, the directory
+can move under `legacy/` or be deleted.
 
 ## Development Setup
 
@@ -97,6 +101,13 @@ The registered services use service-aware `.NET` hosts with direct
 `dotnet.exe <published dll>` `binPath` values. `XiaoLou-LocalModelWorker` is a
 small `.NET` Windows Service wrapper that supervises the Python local model
 adapter process; Python remains limited to local model inference execution.
+Current worker success payloads are explicit skeleton contracts, not proof of
+real model or provider execution. `XiaoLou-LocalModelWorker` and
+`XiaoLou-ClosedApiWorker` can lease, mark running, succeed, fail, and retry
+canonical PostgreSQL jobs, but their default success results keep
+`status=stubbed`, `executionMode=stubbed-simulated`, `isSimulated=true`, and
+`adapterStatus=not_connected` until real model/provider adapters and media
+outputs are attached.
 
 Caddy or IIS should serve `XIAOLOU-main/dist` directly and reverse-proxy
 only the approved public Control API routes to `127.0.0.1:4100`:
@@ -341,12 +352,14 @@ refactor toward P2.
 Read these first before continuing the refactor:
 
 - `XIAOLOU_REFACTOR_HANDOFF.md`
-- `docs/xiaolouai-python-refactor-handoff.md`
+- `docs/xiaolouai-finalization-handoff.md`
+- `docs/xiaolouai-deep-research-structured.md`
 
 After every code, script, config, reverse-proxy, runtime, or README change,
-update both handoff files before closing the work. If a prior "next execution"
-note has been superseded, mark it as historical in
-`docs/xiaolouai-python-refactor-handoff.md` instead of leaving two competing
+update both handoff files before closing the work. Use the structured deep
+research reader to keep the remaining work as finite task cards. If a prior
+"next execution" note has been superseded, mark it as historical in
+`docs/xiaolouai-finalization-handoff.md` instead of leaving two competing
 instructions.
 
 ## README Language Policy

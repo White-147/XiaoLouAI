@@ -376,6 +376,8 @@ $clientApiAllowedPermissions = Merge-DelimitedValues `
   -RequiredValue $defaultClientApiAllowedPermissions
 $coreApiCompatReadOnly = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_READ_ONLY" -DefaultValue "1"
 $coreApiCompatPublicRouteAllowlist = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST" -DefaultValue "GET /healthz;GET /api/windows-native/status"
+$coreApiCompatDisableTasksStream = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_DISABLE_TASKS_STREAM" -DefaultValue "1"
+$coreApiCompatEnableLegacyPaymentNotify = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY" -DefaultValue "0"
 $paymentCallbackAllowedProviders = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_ALLOWED_PROVIDERS" -DefaultValue "testpay,alipay,wechat"
 $paymentCallbackRequireAllowedProvider = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER" -DefaultValue "true"
 $paymentCallbackRequireAccountGrant = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT" -DefaultValue "false"
@@ -454,6 +456,8 @@ $envValues = [ordered]@{
   PGPOOL_MAX = $coreApiPgPoolMax
   CORE_API_COMPAT_READ_ONLY = $coreApiCompatReadOnly
   CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST = $coreApiCompatPublicRouteAllowlist
+  CORE_API_COMPAT_DISABLE_TASKS_STREAM = $coreApiCompatDisableTasksStream
+  CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY = $coreApiCompatEnableLegacyPaymentNotify
   PAYMENT_CALLBACK_ALLOWED_PROVIDERS = $paymentCallbackAllowedProviders
   PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER = $paymentCallbackRequireAllowedProvider
   PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT = $paymentCallbackRequireAccountGrant

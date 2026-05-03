@@ -98,6 +98,12 @@ ClosedApiWorker / local-model-worker 的 succeed 和 fail 路径。identity/conf
 rules、admin payment-order reads、enterprise application submit/review，以及退役 admin
 review 的 410 边界。验证不使用 Docker、Linux、Celery 或 Redis。
 
+当前 worker 成功路径是 skeleton 契约。它们证明 durable PostgreSQL job
+lease/running/succeed/fail 行为，不代表真实 provider 或模型已经执行。默认成功
+结果保留 `status=stubbed`，并新增 `executionMode=stubbed-simulated`、
+`isSimulated=true` 与 `adapterStatus=not_connected`，直到真实 adapter 和 object
+storage 媒体输出接入。
+
 ## README 语言维护规则
 
 请保持本文件与 `README.md` 同步。后续修改 README 时必须同时更新中英文版本。

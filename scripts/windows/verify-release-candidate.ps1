@@ -15,6 +15,7 @@ param(
   [switch]$SkipWalletAudit,
   [switch]$SkipProjectionVerifier,
   [switch]$SkipServiceOpsDrill,
+  [switch]$SkipFinalLegacySurface,
   [switch]$SkipCleanupDryRun
 )
 
@@ -228,6 +229,19 @@ $evidencePending = New-List
 $reviewItems = New-List
 $administrator = Test-IsAdministrator
 
+if ($SkipFinalLegacySurface) {
+  Add-SkippedRequiredGate "final-legacy-surface"
+} else {
+  Invoke-RcStep "final-legacy-surface" {
+    $finalSurfaceReport = Join-Path $reportDir "release-candidate-final-legacy-surface-$stamp.json"
+    Invoke-ReportScript "final-legacy-surface" $finalSurfaceReport {
+      & "$PSScriptRoot\verify-final-legacy-surface.ps1" `
+        -RepoRoot $RepoRoot `
+        -ReportPath $finalSurfaceReport | Out-Null
+    }
+  } | Out-Null
+}
+
 if ($SkipPublishRestartP0) {
   Add-SkippedRequiredGate "fixed-publish-restart-p0"
 } else {
@@ -369,9 +383,11 @@ $report = [ordered]@{
     wallet_audit = [bool]$SkipWalletAudit
     projection_verifier = [bool]$SkipProjectionVerifier
     service_ops_drill = [bool]$SkipServiceOpsDrill
+    final_legacy_surface = [bool]$SkipFinalLegacySurface
     cleanup_dry_run = [bool]$SkipCleanupDryRun
   }
   required_gates = @(
+    "final-legacy-surface",
     "fixed-publish-restart-p0",
     "frontend-hard-gate",
     "p2-audit",

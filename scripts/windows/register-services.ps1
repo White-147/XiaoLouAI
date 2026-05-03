@@ -207,6 +207,8 @@ $clientApiAllowedAccountOwnerIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS
 $clientApiAllowedPermissions = if ($env:CLIENT_API_ALLOWED_PERMISSIONS) { $env:CLIENT_API_ALLOWED_PERMISSIONS } else { "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write,identity:read,identity:write,organization:read,organization:write,api-center:read,api-center:write,admin:read,admin:write,enterprise-applications:read,enterprise-applications:write,playground:read,playground:write,toolbox:read,toolbox:write" }
 $coreApiCompatReadOnly = if ($env:CORE_API_COMPAT_READ_ONLY) { $env:CORE_API_COMPAT_READ_ONLY } else { "1" }
 $coreApiCompatPublicRouteAllowlist = if ($env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST) { $env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST } else { "GET /healthz;GET /api/windows-native/status" }
+$coreApiCompatDisableTasksStream = if ($env:CORE_API_COMPAT_DISABLE_TASKS_STREAM) { $env:CORE_API_COMPAT_DISABLE_TASKS_STREAM } else { "1" }
+$coreApiCompatEnableLegacyPaymentNotify = if ($env:CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY) { $env:CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY } else { "0" }
 $coreApiPgPoolMax = if ($env:PGPOOL_MAX) { $env:PGPOOL_MAX } else { "2" }
 $closedApiWorkerLane = if ($env:CLOSED_API_WORKER_LANE) { $env:CLOSED_API_WORKER_LANE } else { "account-media" }
 $closedApiWorkerProviderRoute = if ($env:CLOSED_API_WORKER_PROVIDER_ROUTE) { $env:CLOSED_API_WORKER_PROVIDER_ROUTE } else { "closed-api" }
@@ -334,6 +336,8 @@ $machineEnv = [ordered]@{
   LOCAL_MODEL_WORKER_INTERNAL_TOKEN = $localModelWorkerInternalToken
   CORE_API_COMPAT_READ_ONLY = $coreApiCompatReadOnly
   CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST = $coreApiCompatPublicRouteAllowlist
+  CORE_API_COMPAT_DISABLE_TASKS_STREAM = $coreApiCompatDisableTasksStream
+  CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY = $coreApiCompatEnableLegacyPaymentNotify
   PGPOOL_MAX = $coreApiPgPoolMax
 }
 

@@ -14,9 +14,12 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level)
 
     app = FastAPI(
-        title="XiaoLouAI API",
+        title="XiaoLouAI Legacy Reference API",
         version="0.1.0",
-        description="Python production API for XiaoLouAI.",
+        description=(
+            "Legacy FastAPI reference for XiaoLouAI route mapping and migration "
+            "comparison only; not the production control plane."
+        ),
     )
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(
