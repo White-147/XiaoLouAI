@@ -353,6 +353,7 @@ try {
 } finally {
   if ($process -and -not $process.HasExited) {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    try { Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue } catch {}
   }
 
   foreach ($name in $previousEnv.Keys) {

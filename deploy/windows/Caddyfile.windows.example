@@ -33,7 +33,43 @@ www.example.com {
 		reverse_proxy 127.0.0.1:4100
 	}
 
+	handle /api/capabilities {
+		reverse_proxy 127.0.0.1:4100
+	}
+
 	handle /api/accounts/ensure {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/auth* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/me {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/organizations* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/api-center* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/admin* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/enterprise-applications* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/playground* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/toolbox* {
 		reverse_proxy 127.0.0.1:4100
 	}
 

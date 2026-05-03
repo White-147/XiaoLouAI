@@ -169,6 +169,129 @@ const { ensurePostgresSchema } = require(path.join(coreApiRoot, "src/postgres-sc
         prompt: "replace video synthetic",
       }), "2026-05-02T08:09:02.000Z"],
     );
+    await client.query(
+      `INSERT INTO projects (id, title, summary, status, data, created_at, updated_at)
+       VALUES ($1,'Legacy adjacent fixture','Projection fixture','active',$2::jsonb,$3,$3)
+       ON CONFLICT (id) DO UPDATE SET data = projects.data || excluded.data, updated_at = excluded.updated_at`,
+      ["legacy_project_adjacent_001", JSON.stringify({ legacyProjectionFixture: true }), "2026-05-02T08:09:03.000Z"],
+    );
+    await client.query(`CREATE TABLE IF NOT EXISTS storyboards (
+      id text PRIMARY KEY,
+      project_id text,
+      shot_no integer,
+      title text,
+      image_status text,
+      video_status text,
+      data jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at text,
+      updated_at text
+    )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS videos (
+      id text PRIMARY KEY,
+      project_id text,
+      storyboard_id text,
+      status text,
+      video_url text,
+      data jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at text,
+      updated_at text
+    )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS dubbings (
+      id text PRIMARY KEY,
+      project_id text,
+      storyboard_id text,
+      status text,
+      audio_url text,
+      data jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at text,
+      updated_at text
+    )`);
+    await client.query(
+      `INSERT INTO storyboards (id, project_id, shot_no, title, image_status, video_status, data, created_at, updated_at)
+       VALUES ($1,$2,1,'Opening','ready','pending',$3::jsonb,$4,$4)`,
+      ["legacy_storyboard_001", "legacy_project_adjacent_001", JSON.stringify({
+        title: "Opening",
+        script: "Opening shot",
+        imageStatus: "ready",
+        videoStatus: "pending",
+        promptSummary: "Opening",
+        imageUrl: "https://example.test/storyboard.png",
+      }), "2026-05-02T08:09:04.000Z"],
+    );
+    await client.query(
+      `INSERT INTO project_storyboards (
+        id, project_id, shot_no, episode_no, title, script, image_status,
+        video_status, duration_seconds, prompt_summary, image_url, data, created_at, updated_at
+      ) VALUES ($1,$2,1,1,'Opening','Opening shot','ready','pending',3,'Opening',$3,$4::jsonb,$5,$5)`,
+      ["legacy_storyboard_001", "legacy_project_adjacent_001", "https://example.test/storyboard.png", JSON.stringify({
+        title: "Opening",
+        script: "Opening shot",
+        imageStatus: "ready",
+        videoStatus: "pending",
+        promptSummary: "Opening",
+        imageUrl: "https://example.test/storyboard.png",
+      }), "2026-05-02T08:09:04.000Z"],
+    );
+    await client.query(
+      `INSERT INTO videos (id, project_id, storyboard_id, status, video_url, data, created_at, updated_at)
+       VALUES ($1,$2,$3,'ready',$4,$5::jsonb,$6,$6)`,
+      ["legacy_video_001", "legacy_project_adjacent_001", "legacy_storyboard_001", "https://example.test/video.mp4", JSON.stringify({
+        storyboardId: "legacy_storyboard_001",
+        status: "ready",
+        videoUrl: "https://example.test/video.mp4",
+        thumbnailUrl: "https://example.test/video.jpg",
+      }), "2026-05-02T08:09:05.000Z"],
+    );
+    await client.query(
+      `INSERT INTO project_videos (
+        id, project_id, storyboard_id, version, status, duration_seconds,
+        video_url, thumbnail_url, data, created_at, updated_at
+      ) VALUES ($1,$2,$3,1,'ready',3,$4,$5,$6::jsonb,$7,$7)`,
+      ["legacy_video_001", "legacy_project_adjacent_001", "legacy_storyboard_001", "https://example.test/video.mp4", "https://example.test/video.jpg", JSON.stringify({
+        storyboardId: "legacy_storyboard_001",
+        status: "ready",
+        videoUrl: "https://example.test/video.mp4",
+        thumbnailUrl: "https://example.test/video.jpg",
+      }), "2026-05-02T08:09:05.000Z"],
+    );
+    await client.query(
+      `INSERT INTO dubbings (id, project_id, storyboard_id, status, audio_url, data, created_at, updated_at)
+       VALUES ($1,$2,$3,'ready',$4,$5::jsonb,$6,$6)`,
+      ["legacy_dubbing_001", "legacy_project_adjacent_001", "legacy_storyboard_001", "https://example.test/audio.wav", JSON.stringify({
+        storyboardId: "legacy_storyboard_001",
+        speakerName: "Narrator",
+        voicePreset: "calm",
+        text: "Opening narration",
+        status: "ready",
+        audioUrl: "https://example.test/audio.wav",
+      }), "2026-05-02T08:09:06.000Z"],
+    );
+    await client.query(
+      `INSERT INTO project_dubbings (
+        id, project_id, storyboard_id, speaker_name, voice_preset,
+        text_content, status, audio_url, data, created_at, updated_at
+      ) VALUES ($1,$2,$3,'Narrator','calm','Opening narration','ready',$4,$5::jsonb,$6,$6)`,
+      ["legacy_dubbing_001", "legacy_project_adjacent_001", "legacy_storyboard_001", "https://example.test/audio.wav", JSON.stringify({
+        storyboardId: "legacy_storyboard_001",
+        speakerName: "Narrator",
+        voicePreset: "calm",
+        text: "Opening narration",
+        status: "ready",
+        audioUrl: "https://example.test/audio.wav",
+      }), "2026-05-02T08:09:06.000Z"],
+    );
+    await client.query(
+      `INSERT INTO project_assets (
+        id, project_id, asset_type, name, preview_url, media_kind, media_url, data, created_at, updated_at
+      ) VALUES ($1,$2,'image_ref','Fixture asset',$3,'image',$3,$4::jsonb,$5,$5)`,
+      ["legacy_asset_001", "legacy_project_adjacent_001", "https://example.test/asset.png", JSON.stringify({
+        assetType: "image_ref",
+        name: "Fixture asset",
+        previewUrl: "https://example.test/asset.png",
+        mediaKind: "image",
+        mediaUrl: "https://example.test/asset.png",
+      }), "2026-05-02T08:09:07.000Z"],
+    );
     console.log(JSON.stringify({ schema, status: "seeded" }));
   } finally {
     client.release();

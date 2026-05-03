@@ -149,6 +149,124 @@ public sealed record CanvasProjectRequest : AccountScope
     public JsonElement AgentContext { get; init; }
 }
 
+public sealed record PlaygroundConversationRequest : AccountScope
+{
+    public string? Id { get; init; }
+    public string? Title { get; init; }
+    public string? Model { get; init; }
+}
+
+public sealed record PlaygroundChatRequest : AccountScope
+{
+    public string? ConversationId { get; init; }
+    public string? Message { get; init; }
+    public string? Model { get; init; }
+}
+
+public sealed record PlaygroundMemoryPreferenceRequest : AccountScope
+{
+    public bool? Enabled { get; init; }
+}
+
+public sealed record PlaygroundMemoryRequest : AccountScope
+{
+    public string? Key { get; init; }
+    public string? Value { get; init; }
+    public bool? Enabled { get; init; }
+}
+
+public sealed record ToolboxRunRequest : AccountScope
+{
+    public string? ProjectId { get; init; }
+    public string? StoryboardId { get; init; }
+    public string? Target { get; init; }
+    public string? Note { get; init; }
+    public string? Text { get; init; }
+    public string? TargetLang { get; init; }
+    public string? VideoUrl { get; init; }
+    public string? Prompt { get; init; }
+    public string? Model { get; init; }
+    public string? PlotText { get; init; }
+    public string? IdempotencyKey { get; init; }
+    public JsonElement References { get; init; }
+    public JsonElement Payload { get; init; }
+}
+
+public sealed record LoginRequest
+{
+    public string? Email { get; init; }
+    public string? Password { get; init; }
+}
+
+public sealed record RegisterPersonalRequest
+{
+    public string? DisplayName { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public string? Password { get; init; }
+}
+
+public sealed record RegisterEnterpriseAdminRequest
+{
+    public string? CompanyName { get; init; }
+    public string? AdminName { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public string? Password { get; init; }
+    public string? LicenseNo { get; init; }
+    public string? Industry { get; init; }
+    public string? TeamSize { get; init; }
+}
+
+public sealed record EnterpriseApplicationRequest
+{
+    public string? CompanyName { get; init; }
+    public string? ContactName { get; init; }
+    public string? ContactPhone { get; init; }
+    public string? Phone { get; init; }
+    public string? Email { get; init; }
+    public string? LicenseNo { get; init; }
+    public string? Industry { get; init; }
+    public string? TeamSize { get; init; }
+    public string? Note { get; init; }
+    public JsonElement Data { get; init; }
+}
+
+public sealed record EnterpriseApplicationReviewRequest
+{
+    public string? Status { get; init; }
+    public string? Decision { get; init; }
+    public string? Note { get; init; }
+}
+
+public sealed record PricingRuleRequest
+{
+    public string? ActionCode { get; init; }
+    public string? Label { get; init; }
+    public decimal? BaseCredits { get; init; }
+    public decimal? Credits { get; init; }
+    public string? UnitLabel { get; init; }
+    public string? Description { get; init; }
+    public JsonElement Data { get; init; }
+}
+
+public sealed record UpdateMeRequest
+{
+    public string? DisplayName { get; init; }
+    public string? Avatar { get; init; }
+}
+
+public sealed record CreateOrganizationMemberRequest
+{
+    public string? DisplayName { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public string? Department { get; init; }
+    public string? Password { get; init; }
+    public string? MembershipRole { get; init; }
+    public bool? CanUseOrganizationWallet { get; init; }
+}
+
 public sealed record PaymentCallbackRequest : AccountScope
 {
     public string Provider { get; init; } = "";

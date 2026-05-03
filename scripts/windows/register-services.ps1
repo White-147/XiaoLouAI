@@ -204,7 +204,7 @@ $clientApiRequireAccountScope = if ($env:CLIENT_API_REQUIRE_ACCOUNT_SCOPE) { $en
 $clientApiRequireConfiguredAccountGrant = if ($env:CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT) { $env:CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT } else { "false" }
 $clientApiAllowedAccountIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_IDS) { $env:CLIENT_API_ALLOWED_ACCOUNT_IDS } else { "" }
 $clientApiAllowedAccountOwnerIds = if ($env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS) { $env:CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS } else { "" }
-$clientApiAllowedPermissions = if ($env:CLIENT_API_ALLOWED_PERMISSIONS) { $env:CLIENT_API_ALLOWED_PERMISSIONS } else { "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write" }
+$clientApiAllowedPermissions = if ($env:CLIENT_API_ALLOWED_PERMISSIONS) { $env:CLIENT_API_ALLOWED_PERMISSIONS } else { "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write,identity:read,identity:write,organization:read,organization:write,api-center:read,api-center:write,admin:read,admin:write,enterprise-applications:read,enterprise-applications:write,playground:read,playground:write,toolbox:read,toolbox:write" }
 $coreApiCompatReadOnly = if ($env:CORE_API_COMPAT_READ_ONLY) { $env:CORE_API_COMPAT_READ_ONLY } else { "1" }
 $coreApiCompatPublicRouteAllowlist = if ($env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST) { $env:CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST } else { "GET /healthz;GET /api/windows-native/status" }
 $coreApiPgPoolMax = if ($env:PGPOOL_MAX) { $env:PGPOOL_MAX } else { "2" }
@@ -365,6 +365,7 @@ Assert-RequiredFile "$Root\publish\local-model-worker-service\XiaoLou.LocalModel
 Assert-RequiredFile "$Root\publish\closed-api-worker\XiaoLou.ClosedApiWorker.dll" "Closed API worker published DLL"
 Assert-RequiredFile "$Root\scripts\windows\verify-postgres-backup.ps1" "PostgreSQL backup verification script"
 Assert-RequiredFile "$Root\scripts\windows\restore-postgres.ps1" "PostgreSQL restore script"
+Assert-RequiredFile "$Root\scripts\windows\verify-legacy-dump-cutover.ps1" "Legacy dump cutover verification script"
 
 $services = @(
   @{

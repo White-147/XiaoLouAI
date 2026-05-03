@@ -6,7 +6,8 @@ param(
   [string]$PythonExe = "",
   [switch]$SkipFrontend,
   [switch]$SkipDotnetPublish,
-  [switch]$SkipRollbackSnapshot
+  [switch]$SkipRollbackSnapshot,
+  [switch]$SuppressRegistrationHint
 )
 
 $ErrorActionPreference = "Stop"
@@ -176,26 +177,64 @@ foreach ($path in @($RuntimeRoot, $runtimeStateRoot, "$runtimeStateRoot\xiaolou-
   Assert-DDrivePath -Path $path -Name "runtime path"
 }
 
+function Invoke-NativeTool {
+  param(
+    [string]$FilePath,
+    [string[]]$Arguments,
+    [string]$Name
+  )
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    # Windows PowerShell can surface native stderr lines as NativeCommandError
+    # records. npm writes warnings to stderr even when it exits successfully, so
+    # keep the actual process exit code as the source of truth here.
+    $script:ErrorActionPreference = "Continue"
+    & $FilePath @Arguments
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $script:ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  if ($exitCode -ne 0) {
+    throw "$Name failed with exit code $exitCode"
+  }
+}
+
+function Invoke-DotnetBuildServerShutdown {
+  param([int]$TimeoutSeconds = 30)
+
+  $process = $null
+  try {
+    $process = Start-Process -FilePath $DotnetExe -ArgumentList @("build-server", "shutdown") -WindowStyle Hidden -PassThru
+    Wait-Process -Id $process.Id -Timeout $TimeoutSeconds -ErrorAction SilentlyContinue
+    $process.Refresh()
+    if (-not $process.HasExited) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      Write-Warning "dotnet build-server shutdown timed out after $TimeoutSeconds seconds; process was stopped."
+      return
+    }
+
+    if ($process.ExitCode -ne 0) {
+      Write-Warning "dotnet build-server shutdown exited with code $($process.ExitCode)"
+    }
+  } catch {
+    Write-Warning "dotnet build-server shutdown failed: $($_.Exception.Message)"
+  }
+}
+
 if (-not $SkipDotnetPublish) {
   Push-Location "$SourceRoot\control-plane-dotnet"
   try {
-    & $DotnetExe restore ".\XiaoLou.ControlPlane.sln"
-    if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed with exit code $LASTEXITCODE" }
+    Invoke-NativeTool -FilePath $DotnetExe -Arguments @("restore", ".\XiaoLou.ControlPlane.sln") -Name "dotnet restore"
 
-    & $DotnetExe publish ".\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj" -c Release -o "$RuntimeRoot\publish\control-api" -p:UseSharedCompilation=false
-    if ($LASTEXITCODE -ne 0) { throw "dotnet publish ControlApi failed with exit code $LASTEXITCODE" }
+    Invoke-NativeTool -FilePath $DotnetExe -Arguments @("publish", ".\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj", "-c", "Release", "-o", "$RuntimeRoot\publish\control-api", "-p:UseSharedCompilation=false") -Name "dotnet publish ControlApi"
 
-    & $DotnetExe publish ".\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj" -c Release -o "$RuntimeRoot\publish\closed-api-worker" -p:UseSharedCompilation=false
-    if ($LASTEXITCODE -ne 0) { throw "dotnet publish ClosedApiWorker failed with exit code $LASTEXITCODE" }
+    Invoke-NativeTool -FilePath $DotnetExe -Arguments @("publish", ".\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj", "-c", "Release", "-o", "$RuntimeRoot\publish\closed-api-worker", "-p:UseSharedCompilation=false") -Name "dotnet publish ClosedApiWorker"
 
-    & $DotnetExe publish ".\src\XiaoLou.LocalModelWorkerService\XiaoLou.LocalModelWorkerService.csproj" -c Release -o "$RuntimeRoot\publish\local-model-worker-service" -p:UseSharedCompilation=false
-    if ($LASTEXITCODE -ne 0) { throw "dotnet publish LocalModelWorkerService failed with exit code $LASTEXITCODE" }
+    Invoke-NativeTool -FilePath $DotnetExe -Arguments @("publish", ".\src\XiaoLou.LocalModelWorkerService\XiaoLou.LocalModelWorkerService.csproj", "-c", "Release", "-o", "$RuntimeRoot\publish\local-model-worker-service", "-p:UseSharedCompilation=false") -Name "dotnet publish LocalModelWorkerService"
   } finally {
-    try {
-      & $DotnetExe build-server shutdown | Out-Null
-    } catch {
-      Write-Warning "dotnet build-server shutdown failed: $($_.Exception.Message)"
-    }
+    Invoke-DotnetBuildServerShutdown
     Pop-Location
   }
 }
@@ -203,11 +242,9 @@ if (-not $SkipDotnetPublish) {
 if (-not $SkipFrontend) {
   Push-Location "$SourceRoot\XIAOLOU-main"
   try {
-    & $NpmCmd ci
-    if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
+    Invoke-NativeTool -FilePath $NpmCmd -Arguments @("ci") -Name "npm ci"
 
-    & $NpmCmd run build
-    if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+    Invoke-NativeTool -FilePath $NpmCmd -Arguments @("run", "build") -Name "npm run build"
   } finally {
     Pop-Location
   }
@@ -269,6 +306,29 @@ function Resolve-EnvValue {
   return $DefaultValue
 }
 
+function Merge-DelimitedValues {
+  param(
+    [string]$CurrentValue,
+    [string]$RequiredValue
+  )
+
+  $items = New-Object System.Collections.Generic.List[string]
+  foreach ($value in @($CurrentValue, $RequiredValue)) {
+    foreach ($entry in ($value -split "[,;\s]+")) {
+      $trimmed = $entry.Trim()
+      if (-not $trimmed) {
+        continue
+      }
+
+      if (-not $items.Contains($trimmed)) {
+        $items.Add($trimmed) | Out-Null
+      }
+    }
+  }
+
+  return ($items.ToArray() -join ",")
+}
+
 function Set-EnvFileValue {
   param(
     [string]$Text,
@@ -310,7 +370,10 @@ $clientApiRequireAccountScope = Resolve-EnvValue -Text $envText -Name "CLIENT_AP
 $clientApiRequireConfiguredAccountGrant = Resolve-EnvValue -Text $envText -Name "CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT" -DefaultValue "false"
 $clientApiAllowedAccountIds = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_ACCOUNT_IDS"
 $clientApiAllowedAccountOwnerIds = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS"
-$clientApiAllowedPermissions = Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_PERMISSIONS" -DefaultValue "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write"
+$defaultClientApiAllowedPermissions = "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write,identity:read,identity:write,organization:read,organization:write,api-center:read,api-center:write,admin:read,admin:write,enterprise-applications:read,enterprise-applications:write,playground:read,playground:write,toolbox:read,toolbox:write"
+$clientApiAllowedPermissions = Merge-DelimitedValues `
+  -CurrentValue (Resolve-EnvValue -Text $envText -Name "CLIENT_API_ALLOWED_PERMISSIONS") `
+  -RequiredValue $defaultClientApiAllowedPermissions
 $coreApiCompatReadOnly = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_READ_ONLY" -DefaultValue "1"
 $coreApiCompatPublicRouteAllowlist = Resolve-EnvValue -Text $envText -Name "CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST" -DefaultValue "GET /healthz;GET /api/windows-native/status"
 $paymentCallbackAllowedProviders = Resolve-EnvValue -Text $envText -Name "PAYMENT_CALLBACK_ALLOWED_PROVIDERS" -DefaultValue "testpay,alipay,wechat"
@@ -377,6 +440,7 @@ $envValues = [ordered]@{
   CLIENT_API_ALLOWED_ACCOUNT_IDS = $clientApiAllowedAccountIds
   CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS = $clientApiAllowedAccountOwnerIds
   CLIENT_API_ALLOWED_PERMISSIONS = $clientApiAllowedPermissions
+  ClientApi__AllowedPermissions = $clientApiAllowedPermissions
   ConnectionStrings__Postgres = $connectionStringsPostgres
   Postgres__ConnectionString = $postgresConnectionString
   POSTGRES_APPLY_SCHEMA_ON_STARTUP = $postgresApplySchemaOnStartup
@@ -437,6 +501,7 @@ Set-Content -LiteralPath $envFile -Value $envText -Encoding UTF8
 foreach ($requiredFile in @(
   "$RuntimeRoot\scripts\windows\restore-postgres.ps1",
   "$RuntimeRoot\scripts\windows\verify-postgres-backup.ps1",
+  "$RuntimeRoot\scripts\windows\verify-legacy-dump-cutover.ps1",
   "$RuntimeRoot\scripts\windows\complete-control-api-publish-restart-p0.ps1",
   "$RuntimeRoot\deploy\windows\ops-runbook.md"
 )) {
@@ -458,5 +523,9 @@ if (-not $SkipDotnetPublish) {
 }
 
 Write-Host "Published XiaoLouAI runtime to $RuntimeRoot"
-Write-Host "Review $envFile, then register/update Windows services:"
-Write-Host "$RuntimeRoot\scripts\windows\register-services.ps1 -Root $RuntimeRoot -DotnetExe $DotnetExe -PythonExe $PythonExe -UpdateExisting"
+if ($SuppressRegistrationHint) {
+  Write-Host "Publish step completed; continuing with the caller's service restart/P0 flow."
+} else {
+  Write-Host "Review $envFile, then register/update Windows services:"
+  Write-Host "$RuntimeRoot\scripts\windows\register-services.ps1 -Root $RuntimeRoot -DotnetExe $DotnetExe -PythonExe $PythonExe -UpdateExisting"
+}

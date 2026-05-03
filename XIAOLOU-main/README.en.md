@@ -37,7 +37,8 @@ cd XIAOLOU-main && npm run dev
 | Native canvas | `/create/canvas` | XiaoLou native canvas |
 | Agent studio | `/create/agent-studio` | Embedded Jaaz canvas |
 | Asset management | `/assets` | Project assets and agent-canvas assets |
-| Playground | `/playground` | Route kept only; external service removed |
+| Homepage toolbox | `/` | Canonical capability cards and queued toolbox runs |
+| Playground | `/playground` | Native canonical conversations, messages, memories, and chat jobs |
 
 ## Frontend Environment Variables
 
@@ -55,14 +56,41 @@ VITE_JAAZ_API_PROXY_TARGET=http://127.0.0.1:57988
   needs a separate canvas port.
 - `/create/agent-studio` no longer depends on old Jaaz writes by default; use
   Jaaz ports only for local embed comparison.
-- The external `/playground` implementation has been removed. The route remains
-  as a future entry point for native XiaoLou capabilities.
+- The external `/playground` implementation has been removed. The route now
+  uses `.NET` canonical `/api/playground/config|models|conversations|chat-jobs|memories`.
 - Project, canvas, agent-canvas, and create image/video list-delete flows now
   call the first-batch `.NET` canonical source endpoints:
   `/api/projects*`, `/api/canvas-projects*`, `/api/agent-canvas/projects*`,
-  `/api/create/images*`, and `/api/create/videos*`. Source verification has
-  passed, but runtime service completion still requires elevated
-  publish/restart/P0.
+  `/api/create/images*`, and `/api/create/videos*`. Source verification,
+  elevated publish/restart/P0, and `http://127.0.0.1:4100` runtime smoke have
+  passed, so the running Windows service includes this batch.
+- Login/register, profile, organization members, and API-center settings now
+  call the second-batch `.NET` canonical identity/config endpoints:
+  `/api/auth*`, `/api/me`, `/api/organizations/*/members`, and
+  `/api/api-center*`. The 4100 runtime smoke covered login, profile update,
+  enterprise registration, organization member writes, and API-center
+  defaults/key/test/model writes.
+- Project-adjacent assets/storyboards/videos/dubbings/exports now call the
+  third-batch `.NET` canonical endpoints:
+  `/api/projects/{projectId}/assets*`, `/storyboards*`, `/videos`,
+  `/dubbings`, and `/exports`. This batch has passed elevated
+  publish/restart/P0 plus a 4100 runtime smoke, so the running Windows service
+  includes it.
+- Admin pricing/order reads now call the admin/system `.NET` canonical
+  endpoints: `/api/admin/pricing-rules` and `/api/admin/orders`. Manual admin
+  recharge review remains retired with a 410 response, and enterprise
+  applications use `/api/enterprise-applications*`.
+- Playground conversations, messages, memory preferences, memories, and chat
+  job creation now call `/api/playground*`. The batch has passed source build,
+  frontend lint/build, frontend legacy dependency gate, temporary 4110 P0, and
+  elevated 4100 publish/restart/P0.
+- Homepage toolbox capability discovery and runnable tools now call
+  `/api/capabilities` and `/api/toolbox*`. Character replacement, motion
+  transfer, upscale/restore, reverse prompt, storyboard grid, and translation
+  requests create canonical `toolbox_runs` plus queued `jobs` instead of using
+  legacy `/api/jobs` shortcuts. The batch has passed frontend build, the
+  frontend legacy dependency gate, temporary 4110 P0, strict projection
+  verification, and patched 4100 P0 smoke.
 
 ## README Language Policy
 

@@ -111,6 +111,15 @@ only the approved public Control API routes to `127.0.0.1:4100`:
 - `/api/media/signed-read-url`
 - `/api/wallet`
 - `/api/wallets*`
+- `/api/auth*`
+- `/api/me`
+- `/api/organizations*`
+- `/api/api-center*`
+- `/api/admin*`
+- `/api/enterprise-applications*`
+- `/api/capabilities`
+- `/api/playground*`
+- `/api/toolbox*`
 - `/api/projects*`
 - `/api/canvas-projects*`
 - `/api/agent-canvas/projects*`
@@ -172,23 +181,65 @@ smoke/test secrets by default, `rehearse -RunP0` imports runtime auth-provider
 env and picks a configured owner grant, and `StrictProduction` intentionally
 blocks the current local smoke env until real production secrets are installed.
 
-Current P2 source checkpoint: frontend legacy write route batches have been
+Current P2 runtime checkpoint: frontend legacy write route batches have been
 retired or migrated, and the remaining frontend review items are guarded
-non-live literals. The first `.NET` canonical real-surface source batch for
+non-live literals. The first `.NET` canonical real-surface batch for
 `/api/projects`, `/api/create/images|videos`, `/api/canvas-projects`, and
-`/api/agent-canvas/projects` is implemented and source-verified. Because it
-changes `.NET` runtime code, do not claim the running Windows services contain
-that batch until `complete-control-api-publish-restart-p0.ps1` has completed
-from an elevated Administrator PowerShell and runtime smoke has checked those
-routes through `http://127.0.0.1:4100`.
+`/api/agent-canvas/projects` is implemented, published to the running Windows
+services, and smoke-tested through `http://127.0.0.1:4100`. The second
+identity/config batch is also implemented and published for `/api/auth*`,
+`/api/me`, `/api/organizations/*/members`, and `/api/api-center*`; runtime
+smoke covered login, profile update, enterprise registration, organization
+member writes, and API-center defaults/key/test/model writes. The latest
+identity/config P0 report is
+`control-api-publish-restart-p0-identity-config-20260503-055717.json`, and
+runtime smoke is
+`control-api-identity-config-runtime-smoke-20260503-060647.json`. Publishing now
+also syncs the runtime env into Windows Machine env before restarting the
+direct `dotnet.exe <dll>` service so newly added client permissions reach the
+running Control API. The third project-adjacent batch for
+`/api/projects/{projectId}/assets*`, `/storyboards*`, `/videos`, `/dubbings`,
+and `/exports` has now passed elevated publish/restart/P0 plus a 4100 runtime
+smoke, so the running Windows service includes it. The admin/system canonical
+batch is also published: `/api/admin/pricing-rules`, `/api/admin/orders`, and
+`/api/enterprise-applications*` are backed by PostgreSQL canonical tables;
+manual admin recharge review remains retired with 410 because canonical payment
+callbacks and `wallet_ledger` are the only write path.
+
+The Playground canonical batch is also published:
+`/api/playground/config|models|conversations|chat-jobs|memories` stores
+conversations, messages, memory preferences, and memories in PostgreSQL while
+continuing to enqueue chat work through canonical `jobs`. Source build,
+frontend lint/build, the frontend legacy dependency gate, a temporary
+`http://127.0.0.1:4110` Control API P0 smoke, and elevated publish/restart/P0
+against the real `http://127.0.0.1:4100` Windows service all passed.
+
+The Toolbox canonical batch is also implemented and available through
+`/api/capabilities` and `/api/toolbox*`. The visible toolbox cards are backed by
+canonical `toolbox_capabilities`, runnable toolbox actions create
+`toolbox_runs`, and execution is queued through canonical `jobs` on the
+`account-control` lane. Source build, frontend build, the frontend legacy
+dependency gate, a temporary `http://127.0.0.1:4110` Control API P0 smoke, the
+strict legacy/canonical projection verifier, and a patched P0 smoke against the
+real `http://127.0.0.1:4100` Windows service passed. An earlier combined
+elevated publish/restart/P0 report failed only in the verifier after publish and
+service restart because background lease recovery won a race with the explicit
+P0 recovery call. `verify-control-plane-p0.ps1` now accepts that recovered state,
+and `complete-control-api-publish-restart-p0.ps1` streams P0 output live while
+suppressing the standalone registration hint, so the admin shell no longer sits
+quietly after the build step.
 
 ## Payment Provider Onboarding
 
 Payment provider integration is prepared, but real Alipay/WeChat Pay merchant
-material is not a P1 engineering blocker. The repository intentionally does not
-contain real merchant accounts, private keys, certificates, provider public
-keys, production secrets, or raw callback captures. Treat those as
-operator-supplied merchant-onboarding evidence, stored only under `.runtime`.
+material is not a P1 engineering blocker. Real production legacy dump/source
+material follows the same rule: it is final acceptance and cutover evidence,
+not a routine engineering next-step blocker. The repository intentionally does
+not contain real merchant accounts, private keys, certificates, provider public
+keys, production secrets, raw callback captures, production PostgreSQL dumps,
+SQLite/legacy source snapshots, or restore-drill outputs. Treat those as
+operator-supplied final acceptance evidence, stored only under `.runtime` or
+operator-controlled evidence storage.
 
 Current Windows-native Control API callbacks accept normalized canonical JSON
 signed with the configured HMAC secret
@@ -233,8 +284,13 @@ refactor toward P2.
 
 ## Runtime Rules
 
-- PostgreSQL is canonical for accounts, jobs, payments, wallet ledger, media
-  metadata, project/canvas/create surfaces, outbox, and provider health.
+- PostgreSQL is canonical for accounts, organizations, identity/profile
+  context, API-center config, admin pricing/order reads, enterprise
+  applications, jobs, payments, wallet ledger, media metadata, project/canvas/
+  create surfaces, project-adjacent assets/storyboards/videos/dubbings/exports,
+  and Playground conversations/messages/memory preferences,
+  Toolbox capabilities/runs,
+  outbox, and provider health.
 - Payment callbacks must be idempotent, signature-checked, and written through
   immutable `wallet_ledger` entries in the `account-finance` lane.
 - Jobs are leased from PostgreSQL with `FOR UPDATE SKIP LOCKED`; workers do not

@@ -40,9 +40,25 @@ route in `src/routes.js` and verifies it returns `410 CORE_API_COMPAT_READ_ONLY`
 
 Current P2 status: frontend legacy write routes have been retired or migrated,
 and `/api/projects*`, `/api/canvas-projects*`, `/api/agent-canvas/projects*`,
-and `/api/create/images|videos` now have first-batch `.NET` canonical source
-implementations. Keep core-api closed for those production surfaces; do not
-reopen old Node writes to make the frontend work.
+and `/api/create/images|videos` now have first-batch `.NET` canonical
+implementations published to the running Windows service. The identity/config
+batch for `/api/auth*`, `/api/me`, `/api/organizations/*/members`, and
+`/api/api-center*` is also implemented and published in the `.NET` Control API.
+The project-adjacent batch for assets/storyboards/videos/dubbings/exports is
+also published and covered by 4100 runtime smoke. The admin/system batch
+for `/api/admin/pricing-rules`, `/api/admin/orders`, and
+`/api/enterprise-applications*` is now canonical in the `.NET` Control API;
+manual admin recharge review remains retired with 410. Playground is also
+canonical in `.NET`: `/api/playground/config|models|conversations|chat-jobs|memories`
+has been published to the 4100 Windows service, with conversations, messages,
+memory preferences, and memories stored in PostgreSQL and chat work enqueued
+through canonical `jobs`.
+Toolbox is now canonical in `.NET` as well: `/api/capabilities` and
+`/api/toolbox*` are backed by `toolbox_capabilities`, `toolbox_runs`, and
+canonical `jobs`. Keep the Node toolbox implementations as migration/reference
+code only.
+Keep core-api closed for those production surfaces; do not reopen old Node
+writes to make the frontend work.
 When no legacy snapshot is present, read-only mode keeps the seed state in
 memory and skips PostgreSQL snapshot/projection writes, so it can smoke test
 against the Windows-native canonical test database without requiring legacy
@@ -104,10 +120,14 @@ After cutover, PostgreSQL is the only runtime write target. SQLite is retained
 only as the stopped migration source and rollback backup. The first PostgreSQL
 stage keeps the full app snapshot in `legacy_state_snapshot.snapshot_value`
 and also projects high-value entities into explicit management tables such as
-`users`, `wallets`, `projects`, `project_assets`, `storyboards`, `videos`,
-`dubbings`, `tasks`, `canvas_projects`, `create_studio_*`, and
-`playground_*`. Video-replace job metadata is moved into `video_replace_jobs`,
-and Jaaz canvas/chat/workflow data is moved into `jaaz_*` tables.
+`users`, `wallets`, `projects`, `project_assets`, `project_storyboards`,
+`project_videos`, `project_dubbings`, `project_exports`, `tasks`,
+`canvas_projects`, `create_studio_*`, `playground_*`, and `toolbox_*`. Legacy
+`storyboards`, `videos`, and `dubbings` can be idempotently projected into the
+new `project_*` canonical tables; create-studio media outputs still require
+`media_objects` provenance. Video-replace job metadata is moved into
+`video_replace_jobs`, and Jaaz canvas/chat/workflow data is moved into `jaaz_*`
+tables.
 
 Bootstrap the requested local management account/database:
 
@@ -317,10 +337,11 @@ npm run verify:legacy-canonical-projection
 ```
 
 This checks legacy snapshot/table presence, canonical table readiness,
-non-terminal legacy jobs, recharge order/payment event projection, and wallet
-ledger canonical fields. Use `-AllowMissingLegacy` only when calling the
-PowerShell script directly against a local canonical smoke database with no real
-legacy source.
+non-terminal legacy jobs, recharge order/payment event projection, wallet
+ledger canonical fields, project-adjacent projection into `project_*` tables,
+and create-studio media provenance in `media_objects`. Use `-AllowMissingLegacy`
+only when calling the PowerShell script directly against a local canonical smoke
+database with no real legacy source.
 
 If the report shows missing account/job/wallet projection, create a reviewed
 dry-run plan before writing anything:

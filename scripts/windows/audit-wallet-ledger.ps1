@@ -42,12 +42,70 @@ function Assert-DDriveOutput {
   return $full
 }
 
-if (-not $env:DATABASE_URL) {
-  throw "DATABASE_URL is required."
+function ConvertTo-LibpqDatabaseUrl {
+  param([string]$DatabaseUrl)
+
+  if (-not $DatabaseUrl) {
+    return $DatabaseUrl
+  }
+
+  $uri = $null
+  if (-not [System.Uri]::TryCreate($DatabaseUrl, [System.UriKind]::Absolute, [ref]$uri)) {
+    return $DatabaseUrl
+  }
+  if ($uri.Scheme -ne "postgres" -and $uri.Scheme -ne "postgresql") {
+    return $DatabaseUrl
+  }
+
+  $allowed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($name in @(
+    "application_name",
+    "channel_binding",
+    "client_encoding",
+    "connect_timeout",
+    "gssencmode",
+    "keepalives",
+    "keepalives_count",
+    "keepalives_idle",
+    "keepalives_interval",
+    "options",
+    "sslcert",
+    "sslcrl",
+    "sslkey",
+    "sslmode",
+    "sslpassword",
+    "sslrootcert",
+    "target_session_attrs",
+    "tcp_user_timeout"
+  )) {
+    $allowed.Add($name) | Out-Null
+  }
+
+  $kept = New-Object System.Collections.Generic.List[string]
+  foreach ($part in $uri.Query.TrimStart("?").Split("&", [System.StringSplitOptions]::RemoveEmptyEntries)) {
+    $keyValue = $part.Split("=", 2)
+    $key = [System.Uri]::UnescapeDataString($keyValue[0]).Trim()
+    if (-not $allowed.Contains($key)) {
+      continue
+    }
+
+    $value = if ($keyValue.Count -gt 1) { [System.Uri]::UnescapeDataString($keyValue[1]) } else { "" }
+    $kept.Add("$([System.Uri]::EscapeDataString($key))=$([System.Uri]::EscapeDataString($value))") | Out-Null
+  }
+
+  $builder = [System.UriBuilder]::new($uri)
+  $builder.Query = if ($kept.Count -gt 0) { $kept -join "&" } else { "" }
+  return $builder.Uri.AbsoluteUri
+}
+
+$databaseUrl = $env:DATABASE_URL
+if (-not $databaseUrl -or $databaseUrl.Contains("change-me")) {
+  $databaseUrl = "postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_test"
 }
 
 $Psql = Resolve-DDriveTool $Psql "D:\soft\program\PostgreSQL\18\bin\psql.exe" "psql.exe"
 $OutputPath = Assert-DDriveOutput $OutputPath
+$psqlDatabaseUrl = ConvertTo-LibpqDatabaseUrl $databaseUrl
 
 $sql = @'
 WITH canonical_ledger AS (
@@ -165,7 +223,7 @@ SELECT jsonb_pretty(jsonb_build_object(
 ));
 '@
 
-$result = & $Psql -X --set ON_ERROR_STOP=1 --tuples-only --no-align $env:DATABASE_URL --command $sql
+$result = & $Psql -X --set ON_ERROR_STOP=1 --tuples-only --no-align $psqlDatabaseUrl --command $sql
 if ($LASTEXITCODE -ne 0) {
   throw "wallet ledger audit failed with exit code $LASTEXITCODE"
 }

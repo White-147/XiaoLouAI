@@ -38,6 +38,10 @@ public static class PostgresServiceCollectionExtensions
         services.AddSingleton<PostgresOutboxStore>();
         services.AddSingleton<PostgresProviderHealthStore>();
         services.AddSingleton<PostgresProjectSurfaceStore>();
+        services.AddSingleton<PostgresIdentityConfigStore>();
+        services.AddSingleton<PostgresAdminSystemStore>();
+        services.AddSingleton<PostgresPlaygroundStore>();
+        services.AddSingleton<PostgresToolboxStore>();
         services.AddSingleton<PostgresJobNotificationListener>();
 
         return services;

@@ -121,14 +121,60 @@ function Get-FirstOwnerGrant {
   return $null
 }
 
+function Sync-MachineEnvironmentFromEnvFile {
+  param([string]$EnvFile)
+
+  if (-not (Test-Path -LiteralPath $EnvFile)) {
+    throw "Runtime environment file is missing: $EnvFile"
+  }
+
+  $count = 0
+  foreach ($line in Get-Content -LiteralPath $EnvFile) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $parts = $trimmed.Split("=", 2)
+    if ($parts.Count -ne 2) {
+      continue
+    }
+
+    $name = $parts[0].Trim()
+    if (-not $name) {
+      continue
+    }
+
+    [Environment]::SetEnvironmentVariable($name, $parts[1].Trim(), "Machine")
+    $count += 1
+  }
+
+  return $count
+}
+
 function Invoke-DotnetBuildServerShutdown {
+  param([int]$TimeoutSeconds = 30)
+
   if (-not $DotnetExe) {
     return
   }
 
+  $process = $null
   try {
-    & $DotnetExe build-server shutdown | Out-Null
-    Add-Step $steps "dotnet-build-server-shutdown" "ok" $DotnetExe
+    $process = Start-Process -FilePath $DotnetExe -ArgumentList @("build-server", "shutdown") -WindowStyle Hidden -PassThru
+    Wait-Process -Id $process.Id -Timeout $TimeoutSeconds -ErrorAction SilentlyContinue
+    $process.Refresh()
+    if (-not $process.HasExited) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      Add-Step $steps "dotnet-build-server-shutdown" "warning" "Timed out after $TimeoutSeconds seconds; process was stopped."
+      return
+    }
+
+    if ($process.ExitCode -eq 0) {
+      Add-Step $steps "dotnet-build-server-shutdown" "ok" $DotnetExe
+    } else {
+      Add-Step $steps "dotnet-build-server-shutdown" "warning" "dotnet build-server shutdown exited with code $($process.ExitCode)"
+    }
   } catch {
     Add-Step $steps "dotnet-build-server-shutdown" "warning" $_.Exception.Message
   }
@@ -192,6 +238,7 @@ try {
     SourceRoot = $SourceRoot
     RuntimeRoot = $Root
     SkipFrontend = -not [bool]$PublishFrontend
+    SuppressRegistrationHint = $true
   }
   if ($DotnetExe) { $publishArgs.DotnetExe = $DotnetExe }
   if ($NpmCmd) { $publishArgs.NpmCmd = $NpmCmd }
@@ -199,11 +246,14 @@ try {
   & "$SourceRoot\scripts\windows\publish-runtime-to-d.ps1" @publishArgs
   Add-Step $steps "publish-runtime" "ok" $Root
 
+  $envFile = Join-Path $Root "scripts\windows\.env.windows"
+  $syncedEnvCount = Sync-MachineEnvironmentFromEnvFile $envFile
+  Add-Step $steps "sync-machine-env" "ok" "$syncedEnvCount values from $envFile"
+
   Start-Service -Name XiaoLou-ControlApi
   Wait-ServiceStatus -Name XiaoLou-ControlApi -Status "Running" -TimeoutSeconds 60
   Add-Step $steps "start-control-api" "ok" "XiaoLou-ControlApi"
 
-  $envFile = Join-Path $Root "scripts\windows\.env.windows"
   if (-not $P0AccountOwnerId) {
     $P0AccountOwnerId = Get-FirstOwnerGrant (Get-EnvFileValue $envFile "PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS")
   }
@@ -218,8 +268,13 @@ try {
   if ($DotnetExe) { $p0Args.DotnetExe = $DotnetExe }
   if ($PythonExe) { $p0Args.PythonExe = $PythonExe }
   if ($P0AccountOwnerId) { $p0Args.AccountOwnerId = $P0AccountOwnerId }
-  $p0Output = & "$SourceRoot\scripts\windows\verify-control-plane-p0.ps1" @p0Args
-  $p0OutputText = ($p0Output | Out-String).Trim()
+  $p0OutputLines = New-Object System.Collections.Generic.List[string]
+  & "$SourceRoot\scripts\windows\verify-control-plane-p0.ps1" @p0Args 2>&1 | ForEach-Object {
+    $line = [string]$_
+    $p0OutputLines.Add($line) | Out-Null
+    Write-Host $line
+  }
+  $p0OutputText = ($p0OutputLines -join "`n").Trim()
   if ($p0OutputText) {
     $p0Result = Convert-P0Output $p0OutputText
     if ($p0Result) {

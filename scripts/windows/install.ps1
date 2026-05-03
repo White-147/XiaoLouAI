@@ -29,17 +29,20 @@ function Invoke-ControlApiSchemaApply {
   $healthUri = "$baseUrl/healthz"
   $schemaUri = "$baseUrl/api/schema/apply"
   $deadline = (Get-Date).AddSeconds(45)
-  do {
+  $healthy = $false
+  while ((Get-Date) -lt $deadline) {
     try {
       Invoke-RestMethod -Method Get -Uri $healthUri -TimeoutSec 5 | Out-Null
+      $healthy = $true
       break
     } catch {
-      if ((Get-Date) -gt $deadline) {
-        throw "Control API did not become healthy at $healthUri before schema apply."
-      }
       Start-Sleep -Seconds 2
     }
-  } while ($true)
+  }
+
+  if (-not $healthy) {
+    throw "Control API did not become healthy at $healthUri before schema apply."
+  }
 
   Invoke-RestMethod -Method Post -Uri $schemaUri -TimeoutSec 60 | Out-Null
   Write-Host "Applied Control API PostgreSQL schema through $schemaUri"

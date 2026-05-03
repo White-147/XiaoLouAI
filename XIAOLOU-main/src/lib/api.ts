@@ -30,6 +30,7 @@ export const API_BASE_URL =
 
 const CONTROL_API_CLIENT_EXACT_PATHS = new Set([
   "/api/accounts/ensure",
+  "/api/capabilities",
   "/api/jobs",
   "/api/wallet",
   "/api/wallets",
@@ -38,6 +39,32 @@ const CONTROL_API_CLIENT_EXACT_PATHS = new Set([
   "/api/media/upload-complete",
   "/api/media/move-temp-to-permanent",
   "/api/media/signed-read-url",
+  "/api/auth/providers",
+  "/api/auth/google/exchange",
+  "/api/auth/login",
+  "/api/auth/admin/login",
+  "/api/auth/register/personal",
+  "/api/auth/register/enterprise-admin",
+  "/api/me",
+  "/api/api-center",
+  "/api/api-center/defaults",
+  "/api/admin/pricing-rules",
+  "/api/admin/orders",
+  "/api/enterprise-applications",
+  "/api/playground/config",
+  "/api/playground/models",
+  "/api/playground/conversations",
+  "/api/playground/chat-jobs",
+  "/api/playground/memories",
+  "/api/playground/memories/preference",
+  "/api/toolbox",
+  "/api/toolbox/capabilities",
+  "/api/toolbox/character-replace",
+  "/api/toolbox/motion-transfer",
+  "/api/toolbox/upscale-restore",
+  "/api/toolbox/video-reverse-prompt",
+  "/api/toolbox/storyboard-grid25",
+  "/api/toolbox/translate-text",
   "/api/projects",
   "/api/canvas-projects",
   "/api/agent-canvas/projects",
@@ -55,6 +82,12 @@ function isControlApiClientPath(path: string) {
     CONTROL_API_CLIENT_EXACT_PATHS.has(normalizedPath) ||
     normalizedPath.startsWith("/api/jobs/") ||
     normalizedPath.startsWith("/api/wallets/") ||
+    normalizedPath.startsWith("/api/organizations/") ||
+    normalizedPath.startsWith("/api/api-center/") ||
+    normalizedPath.startsWith("/api/admin/") ||
+    normalizedPath.startsWith("/api/enterprise-applications/") ||
+    normalizedPath.startsWith("/api/playground/") ||
+    normalizedPath.startsWith("/api/toolbox/") ||
     normalizedPath.startsWith("/api/projects/") ||
     normalizedPath.startsWith("/api/canvas-projects/") ||
     normalizedPath.startsWith("/api/agent-canvas/projects/") ||
@@ -969,6 +1002,12 @@ type TaskAccepted = {
   task: Task;
 };
 
+type ToolboxRunResponse = Record<string, unknown> & {
+  taskId?: string;
+  status?: string;
+  job?: ControlJobRecord;
+};
+
 function isRouteNotFoundError(error: unknown) {
   return (
     (error instanceof ApiRequestError && error.status === 404) ||
@@ -1277,36 +1316,6 @@ function retiredWalletRechargeCapabilities(): WalletRechargeCapabilities {
     ],
   };
 }
-
-const DEFAULT_PRICING_RULES: PricingRule[] = [
-  {
-    id: "storyboard-image-generate",
-    actionCode: "storyboard_image_generate",
-    label: "Storyboard image generation",
-    baseCredits: 1,
-    unitLabel: "image",
-    description: "Read-only display rule while legacy pricing writes are retired.",
-    updatedAt: "2026-05-02T00:00:00.000Z",
-  },
-  {
-    id: "canvas-image-generate",
-    actionCode: "canvas_image_generate",
-    label: "Canvas image generation",
-    baseCredits: 1,
-    unitLabel: "image",
-    description: "Read-only display rule while legacy pricing writes are retired.",
-    updatedAt: "2026-05-02T00:00:00.000Z",
-  },
-  {
-    id: "video-generate",
-    actionCode: "video_generate",
-    label: "Video generation",
-    baseCredits: 8,
-    unitLabel: "job",
-    description: "Read-only display rule while legacy pricing writes are retired.",
-    updatedAt: "2026-05-02T00:00:00.000Z",
-  },
-];
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   assertNoLegacyMutatingRequest(path, init);
@@ -1777,6 +1786,37 @@ async function createCanonicalJob(input: CanonicalJobInput): Promise<TaskAccepte
   });
   const task = mapControlJobToTask(job);
   return { taskId: task.id, status: task.status, task };
+}
+
+async function createToolboxRun(
+  path: string,
+  input: Record<string, unknown>,
+): Promise<ToolboxRunResponse> {
+  const actorId = getCurrentActorId();
+  return controlApiJsonRequest<ToolboxRunResponse>(path, {
+    method: "POST",
+    body: JSON.stringify({
+      ...buildControlMediaScope(actorId),
+      ...input,
+    }),
+  });
+}
+
+function taskAcceptedFromToolboxRun(response: ToolboxRunResponse): TaskAccepted {
+  const job = readRecord(response, "job") as ControlJobRecord | null;
+  if (!job) {
+    throw new ApiRequestError("Toolbox Control API did not return a canonical job", {
+      code: "TOOLBOX_JOB_MISSING",
+      status: 502,
+    });
+  }
+
+  const task = mapControlJobToTask(job);
+  return {
+    taskId: readString(response, "taskId") || task.id,
+    status: readString(response, "status") || task.status,
+    task,
+  };
 }
 
 function taskResultRecord(task: Task) {
@@ -2254,20 +2294,14 @@ function buildLocalNetworkAccessInfo(): NetworkAccessInfo {
 }
 
 export async function getMe() {
-  const actorId = getCurrentActorId();
-  return applyLocalProfile(buildFallbackPermissionContext(actorId), readLocalProfile(actorId));
+  return controlApiJsonRequest<PermissionContext>("/api/me");
 }
 
 export async function updateMe(data: { displayName?: string; avatar?: string | null }) {
-  const actorId = getCurrentActorId();
-  const current = readLocalProfile(actorId);
-  const next = {
-    ...current,
-    displayName: data.displayName?.trim() || current.displayName,
-    avatar: data.avatar ?? current.avatar ?? null,
-  };
-  writeLocalProfile(actorId, next);
-  return applyLocalProfile(buildFallbackPermissionContext(actorId), next);
+  return controlApiJsonRequest<PermissionContext>("/api/me", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }
 
 export async function listProjects() {
@@ -2471,52 +2505,28 @@ export async function rewriteScript(projectId: string, instruction: string) {
 }
 
 export async function listAssets(projectId: string, assetType?: string) {
-  void projectId;
-  void assetType;
-  return { items: [] };
+  const params = new URLSearchParams();
+  if (assetType) params.set("assetType", assetType);
+  const query = params.toString();
+  return controlApiJsonRequest<{ items: Asset[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/assets${query ? `?${query}` : ""}`,
+  );
 }
 
 export async function getAsset(projectId: string, assetId: string): Promise<Asset> {
-  void projectId;
-  throw new ApiRequestError(`Asset ${assetId} is not available on the Windows-native canonical surface yet.`, {
-    code: "PROJECT_ASSET_FLOW_RETIRED",
-    status: 410,
-  });
+  return controlApiJsonRequest<Asset>(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+  );
 }
 
 export async function createAsset(
   projectId: string,
   input: CreateAssetInput,
 ): Promise<Asset> {
-  const accepted = await createCanonicalJob({
-    jobType: "project_asset_sync_requested",
-    domain: "project",
-    actionCode: "project_asset_sync",
-    inputSummary: input.name || input.generationPrompt || input.description || "asset sync",
-    payload: { projectId, ...input },
+  return controlApiJsonRequest<Asset>(`/api/projects/${encodeURIComponent(projectId)}/assets`, {
+    method: "POST",
+    body: JSON.stringify(input),
   });
-  const now = new Date().toISOString();
-  return {
-    id: accepted.taskId,
-    projectId,
-    assetType: input.assetType,
-    name: input.name || "Project asset",
-    description: input.description || "",
-    previewUrl: input.previewUrl ?? input.mediaUrl ?? null,
-    mediaKind: input.mediaKind ?? null,
-    mediaUrl: input.mediaUrl ?? input.previewUrl ?? null,
-    sourceTaskId: input.sourceTaskId ?? accepted.taskId,
-    sourceModule: input.sourceModule ?? null,
-    sourceMetadata: input.sourceMetadata ?? null,
-    generationPrompt: input.generationPrompt,
-    referenceImageUrls: input.referenceImageUrls,
-    imageModel: input.imageModel,
-    aspectRatio: input.aspectRatio,
-    negativePrompt: input.negativePrompt,
-    scope: input.scope || "manual",
-    createdAt: now,
-    updatedAt: now,
-  };
 }
 
 export async function syncAgentStudioAsset(
@@ -2552,33 +2562,20 @@ export async function syncAgentStudioCanvasProject(
 }
 
 export async function updateAsset(projectId: string, assetId: string, input: Partial<Asset>): Promise<Asset> {
-  return {
-    id: assetId,
-    projectId,
-    assetType: input.assetType || "asset",
-    name: input.name || "Project asset",
-    description: input.description || "",
-    previewUrl: input.previewUrl ?? null,
-    mediaKind: input.mediaKind ?? null,
-    mediaUrl: input.mediaUrl ?? input.previewUrl ?? null,
-    sourceTaskId: input.sourceTaskId ?? null,
-    sourceModule: input.sourceModule ?? null,
-    sourceMetadata: input.sourceMetadata ?? null,
-    generationPrompt: input.generationPrompt,
-    referenceImageUrls: input.referenceImageUrls,
-    imageStatus: input.imageStatus,
-    imageModel: input.imageModel,
-    aspectRatio: input.aspectRatio,
-    negativePrompt: input.negativePrompt,
-    scope: input.scope || "manual",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  return controlApiJsonRequest<Asset>(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export async function deleteAsset(projectId: string, assetId: string) {
-  void projectId;
-  return { deleted: true, assetId };
+  return controlApiJsonRequest<{ deleted: boolean; assetId: string }>(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export async function extractAssets(projectId: string, sourceText: string) {
@@ -2606,17 +2603,18 @@ export async function generateAssetImage(
 }
 
 export async function listStoryboards(projectId: string, episodeNo?: number) {
-  void projectId;
-  void episodeNo;
-  return { items: [] };
+  const params = new URLSearchParams();
+  if (episodeNo != null) params.set("episodeNo", String(episodeNo));
+  const query = params.toString();
+  return controlApiJsonRequest<{ items: Storyboard[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/storyboards${query ? `?${query}` : ""}`,
+  );
 }
 
 export async function getStoryboard(projectId: string, storyboardId: string): Promise<Storyboard> {
-  void projectId;
-  throw new ApiRequestError(`Storyboard ${storyboardId} is not available on the Windows-native canonical surface yet.`, {
-    code: "STORYBOARD_FLOW_RETIRED",
-    status: 410,
-  });
+  return controlApiJsonRequest<Storyboard>(
+    `/api/projects/${encodeURIComponent(projectId)}/storyboards/${encodeURIComponent(storyboardId)}`,
+  );
 }
 
 export async function updateStoryboard(
@@ -2624,26 +2622,20 @@ export async function updateStoryboard(
   storyboardId: string,
   input: Partial<Storyboard>,
 ): Promise<Storyboard> {
-  return {
-    id: storyboardId,
-    projectId,
-    shotNo: input.shotNo ?? 1,
-    title: input.title || "Storyboard",
-    script: input.script || "",
-    imageStatus: input.imageStatus || "pending",
-    videoStatus: input.videoStatus || "pending",
-    durationSeconds: input.durationSeconds ?? 0,
-    promptSummary: input.promptSummary || "",
-    imageUrl: input.imageUrl ?? null,
-    createdAt: input.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    ...input,
-  };
+  return controlApiJsonRequest<Storyboard>(
+    `/api/projects/${encodeURIComponent(projectId)}/storyboards/${encodeURIComponent(storyboardId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export async function deleteStoryboard(projectId: string, storyboardId: string) {
-  void projectId;
-  return { deleted: true, storyboardId };
+  return controlApiJsonRequest<{ deleted: boolean; storyboardId: string }>(
+    `/api/projects/${encodeURIComponent(projectId)}/storyboards/${encodeURIComponent(storyboardId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export async function autoGenerateStoryboards(
@@ -2740,8 +2732,9 @@ export async function generateStoryboardImage(
 }
 
 export async function listVideos(projectId: string) {
-  void projectId;
-  return { items: [] };
+  return controlApiJsonRequest<{ items: VideoItem[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/videos`,
+  );
 }
 
 export async function generateVideo(
@@ -2758,8 +2751,9 @@ export async function generateVideo(
 }
 
 export async function listDubbings(projectId: string) {
-  void projectId;
-  return { items: [] };
+  return controlApiJsonRequest<{ items: Dubbing[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/dubbings`,
+  );
 }
 
 export async function updateDubbing(
@@ -2767,18 +2761,13 @@ export async function updateDubbing(
   dubbingId: string,
   input: Partial<Dubbing>,
 ) {
-  return {
-    id: dubbingId,
-    projectId,
-    storyboardId: input.storyboardId || "",
-    speakerName: input.speakerName || "",
-    voicePreset: input.voicePreset || "",
-    text: input.text || "",
-    status: input.status || "pending",
-    audioUrl: input.audioUrl ?? null,
-    createdAt: input.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  return controlApiJsonRequest<Dubbing>(
+    `/api/projects/${encodeURIComponent(projectId)}/dubbings/${encodeURIComponent(dubbingId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export async function generateDubbing(
@@ -2819,13 +2808,13 @@ export async function updateTimeline(
 }
 
 export async function createExport(projectId: string, format = "mp4") {
-  return createCanonicalJob({
-    jobType: "project_export_requested",
-    domain: "project",
-    actionCode: "project_export",
-    inputSummary: `${projectId} ${format}`,
-    payload: { projectId, format },
-  });
+  return controlApiJsonRequest<{ id: string; projectId: string; format: string; status: string; jobId?: string | null }>(
+    `/api/projects/${encodeURIComponent(projectId)}/exports`,
+    {
+      method: "POST",
+      body: JSON.stringify({ format }),
+    },
+  );
 }
 
 export async function listTasks(projectId?: string, type?: string) {
@@ -3005,67 +2994,54 @@ export async function confirmWalletRechargeOrder(orderId: string): Promise<Walle
 }
 
 export async function getToolboxCapabilities() {
+  const response = await controlApiJsonRequest<{
+    items?: ToolboxCapability[];
+    stagingArea?: string[];
+  }>("/api/toolbox/capabilities");
   return {
-    items: WINDOWS_NATIVE_TOOLBOX_CAPABILITIES,
-    stagingArea: [],
+    items: Array.isArray(response.items) ? response.items : WINDOWS_NATIVE_TOOLBOX_CAPABILITIES,
+    stagingArea: Array.isArray(response.stagingArea) ? response.stagingArea : [],
   };
 }
 
 export async function getCapabilities() {
-  return {
-    service: "xiaolou-control-api",
-    mode: "windows-native",
-    implementedDomains: ["jobs", "media", "wallet"],
-    toolbox: WINDOWS_NATIVE_TOOLBOX_CAPABILITIES,
-  };
+  return controlApiJsonRequest<{
+    service: string;
+    mode: string;
+    implementedDomains: string[];
+    toolbox: ToolboxCapability[];
+  }>("/api/capabilities");
 }
 
 export async function getApiCenterConfig() {
-  return readLocalApiCenterConfig();
+  return controlApiJsonRequest<ApiCenterConfig>(`/api/api-center?${buildControlScopeQuery()}`);
 }
 
 export async function updateApiCenterDefaults(input: Partial<ApiCenterConfig["defaults"]>) {
-  const config = readLocalApiCenterConfig();
-  const defaults = { ...config.defaults, ...input };
-  writeLocalApiCenterConfig({ ...config, defaults });
-  return defaults;
+  return controlApiJsonRequest<ApiCenterConfig["defaults"]>(
+    `/api/api-center/defaults?${buildControlScopeQuery()}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 export async function saveApiCenterVendorApiKey(vendorId: string, apiKey: string) {
-  const config = readLocalApiCenterConfig();
-  const vendor = findApiVendor(config, vendorId);
-  const nextVendor = {
-    ...vendor,
-    connected: Boolean(apiKey.trim()),
-    apiKeyConfigured: Boolean(apiKey.trim()),
-    lastCheckedAt: new Date().toISOString(),
-  };
-  writeLocalApiCenterConfig({
-    ...config,
-    vendors: config.vendors.map((item) => (item.id === vendorId ? nextVendor : item)),
-  });
-  return nextVendor;
+  return controlApiJsonRequest<ApiVendor>(
+    `/api/api-center/vendors/${encodeURIComponent(vendorId)}/api-key?${buildControlScopeQuery()}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ apiKey }),
+    },
+  );
 }
 
 export async function testApiCenterVendorConnection(vendorId: string) {
-  const config = readLocalApiCenterConfig();
-  const vendor = findApiVendor(config, vendorId);
-  const checkedAt = new Date().toISOString();
-  const nextVendor = {
-    ...vendor,
-    connected: true,
-    lastCheckedAt: checkedAt,
-    testedAt: checkedAt,
-  };
-  writeLocalApiCenterConfig({
-    ...config,
-    vendors: config.vendors.map((item) => (item.id === vendorId ? nextVendor : item)),
-  });
-  return {
-    vendor: nextVendor,
-    checkedAt,
-    modelCount: nextVendor.models.length,
-  };
+  return controlApiJsonRequest<ApiVendorConnectionTestResult>(
+    `/api/api-center/vendors/${encodeURIComponent(vendorId)}/test?${buildControlScopeQuery()}`,
+    { method: "POST" },
+  );
 }
 
 export async function updateApiVendorModel(
@@ -3073,30 +3049,27 @@ export async function updateApiVendorModel(
   modelId: string,
   input: Partial<Pick<ApiVendorModel, "enabled">>,
 ) {
-  const config = readLocalApiCenterConfig();
-  const vendor = findApiVendor(config, vendorId);
-  const model = vendor.models.find((item) => item.id === modelId);
-  if (!model) {
-    throw new ApiRequestError("API model is not available in the Windows-native local config draft.", {
-      code: "API_MODEL_NOT_FOUND",
-      status: 404,
-    });
-  }
-  const nextModel = { ...model, ...input };
-  const nextVendor = {
-    ...vendor,
-    models: vendor.models.map((item) => (item.id === modelId ? nextModel : item)),
-  };
-  writeLocalApiCenterConfig({
-    ...config,
-    vendors: config.vendors.map((item) => (item.id === vendorId ? nextVendor : item)),
-  });
-  return nextModel;
+  return controlApiJsonRequest<ApiVendorModel>(
+    `/api/api-center/vendors/${encodeURIComponent(vendorId)}/models/${encodeURIComponent(modelId)}?${buildControlScopeQuery()}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
+  );
 }
 
 /** Bidirectional text translation via Qwen-Plus. targetLang: 'en' | 'zh' */
 export async function translateText(text: string, targetLang: "en" | "zh") {
-  return { text, targetLang };
+  const response = await createToolboxRun("/api/toolbox/translate-text", {
+    text,
+    targetLang,
+    idempotencyKey: `frontend:${getCurrentActorId()}:translate-text:${createClientId("toolbox")}`,
+  });
+  return {
+    text: readString(response, "text") || text,
+    targetLang: (readString(response, "targetLang", "target_lang") as "en" | "zh" | null) || targetLang,
+    taskId: readString(response, "taskId"),
+  };
 }
 
 /** Whitelisted Qwen-Omni model IDs (must match core-api ALLOWED_QWEN_OMNI_MODELS). */
@@ -3118,18 +3091,17 @@ export async function generateStoryboardGrid25(
     model?: string;
   },
 ) {
-  const accepted = await createCanonicalJob({
-    jobType: "storyboard_grid25_generate",
-    domain: "toolbox",
-    actionCode: "storyboard_grid25",
-    inputSummary: plotText,
-    payload: {
-      plotText,
-      references: options?.references,
-      model: options?.model,
-    },
+  const response = await createToolboxRun("/api/toolbox/storyboard-grid25", {
+    plotText,
+    references: options?.references,
+    model: options?.model,
+    idempotencyKey: `frontend:${getCurrentActorId()}:storyboard-grid25:${createClientId("toolbox")}`,
   });
-  return { imageUrl: "", model: options?.model || "canonical-job", taskId: accepted.taskId };
+  return {
+    imageUrl: readString(response, "imageUrl", "image_url") || "",
+    model: readString(response, "model") || options?.model || "canonical-job",
+    taskId: readString(response, "taskId") || "",
+  };
 }
 
 /** Qwen3.5-Omni video-to-prompt reverse analysis. */
@@ -3137,16 +3109,18 @@ export async function reverseVideoPrompt(
   videoUrl: string,
   options?: { prompt?: string; model?: QwenOmniModel },
 ) {
-  const accepted = await createCanonicalJob({
-    jobType: "video_reverse_prompt_requested",
-    domain: "toolbox",
-    actionCode: "video_reverse_prompt",
-    inputSummary: options?.prompt || videoUrl,
-    payload: { videoUrl, ...(options ?? {}) },
+  const response = await createToolboxRun("/api/toolbox/video-reverse-prompt", {
+    videoUrl,
+    ...(options ?? {}),
+    idempotencyKey: `frontend:${getCurrentActorId()}:video-reverse-prompt:${createClientId("toolbox")}`,
   });
   return {
-    prompt: options?.prompt || `Reverse prompt job queued: ${accepted.taskId}`,
-    model: options?.model || "canonical-job",
+    prompt:
+      readString(response, "prompt") ||
+      options?.prompt ||
+      `Reverse prompt job queued: ${readString(response, "taskId") || ""}`,
+    model: readString(response, "model") || options?.model || "canonical-job",
+    taskId: readString(response, "taskId"),
   };
 }
 
@@ -3264,11 +3238,11 @@ export async function uploadDataUrlAsFile(dataUrl: string, kind = "file", nameHi
 }
 
 export async function listPricingRules() {
-  return { items: DEFAULT_PRICING_RULES };
+  return controlApiJsonRequest<{ items: PricingRule[] }>("/api/admin/pricing-rules");
 }
 
 export async function listAdminOrders() {
-  return { items: [] };
+  return controlApiJsonRequest<{ items: AdminRechargeOrder[] }>("/api/admin/orders");
 }
 
 export async function reviewAdminOrder(
@@ -3281,26 +3255,21 @@ export async function reviewAdminOrder(
 }
 
 export async function listOrganizationMembers(organizationId: string) {
-  return { items: readLocalOrganizationMembers(organizationId) };
+  return controlApiJsonRequest<{ items: OrganizationMember[] }>(
+    `/api/organizations/${encodeURIComponent(organizationId)}/members`,
+  );
 }
 
 export async function createOrganizationMember(
   organizationId: string,
   input: CreateOrganizationMemberInput,
 ) {
-  const member = createLocalOrganizationMember(organizationId, input);
-  const current = readLocalOrganizationMembers(organizationId);
-  writeLocalOrganizationMembers(organizationId, [member, ...current.filter((item) => item.userId !== member.userId)]);
-  const profile: LocalProfile = {
-    displayName: member.displayName,
-    email: member.email,
-  };
-  writeLocalProfile(member.userId, profile);
-  return buildRegistrationResult(
-    member.userId,
-    applyLocalProfile(buildFallbackPermissionContext(member.userId), profile),
-    member.role,
-    member,
+  return controlApiJsonRequest<RegistrationResult>(
+    `/api/organizations/${encodeURIComponent(organizationId)}/members`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
   );
 }
 
@@ -3314,22 +3283,27 @@ export async function getOrganizationWallet(organizationId: string) {
 }
 
 export async function loginWithEmail(input: LoginInput) {
-  return buildLocalLoginResult(input);
+  return controlApiJsonRequest<LoginResult>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export async function loginAdminWithEmail(input: LoginInput) {
-  return buildLocalLoginResult(input, "ops_admin");
+  return controlApiJsonRequest<LoginResult>("/api/auth/admin/login", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export async function getAuthProviders() {
-  return { google: { configured: false } };
+  return controlApiJsonRequest<AuthProvidersResponse>("/api/auth/providers");
 }
 
 export async function exchangeGoogleLogin(code: string): Promise<LoginResult> {
-  void code;
-  throw new ApiRequestError("Google login is not configured in the Windows-native local auth draft.", {
-    code: "AUTH_PROVIDER_DISABLED",
-    status: 410,
+  return controlApiJsonRequest<LoginResult>("/api/auth/google/exchange", {
+    method: "POST",
+    body: JSON.stringify({ code }),
   });
 }
 
@@ -3615,76 +3589,82 @@ function playgroundJobFromTask(task: Task): PlaygroundChatJob {
 }
 
 export async function getPlaygroundConfig() {
+  const response = await controlApiJsonRequest<{
+    defaultModel: string;
+    models?: PlaygroundModel[];
+    memory?: PlaygroundMemoryPreference;
+  }>(`/api/playground/config?${buildControlScopeQuery()}`);
   return {
-    defaultModel: playgroundDefaultModel(),
-    memory: readLocalPlaygroundMemoryPreference(),
+    defaultModel: response.defaultModel || playgroundDefaultModel(),
+    models: Array.isArray(response.models) ? response.models : WINDOWS_NATIVE_PLAYGROUND_MODELS,
+    memory: response.memory ?? { enabled: true, updatedAt: null },
   };
 }
 
 export async function listPlaygroundModels() {
-  return { defaultModel: playgroundDefaultModel(), items: WINDOWS_NATIVE_PLAYGROUND_MODELS };
+  const response = await controlApiJsonRequest<{ defaultModel: string; items: PlaygroundModel[] }>(
+    "/api/playground/models",
+  );
+  return {
+    defaultModel: response.defaultModel || playgroundDefaultModel(),
+    items: Array.isArray(response.items) ? response.items : WINDOWS_NATIVE_PLAYGROUND_MODELS,
+  };
 }
 
 export async function listPlaygroundConversations(search?: string) {
-  const normalizedSearch = search?.trim().toLowerCase();
-  const items = readLocalPlaygroundConversations().filter(
-    (item) =>
-      !normalizedSearch ||
-      item.title.toLowerCase().includes(normalizedSearch) ||
-      item.model.toLowerCase().includes(normalizedSearch),
+  const params = new URLSearchParams(buildControlScopeQuery());
+  const normalizedSearch = search?.trim();
+  if (normalizedSearch) params.set("search", normalizedSearch);
+  return controlApiJsonRequest<{ items: PlaygroundConversation[] }>(
+    `/api/playground/conversations?${params.toString()}`,
   );
-  return { items };
 }
 
 export async function createPlaygroundConversation(input: { title?: string; model?: string } = {}) {
-  return upsertLocalPlaygroundConversation(normalizePlaygroundConversation(input));
+  const actorId = getCurrentActorId();
+  return controlApiJsonRequest<PlaygroundConversation>("/api/playground/conversations", {
+    method: "POST",
+    body: JSON.stringify({
+      ...buildControlMediaScope(actorId),
+      ...input,
+    }),
+  });
 }
 
 export async function updatePlaygroundConversation(
   conversationId: string,
   input: Partial<Pick<PlaygroundConversation, "title" | "model">>,
 ) {
-  const current = readLocalPlaygroundConversations();
-  const existing = current.find((item) => item.id === conversationId);
-  if (!existing) {
-    throw new ApiRequestError("Playground conversation is not available in the local Windows-native draft store.", {
-      code: "PLAYGROUND_CONVERSATION_NOT_FOUND",
-      status: 404,
-    });
-  }
-  return upsertLocalPlaygroundConversation(
-    normalizePlaygroundConversation({
-      ...existing,
-      ...input,
-      title: input.title?.trim() || existing.title,
-      updatedAt: new Date().toISOString(),
-    }),
+  const actorId = getCurrentActorId();
+  return controlApiJsonRequest<PlaygroundConversation>(
+    `/api/playground/conversations/${encodeURIComponent(conversationId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        ...buildControlMediaScope(actorId),
+        ...input,
+      }),
+    },
   );
 }
 
 export async function deletePlaygroundConversation(conversationId: string) {
-  const actorId = getCurrentActorId();
-  writeLocalPlaygroundConversations(
-    readLocalPlaygroundConversations(actorId).filter((item) => item.id !== conversationId),
-    actorId,
+  return controlApiJsonRequest<{ deleted: boolean; conversationId: string }>(
+    `/api/playground/conversations/${encodeURIComponent(conversationId)}?${buildControlScopeQuery()}`,
+    { method: "DELETE" },
   );
-  localStorageRemove(playgroundMessagesStorageKey(conversationId, actorId));
-  return { deleted: true, conversationId };
 }
 
 export async function getPlaygroundConversation(conversationId: string) {
-  const conversation = readLocalPlaygroundConversations().find((item) => item.id === conversationId);
-  if (!conversation) {
-    throw new ApiRequestError("Playground conversation is not available in the local Windows-native draft store.", {
-      code: "PLAYGROUND_CONVERSATION_NOT_FOUND",
-      status: 404,
-    });
-  }
-  return conversation;
+  return controlApiJsonRequest<PlaygroundConversation>(
+    `/api/playground/conversations/${encodeURIComponent(conversationId)}?${buildControlScopeQuery()}`,
+  );
 }
 
 export async function listPlaygroundMessages(conversationId: string) {
-  return { items: readLocalPlaygroundMessages(conversationId) };
+  return controlApiJsonRequest<{ items: PlaygroundMessage[] }>(
+    `/api/playground/conversations/${encodeURIComponent(conversationId)}/messages?${buildControlScopeQuery()}`,
+  );
 }
 
 export async function listPlaygroundChatJobs(options: {
@@ -3693,16 +3673,20 @@ export async function listPlaygroundChatJobs(options: {
   status?: string;
   limit?: number;
 } = {}) {
-  const response = await listTasks(undefined, "playground_chat");
-  let items = response.items.map(playgroundJobFromTask).filter((item) => item.conversationId);
-  if (options.conversationId) items = items.filter((item) => item.conversationId === options.conversationId);
-  if (options.activeOnly) items = items.filter((item) => item.status === "queued" || item.status === "running");
-  if (options.status) items = items.filter((item) => item.status === options.status);
-  return { items: items.slice(0, options.limit || 100) };
+  const params = new URLSearchParams(buildControlScopeQuery());
+  if (options.conversationId) params.set("conversationId", options.conversationId);
+  if (options.activeOnly) params.set("activeOnly", "true");
+  if (options.status) params.set("status", options.status);
+  if (options.limit) params.set("limit", String(options.limit));
+  return controlApiJsonRequest<{ items: PlaygroundChatJob[] }>(
+    `/api/playground/chat-jobs?${params.toString()}`,
+  );
 }
 
 export async function getPlaygroundChatJob(jobId: string) {
-  return { job: playgroundJobFromTask(await getTask(jobId)) };
+  return controlApiJsonRequest<{ job: PlaygroundChatJob }>(
+    `/api/playground/chat-jobs/${encodeURIComponent(jobId)}?${buildControlScopeQuery()}`,
+  );
 }
 
 export async function startPlaygroundChatJob(input: PlaygroundChatInput) {
@@ -3714,115 +3698,55 @@ export async function startPlaygroundChatJob(input: PlaygroundChatInput) {
     });
   }
 
-  const now = new Date().toISOString();
   const model = input.model?.trim() || playgroundDefaultModel();
-  const existingConversation = input.conversationId
-    ? readLocalPlaygroundConversations().find((item) => item.id === input.conversationId)
-    : null;
-  const conversation = normalizePlaygroundConversation({
-    ...(existingConversation ?? {}),
-    id: existingConversation?.id || createClientId("playground-conversation"),
-    title: existingConversation?.title || message.slice(0, 48),
-    model,
-    updatedAt: now,
-    lastMessageAt: now,
-  });
-  const userMessage = normalizePlaygroundMessage({
-    conversationId: conversation.id,
-    role: "user",
-    content: message,
-    model,
-    status: "succeeded",
-    createdAt: now,
-    updatedAt: now,
-  });
-  const assistantMessage = normalizePlaygroundMessage({
-    conversationId: conversation.id,
-    role: "assistant",
-    content: "",
-    model,
-    status: "queued",
-    metadata: { queuedThrough: "canonical-control-api" },
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const accepted = await createCanonicalJob({
-    jobType: "playground_chat",
-    domain: "playground",
-    actionCode: "playground_chat",
-    inputSummary: message,
-    payload: {
-      conversationId: conversation.id,
-      userMessageId: userMessage.id,
-      assistantMessageId: assistantMessage.id,
+  const actorId = getCurrentActorId();
+  return controlApiJsonRequest<PlaygroundChatJobStartResult>("/api/playground/chat-jobs", {
+    method: "POST",
+    body: JSON.stringify({
+      ...buildControlMediaScope(actorId),
+      conversationId: input.conversationId,
       message,
       model,
-    },
+    }),
   });
-  const job = playgroundJobFromTask(accepted.task);
-  const queuedAssistantMessage = normalizePlaygroundMessage({
-    ...assistantMessage,
-    metadata: { ...assistantMessage.metadata, jobId: job.id },
-  });
-  const messages = upsertLocalPlaygroundMessages(conversation.id, [userMessage, queuedAssistantMessage]);
-  const nextConversation = upsertLocalPlaygroundConversation({
-    ...conversation,
-    messageCount: messages.length,
-    updatedAt: now,
-    lastMessageAt: now,
-  });
-
-  return {
-    job,
-    conversation: nextConversation,
-    userMessage,
-    assistantMessage: queuedAssistantMessage,
-  };
 }
 
 export async function listPlaygroundMemories() {
-  return {
-    preference: readLocalPlaygroundMemoryPreference(),
-    items: readLocalPlaygroundMemories(),
-  };
+  return controlApiJsonRequest<{ preference: PlaygroundMemoryPreference; items: PlaygroundMemory[] }>(
+    `/api/playground/memories?${buildControlScopeQuery()}`,
+  );
 }
 
 export async function updatePlaygroundMemoryPreference(input: Partial<PlaygroundMemoryPreference>) {
-  const next = {
-    ...readLocalPlaygroundMemoryPreference(),
-    ...input,
-    updatedAt: new Date().toISOString(),
-  };
-  writeLocalPlaygroundMemoryPreference(next);
-  return next;
+  const actorId = getCurrentActorId();
+  return controlApiJsonRequest<PlaygroundMemoryPreference>("/api/playground/memories/preference", {
+    method: "PUT",
+    body: JSON.stringify({
+      ...buildControlMediaScope(actorId),
+      ...input,
+    }),
+  });
 }
 
 export async function updatePlaygroundMemory(
   key: string,
   input: Partial<Pick<PlaygroundMemory, "key" | "value" | "enabled">>,
 ) {
-  const now = new Date().toISOString();
-  const current = readLocalPlaygroundMemories();
-  const existing = current.find((item) => item.key === key);
-  const nextKey = input.key?.trim() || existing?.key || key;
-  const next: PlaygroundMemory = {
-    key: nextKey,
-    value: input.value ?? existing?.value ?? "",
-    enabled: input.enabled ?? existing?.enabled ?? true,
-    confidence: existing?.confidence ?? null,
-    sourceConversationId: existing?.sourceConversationId ?? null,
-    sourceMessageId: existing?.sourceMessageId ?? null,
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-  };
-  writeLocalPlaygroundMemories([next, ...current.filter((item) => item.key !== key && item.key !== nextKey)]);
-  return next;
+  const actorId = getCurrentActorId();
+  return controlApiJsonRequest<PlaygroundMemory>(`/api/playground/memories/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      ...buildControlMediaScope(actorId),
+      ...input,
+    }),
+  });
 }
 
 export async function deletePlaygroundMemory(key: string) {
-  writeLocalPlaygroundMemories(readLocalPlaygroundMemories().filter((item) => item.key !== key));
-  return { deleted: true, key };
+  return controlApiJsonRequest<{ deleted: boolean; key: string }>(
+    `/api/playground/memories/${encodeURIComponent(key)}?${buildControlScopeQuery()}`,
+    { method: "DELETE" },
+  );
 }
 
 export async function streamPlaygroundChat(
@@ -3852,31 +3776,17 @@ export async function streamPlaygroundChat(
 }
 
 export async function registerPersonalUser(input: RegisterPersonalInput) {
-  const actorId = actorIdFromEmail(input.email, "personal");
-  const profile: LocalProfile = {
-    displayName: input.displayName || input.email.split("@")[0] || "Windows Native User",
-    email: input.email || null,
-  };
-  writeLocalProfile(actorId, profile);
-  return buildRegistrationResult(
-    actorId,
-    applyLocalProfile(buildFallbackPermissionContext(actorId), profile),
-    "personal",
-  );
+  return controlApiJsonRequest<RegistrationResult>("/api/auth/register/personal", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export async function registerEnterpriseAdmin(input: RegisterEnterpriseAdminInput) {
-  const actorId = "user_demo_001";
-  const profile: LocalProfile = {
-    displayName: input.adminName || input.email.split("@")[0] || "Enterprise Admin",
-    email: input.email || null,
-  };
-  writeLocalProfile(actorId, profile);
-  return buildRegistrationResult(
-    actorId,
-    applyLocalProfile(buildFallbackPermissionContext(actorId), profile),
-    "enterprise_admin",
-  );
+  return controlApiJsonRequest<RegistrationResult>("/api/auth/register/enterprise-admin", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export type CanvasProject = {
@@ -4070,13 +3980,16 @@ export async function runToolboxCapability(
   type: "character_replace" | "motion_transfer" | "upscale_restore",
   input: { projectId?: string; note?: string; target?: string; storyboardId?: string },
 ) {
-  return createCanonicalJob({
-    jobType: type,
-    domain: "toolbox",
-    actionCode: type,
-    inputSummary: input.note || input.target || input.storyboardId || type,
-    payload: input,
+  const routes: Record<typeof type, string> = {
+    character_replace: "/api/toolbox/character-replace",
+    motion_transfer: "/api/toolbox/motion-transfer",
+    upscale_restore: "/api/toolbox/upscale-restore",
+  };
+  const response = await createToolboxRun(routes[type], {
+    ...input,
+    idempotencyKey: `frontend:${getCurrentActorId()}:${type}:${createClientId("toolbox")}`,
   });
+  return taskAcceptedFromToolboxRun(response);
 }
 
 // ═══════════════════════════════════════════════════════════════════════

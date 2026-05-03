@@ -61,8 +61,9 @@ app.Use(async (context, next) =>
     }
 
     var isPublicClientRequest = IsPublicClientApiRequest(context);
+    var isAnonymousIdentityRequest = IsAnonymousIdentityRequest(context);
     var clientApiOptions = context.RequestServices.GetRequiredService<IOptions<ClientApiOptions>>().Value;
-    var clientAuth = isPublicClientRequest
+    var clientAuth = isPublicClientRequest && !isAnonymousIdentityRequest
         ? AuthenticateClientRequest(context, clientApiOptions)
         : ClientAuthenticationResult.Allowed(null);
     if (isPublicClientRequest && !clientAuth.IsAllowed)
@@ -80,7 +81,7 @@ app.Use(async (context, next) =>
         context.Items[ClientPrincipal.ItemKey] = clientAuth.Principal;
     }
 
-    if (isPublicClientRequest && !IsClientPermissionAllowed(context, clientApiOptions))
+    if (isPublicClientRequest && !isAnonymousIdentityRequest && !IsClientPermissionAllowed(context, clientApiOptions))
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         await context.Response.WriteAsJsonAsync(new
@@ -186,6 +187,755 @@ app.MapPost("/api/accounts/ensure", async (
 
     var account = await accounts.EnsureAccountAsync(request, ct);
     return Results.Ok(account);
+});
+
+app.MapGet("/api/auth/providers", () => Results.Ok(new
+{
+    google = new
+    {
+        configured = false,
+    },
+}));
+
+app.MapPost("/api/auth/google/exchange", () => Results.Json(new
+{
+    error = new
+    {
+        code = "AUTH_PROVIDER_DISABLED",
+        message = "Google login is not configured in the Windows-native canonical identity surface.",
+    },
+}, statusCode: StatusCodes.Status410Gone));
+
+app.MapPost("/api/auth/login", async (
+    LoginRequest request,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var permissionContext = await identity.LoginWithEmailAsync(request, "personal", ct);
+    return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
+});
+
+app.MapPost("/api/auth/admin/login", async (
+    LoginRequest request,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var permissionContext = await identity.LoginWithEmailAsync(request, "ops_admin", ct);
+    return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
+});
+
+app.MapPost("/api/auth/register/personal", async (
+    RegisterPersonalRequest request,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var registration = await identity.RegisterPersonalAsync(request, ct);
+    return Results.Json(AttachSessionCredentials(registration, clientApi.Value), statusCode: StatusCodes.Status201Created);
+});
+
+app.MapPost("/api/auth/register/enterprise-admin", async (
+    RegisterEnterpriseAdminRequest request,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var registration = await identity.RegisterEnterpriseAdminAsync(request, ct);
+    return Results.Json(AttachSessionCredentials(registration, clientApi.Value), statusCode: StatusCodes.Status201Created);
+});
+
+app.MapGet("/api/me", async (
+    HttpContext httpContext,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    return Results.Ok(await identity.GetPermissionContextAsync(ResolveActorId(httpContext), ct));
+});
+
+app.MapPut("/api/me", async (
+    UpdateMeRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var actorId = ResolveActorId(httpContext);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, new AccountScope
+        {
+            AccountOwnerType = "user",
+            AccountOwnerId = actorId,
+        }, requireConfiguredAccountGrant: false) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await identity.UpdateProfileAsync(actorId, request, ct));
+});
+
+app.MapGet("/api/organizations/{organizationId}/members", async (
+    string organizationId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, new AccountScope
+        {
+            AccountOwnerType = "organization",
+            AccountOwnerId = organizationId,
+        }, requireConfiguredAccountGrant: false) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new
+    {
+        items = await identity.ListOrganizationMembersAsync(organizationId, ct),
+    });
+});
+
+app.MapPost("/api/organizations/{organizationId}/members", async (
+    string organizationId,
+    CreateOrganizationMemberRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, new AccountScope
+        {
+            AccountOwnerType = "organization",
+            AccountOwnerId = organizationId,
+        }, requireConfiguredAccountGrant: false) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Json(await identity.CreateOrganizationMemberAsync(organizationId, request, ct), statusCode: StatusCodes.Status201Created);
+});
+
+app.MapGet("/api/api-center", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await identity.GetApiCenterConfigAsync(scope, ct));
+});
+
+app.MapPut("/api/api-center/defaults", async (
+    JsonElement request,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await identity.UpdateApiCenterDefaultsAsync(scope, request, ct));
+});
+
+app.MapPut("/api/api-center/vendors/{vendorId}/api-key", async (
+    string vendorId,
+    JsonElement request,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
+    {
+        return denied;
+    }
+
+    var apiKey = request.TryGetProperty("apiKey", out var apiKeyValue) ? apiKeyValue.GetString() ?? "" : "";
+    return Results.Ok(await identity.SaveApiCenterVendorApiKeyAsync(scope, vendorId, apiKey, ct));
+});
+
+app.MapPost("/api/api-center/vendors/{vendorId}/test", async (
+    string vendorId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await identity.TestApiCenterVendorConnectionAsync(scope, vendorId, ct));
+});
+
+app.MapPut("/api/api-center/vendors/{vendorId}/models/{modelId}", async (
+    string vendorId,
+    string modelId,
+    JsonElement request,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresIdentityConfigStore identity,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await identity.UpdateApiVendorModelAsync(scope, vendorId, modelId, request, ct));
+});
+
+app.MapGet("/api/playground/config", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await playground.GetConfigAsync(scope, ct));
+});
+
+app.MapGet("/api/playground/models", (PostgresPlaygroundStore playground) =>
+{
+    return Results.Ok(playground.ListModels());
+});
+
+app.MapGet("/api/playground/conversations", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    string? search,
+    int? limit,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new
+    {
+        items = await playground.ListConversationsAsync(scope, search, limit ?? 100, ct),
+    });
+});
+
+app.MapPost("/api/playground/conversations", async (
+    PlaygroundConversationRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    var scopedRequest = request with
+    {
+        AccountOwnerType = scope.AccountOwnerType,
+        AccountOwnerId = scope.AccountOwnerId,
+        RegionCode = scope.RegionCode,
+        Currency = scope.Currency,
+    };
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+    {
+        return denied;
+    }
+
+    try
+    {
+        return Results.Json(
+            await playground.CreateConversationAsync(scopedRequest, ResolveActorId(httpContext), scopedRequest, ct),
+            statusCode: StatusCodes.Status201Created);
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+    }
+});
+
+app.MapGet("/api/playground/conversations/{conversationId}", async (
+    string conversationId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var conversation = await playground.GetConversationAsync(scope, conversationId, ct);
+    return conversation is null ? Results.NotFound(new { error = "playground conversation not found" }) : Results.Ok(conversation);
+});
+
+app.MapPut("/api/playground/conversations/{conversationId}", async (
+    string conversationId,
+    PlaygroundConversationRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    var scopedRequest = request with
+    {
+        AccountOwnerType = scope.AccountOwnerType,
+        AccountOwnerId = scope.AccountOwnerId,
+        RegionCode = scope.RegionCode,
+        Currency = scope.Currency,
+    };
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+    {
+        return denied;
+    }
+
+    var conversation = await playground.UpdateConversationAsync(scopedRequest, conversationId, scopedRequest, ct);
+    return conversation is null ? Results.NotFound(new { error = "playground conversation not found" }) : Results.Ok(conversation);
+});
+
+app.MapDelete("/api/playground/conversations/{conversationId}", async (
+    string conversationId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var deleted = await playground.DeleteConversationAsync(scope, conversationId, ct);
+    return deleted ? Results.Ok(new { deleted, conversationId }) : Results.NotFound(new { error = "playground conversation not found" });
+});
+
+app.MapGet("/api/playground/conversations/{conversationId}/messages", async (
+    string conversationId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await playground.ListMessagesAsync(scope, conversationId, ct) });
+});
+
+app.MapGet("/api/playground/chat-jobs", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    string? conversationId,
+    bool? activeOnly,
+    string? status,
+    int? limit,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new
+    {
+        items = await playground.ListChatJobsAsync(scope, conversationId, activeOnly == true, status, limit ?? 100, ct),
+    });
+});
+
+app.MapPost("/api/playground/chat-jobs", async (
+    PlaygroundChatRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    var scopedRequest = request with
+    {
+        AccountOwnerType = scope.AccountOwnerType,
+        AccountOwnerId = scope.AccountOwnerId,
+        RegionCode = scope.RegionCode,
+        Currency = scope.Currency,
+    };
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+    {
+        return denied;
+    }
+
+    try
+    {
+        return Results.Json(
+            await playground.StartChatJobAsync(scopedRequest, ResolveActorId(httpContext), scopedRequest, ct),
+            statusCode: StatusCodes.Status202Accepted);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+    }
+});
+
+app.MapGet("/api/playground/chat-jobs/{jobId:guid}", async (
+    Guid jobId,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var job = await playground.GetChatJobAsync(scope, jobId, ct);
+    return job is null ? Results.NotFound(new { error = "playground chat job not found" }) : Results.Ok(new { job });
+});
+
+app.MapGet("/api/playground/memories", async (
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await playground.ListMemoriesAsync(scope, ct));
+});
+
+app.MapPut("/api/playground/memories/preference", async (
+    PlaygroundMemoryPreferenceRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    var scopedRequest = request with
+    {
+        AccountOwnerType = scope.AccountOwnerType,
+        AccountOwnerId = scope.AccountOwnerId,
+        RegionCode = scope.RegionCode,
+        Currency = scope.Currency,
+    };
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(await playground.UpdateMemoryPreferenceAsync(scopedRequest, scopedRequest, ct));
+});
+
+app.MapPut("/api/playground/memories/{key}", async (
+    string key,
+    PlaygroundMemoryRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    var scopedRequest = request with
+    {
+        AccountOwnerType = scope.AccountOwnerType,
+        AccountOwnerId = scope.AccountOwnerId,
+        RegionCode = scope.RegionCode,
+        Currency = scope.Currency,
+    };
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+    {
+        return denied;
+    }
+
+    try
+    {
+        return Results.Ok(await playground.UpsertMemoryAsync(scopedRequest, key, scopedRequest, ct));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapDelete("/api/playground/memories/{key}", async (
+    string key,
+    string? accountOwnerType,
+    string? accountOwnerId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresPlaygroundStore playground,
+    CancellationToken ct) =>
+{
+    var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+    if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+    {
+        return denied;
+    }
+
+    var deleted = await playground.DeleteMemoryAsync(scope, key, ct);
+    return deleted ? Results.Ok(new { deleted, key }) : Results.NotFound(new { error = "playground memory not found" });
+});
+
+app.MapGet("/api/capabilities", async (
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return Results.Ok(await toolbox.GetSystemCapabilitiesAsync(ct));
+});
+
+app.MapGet("/api/toolbox", async (
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return Results.Ok(await toolbox.GetCapabilitiesAsync(ct));
+});
+
+app.MapGet("/api/toolbox/capabilities", async (
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return Results.Ok(await toolbox.GetCapabilitiesAsync(ct));
+});
+
+app.MapPost("/api/toolbox/character-replace", async (
+    ToolboxRunRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return await QueueToolboxRunAsync("character_replace", request, httpContext, clientApi.Value, toolbox, ct);
+});
+
+app.MapPost("/api/toolbox/motion-transfer", async (
+    ToolboxRunRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return await QueueToolboxRunAsync("motion_transfer", request, httpContext, clientApi.Value, toolbox, ct);
+});
+
+app.MapPost("/api/toolbox/upscale-restore", async (
+    ToolboxRunRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return await QueueToolboxRunAsync("upscale_restore", request, httpContext, clientApi.Value, toolbox, ct);
+});
+
+app.MapPost("/api/toolbox/video-reverse-prompt", async (
+    ToolboxRunRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return await QueueToolboxRunAsync("video_reverse_prompt", request, httpContext, clientApi.Value, toolbox, ct);
+});
+
+app.MapPost("/api/toolbox/storyboard-grid25", async (
+    ToolboxRunRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return await QueueToolboxRunAsync("storyboard_grid25", request, httpContext, clientApi.Value, toolbox, ct);
+});
+
+app.MapPost("/api/toolbox/translate-text", async (
+    ToolboxRunRequest request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresToolboxStore toolbox,
+    CancellationToken ct) =>
+{
+    return await QueueToolboxRunAsync("translate_text", request, httpContext, clientApi.Value, toolbox, ct);
+});
+
+app.MapGet("/api/admin/pricing-rules", async (
+    HttpContext httpContext,
+    PostgresIdentityConfigStore identity,
+    PostgresAdminSystemStore adminSystem,
+    CancellationToken ct) =>
+{
+    if (await AuthorizePlatformAdminAsync(httpContext, identity, ct) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await adminSystem.ListPricingRulesAsync(ct) });
+});
+
+app.MapPut("/api/admin/pricing-rules/{actionCode}", async (
+    string actionCode,
+    PricingRuleRequest request,
+    HttpContext httpContext,
+    PostgresIdentityConfigStore identity,
+    PostgresAdminSystemStore adminSystem,
+    CancellationToken ct) =>
+{
+    if (await AuthorizePlatformAdminAsync(httpContext, identity, ct) is { } denied)
+    {
+        return denied;
+    }
+
+    try
+    {
+        return Results.Ok(await adminSystem.UpsertPricingRuleAsync(actionCode, request, ct));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapGet("/api/admin/orders", async (
+    int? limit,
+    HttpContext httpContext,
+    PostgresIdentityConfigStore identity,
+    PostgresAdminSystemStore adminSystem,
+    CancellationToken ct) =>
+{
+    if (await AuthorizePlatformAdminAsync(httpContext, identity, ct) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await adminSystem.ListAdminOrdersAsync(limit ?? 100, ct) });
+});
+
+app.MapPost("/api/admin/orders/{orderId}/review", () => Results.Json(new
+{
+    error = "manual recharge review is retired; canonical payment callbacks and wallet ledger are the only write path",
+    code = "RECHARGE_FLOW_RETIRED",
+}, statusCode: StatusCodes.Status410Gone));
+
+app.MapGet("/api/enterprise-applications", async (
+    int? limit,
+    HttpContext httpContext,
+    PostgresIdentityConfigStore identity,
+    PostgresAdminSystemStore adminSystem,
+    CancellationToken ct) =>
+{
+    if (await AuthorizePlatformAdminAsync(httpContext, identity, ct) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await adminSystem.ListEnterpriseApplicationsAsync(limit ?? 100, ct) });
+});
+
+app.MapPost("/api/enterprise-applications", async (
+    EnterpriseApplicationRequest request,
+    PostgresAdminSystemStore adminSystem,
+    CancellationToken ct) =>
+{
+    try
+    {
+        return Results.Json(await adminSystem.CreateEnterpriseApplicationAsync(request, ct), statusCode: StatusCodes.Status201Created);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPatch("/api/enterprise-applications/{applicationId}", async (
+    string applicationId,
+    EnterpriseApplicationReviewRequest request,
+    HttpContext httpContext,
+    PostgresIdentityConfigStore identity,
+    PostgresAdminSystemStore adminSystem,
+    CancellationToken ct) =>
+{
+    if (await AuthorizePlatformAdminAsync(httpContext, identity, ct) is { } denied)
+    {
+        return denied;
+    }
+
+    var application = await adminSystem.ReviewEnterpriseApplicationAsync(applicationId, request, ResolveActorId(httpContext), ct);
+    return application is null ? Results.NotFound(new { error = "enterprise application not found" }) : Results.Ok(application);
+});
+
+app.MapPost("/api/enterprise-applications/{applicationId}/review", async (
+    string applicationId,
+    EnterpriseApplicationReviewRequest request,
+    HttpContext httpContext,
+    PostgresIdentityConfigStore identity,
+    PostgresAdminSystemStore adminSystem,
+    CancellationToken ct) =>
+{
+    if (await AuthorizePlatformAdminAsync(httpContext, identity, ct) is { } denied)
+    {
+        return denied;
+    }
+
+    var application = await adminSystem.ReviewEnterpriseApplicationAsync(applicationId, request, ResolveActorId(httpContext), ct);
+    return application is null ? Results.NotFound(new { error = "enterprise application not found" }) : Results.Ok(application);
 });
 
 app.MapPost("/api/jobs", async (
@@ -841,6 +1591,384 @@ app.MapPut("/api/projects/{projectId}/timeline", async (
     return Results.Ok(await projects.UpsertTimelineAsync(projectId, request, ct));
 });
 
+app.MapGet("/api/projects/{projectId}/assets", async (
+    string projectId,
+    string? assetType,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListAssetsAsync(projectId, assetType, ct) });
+});
+
+app.MapGet("/api/projects/{projectId}/assets/{assetId}", async (
+    string projectId,
+    string assetId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var asset = await projects.GetAssetAsync(projectId, assetId, ct);
+    return asset is null ? Results.NotFound(new { error = "asset not found" }) : Results.Ok(asset);
+});
+
+app.MapPost("/api/projects/{projectId}/assets", async (
+    string projectId,
+    JsonElement request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var asset = await projects.UpsertAssetAsync(projectId, null, request, ct);
+    return asset is null
+        ? Results.Json(new { error = "asset is owned by another project" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Json(asset, statusCode: StatusCodes.Status201Created);
+});
+
+app.MapPut("/api/projects/{projectId}/assets/{assetId}", async (
+    string projectId,
+    string assetId,
+    JsonElement request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var asset = await projects.UpsertAssetAsync(projectId, assetId, request, ct);
+    return asset is null
+        ? Results.Json(new { error = "asset is owned by another project" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Ok(asset);
+});
+
+app.MapDelete("/api/projects/{projectId}/assets/{assetId}", async (
+    string projectId,
+    string assetId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var deleted = await projects.DeleteProjectItemAsync("project_assets", projectId, assetId, ct);
+    return deleted ? Results.Ok(new { deleted, assetId }) : Results.NotFound(new { error = "asset not found" });
+});
+
+app.MapGet("/api/projects/{projectId}/storyboards", async (
+    string projectId,
+    int? episodeNo,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListStoryboardsAsync(projectId, episodeNo, ct) });
+});
+
+app.MapGet("/api/projects/{projectId}/storyboards/{storyboardId}", async (
+    string projectId,
+    string storyboardId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var storyboard = await projects.GetStoryboardAsync(projectId, storyboardId, ct);
+    return storyboard is null ? Results.NotFound(new { error = "storyboard not found" }) : Results.Ok(storyboard);
+});
+
+app.MapPut("/api/projects/{projectId}/storyboards/{storyboardId}", async (
+    string projectId,
+    string storyboardId,
+    JsonElement request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var storyboard = await projects.UpsertStoryboardAsync(projectId, storyboardId, request, ct);
+    return storyboard is null
+        ? Results.Json(new { error = "storyboard is owned by another project" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Ok(storyboard);
+});
+
+app.MapDelete("/api/projects/{projectId}/storyboards/{storyboardId}", async (
+    string projectId,
+    string storyboardId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var deleted = await projects.DeleteProjectItemAsync("project_storyboards", projectId, storyboardId, ct);
+    return deleted ? Results.Ok(new { deleted, storyboardId }) : Results.NotFound(new { error = "storyboard not found" });
+});
+
+app.MapGet("/api/projects/{projectId}/videos", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListVideosAsync(projectId, ct) });
+});
+
+app.MapPut("/api/projects/{projectId}/videos/{videoId}", async (
+    string projectId,
+    string videoId,
+    JsonElement request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var video = await projects.UpsertVideoAsync(projectId, videoId, request, ct);
+    return video is null
+        ? Results.Json(new { error = "video is owned by another project" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Ok(video);
+});
+
+app.MapGet("/api/projects/{projectId}/dubbings", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListDubbingsAsync(projectId, ct) });
+});
+
+app.MapPut("/api/projects/{projectId}/dubbings/{dubbingId}", async (
+    string projectId,
+    string dubbingId,
+    JsonElement request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var dubbing = await projects.UpsertDubbingAsync(projectId, dubbingId, request, ct);
+    return dubbing is null
+        ? Results.Json(new { error = "dubbing is owned by another project" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Ok(dubbing);
+});
+
+app.MapGet("/api/projects/{projectId}/exports", async (
+    string projectId,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    return Results.Ok(new { items = await projects.ListExportsAsync(projectId, ct) });
+});
+
+app.MapPost("/api/projects/{projectId}/exports", async (
+    string projectId,
+    JsonElement request,
+    HttpContext httpContext,
+    IOptions<ClientApiOptions> clientApi,
+    PostgresProjectSurfaceStore projects,
+    PostgresJobQueue jobs,
+    CancellationToken ct) =>
+{
+    var project = await projects.GetProjectAsync(projectId, ct);
+    if (project is null)
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+    {
+        return denied;
+    }
+
+    var format = ReadJsonString(request, "format") ?? "mp4";
+    var payload = request.ValueKind == JsonValueKind.Object
+        ? JsonSerializer.Deserialize<Dictionary<string, object?>>(request.GetRawText(), jsonOptions) ?? new Dictionary<string, object?>()
+        : new Dictionary<string, object?>();
+    payload["projectId"] = projectId;
+    payload["format"] = format;
+
+    var job = await jobs.CreateJobAsync(new CreateJobRequest
+    {
+        AccountOwnerType = TryReadRowString(project, "account_owner_type") ?? "user",
+        AccountOwnerId = TryReadRowString(project, "account_owner_id") ?? "guest",
+        Lane = AccountLanes.Media,
+        JobType = "project_export_requested",
+        IdempotencyKey = $"project-export:{projectId}:{format}:{Guid.NewGuid():N}",
+        Payload = JsonSerializer.SerializeToElement(payload, jsonOptions),
+        CreatedByUserId = TryReadRowString(project, "created_by_user_id"),
+    }, ct);
+
+    Guid? jobId = null;
+    if (Guid.TryParse(job?.GetValueOrDefault("id")?.ToString(), out var parsedJobId))
+    {
+        jobId = parsedJobId;
+    }
+
+    var export = await projects.CreateExportAsync(projectId, request, jobId, ct);
+    return export is null
+        ? Results.Json(new { error = "export is owned by another project" }, statusCode: StatusCodes.Status403Forbidden)
+        : Results.Json(export, statusCode: StatusCodes.Status202Accepted);
+});
+
 app.MapGet("/api/canvas-projects", async (
     string? accountOwnerType,
     string? accountOwnerId,
@@ -1362,6 +2490,258 @@ static bool ShouldRequirePaymentCallbackAccountGrant(PaymentCallbackOptions opti
     return ReadBoolOption("PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT", options.RequireAccountGrant);
 }
 
+static Dictionary<string, object?> BuildLoginResult(
+    Dictionary<string, object?> permissionContext,
+    ClientApiOptions options)
+{
+    var actor = TryReadDictionary(permissionContext, "actor");
+    var actorId = ReadDictionaryString(actor, "id")
+        ?? ReadDictionaryString(permissionContext, "actorId")
+        ?? "guest";
+    var email = ReadDictionaryString(actor, "email") ?? "";
+    return new Dictionary<string, object?>
+    {
+        ["actorId"] = actorId,
+        ["token"] = CreateLocalAuthToken(actorId),
+        ["controlApiClientAssertion"] = CreateControlApiClientAssertion(permissionContext, options),
+        ["displayName"] = ReadDictionaryString(actor, "displayName") ?? actorId,
+        ["email"] = email,
+        ["permissionContext"] = permissionContext,
+    };
+}
+
+static Dictionary<string, object?> AttachSessionCredentials(
+    Dictionary<string, object?> registration,
+    ClientApiOptions options)
+{
+    var next = new Dictionary<string, object?>(registration, StringComparer.OrdinalIgnoreCase);
+    var permissionContext = next.TryGetValue("permissionContext", out var permissionContextValue)
+        ? permissionContextValue as Dictionary<string, object?>
+        : null;
+    var actorId = ReadDictionaryString(next, "actorId")
+        ?? (permissionContext is null ? null : ReadDictionaryString(TryReadDictionary(permissionContext, "actor"), "id"))
+        ?? "guest";
+    next["actorId"] = actorId;
+    next["token"] = CreateLocalAuthToken(actorId);
+    next["controlApiClientAssertion"] = permissionContext is null
+        ? null
+        : CreateControlApiClientAssertion(permissionContext, options);
+    return next;
+}
+
+static string ResolveActorId(HttpContext context)
+{
+    return NormalizeBlank(GetClientPrincipal(context)?.Subject)
+        ?? NormalizeBlank(ReadHeader(context, "X-Actor-Id"))
+        ?? "guest";
+}
+
+static async Task<IResult?> AuthorizePlatformAdminAsync(
+    HttpContext context,
+    PostgresIdentityConfigStore identity,
+    CancellationToken cancellationToken)
+{
+    var permissionContext = await identity.GetPermissionContextAsync(ResolveActorId(context), cancellationToken);
+    var permissions = TryReadDictionary(permissionContext, "permissions");
+    var platformRole = ReadDictionaryString(permissionContext, "platformRole")
+        ?? ReadDictionaryString(TryReadDictionary(permissionContext, "actor"), "platformRole");
+    var allowed = ReadDictionaryBool(permissions, "canManageOps")
+        || ReadDictionaryBool(permissions, "canManageSystem")
+        || string.Equals(platformRole, "ops_admin", StringComparison.Ordinal)
+        || string.Equals(platformRole, "super_admin", StringComparison.Ordinal);
+
+    return allowed
+        ? null
+        : Results.Json(new
+        {
+            error = "platform admin permission is required",
+        }, statusCode: StatusCodes.Status403Forbidden);
+}
+
+static string CreateLocalAuthToken(string actorId)
+{
+    return Convert.ToBase64String(Encoding.UTF8.GetBytes($"{actorId}:{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}"));
+}
+
+static string? CreateControlApiClientAssertion(
+    Dictionary<string, object?> permissionContext,
+    ClientApiOptions options)
+{
+    var secret = GetConfiguredClientAuthProviderSecret(options);
+    if (string.IsNullOrWhiteSpace(secret))
+    {
+        return null;
+    }
+
+    var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    var ttlSeconds = ReadPositiveIntegerOption("CLIENT_API_AUTH_PROVIDER_TTL_SECONDS", 3600);
+    var header = new Dictionary<string, object?>
+    {
+        ["alg"] = "HS256",
+        ["typ"] = "JWT",
+    };
+    var claims = BuildControlApiAssertionClaims(permissionContext, options, now, ttlSeconds);
+    var signingInput = $"{Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(header))}.{Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(claims))}";
+    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret.Trim()));
+    var signature = Base64UrlEncode(hmac.ComputeHash(Encoding.ASCII.GetBytes(signingInput)));
+    return $"{signingInput}.{signature}";
+}
+
+static Dictionary<string, object?> BuildControlApiAssertionClaims(
+    Dictionary<string, object?> permissionContext,
+    ClientApiOptions options,
+    long now,
+    int ttlSeconds)
+{
+    var actor = TryReadDictionary(permissionContext, "actor");
+    var actorId = ReadDictionaryString(actor, "id")
+        ?? ReadDictionaryString(permissionContext, "actorId")
+        ?? "guest";
+    var claims = new Dictionary<string, object?>
+    {
+        ["sub"] = actorId,
+        ["iat"] = now,
+        ["nbf"] = now - 30,
+        ["exp"] = now + ttlSeconds,
+        ["jti"] = Guid.NewGuid().ToString("D"),
+        ["xiaolou_account_owner_type"] = "user",
+        ["xiaolou_account_owner_ids"] = CollectOwnerGrants(permissionContext, actorId),
+        ["xiaolou_permissions"] = NormalizeGrantArray(GetAssertionPermissions(options)),
+    };
+
+    var issuer = NormalizeBlank(GetConfiguredClientAuthProviderIssuer(options));
+    if (issuer is not null)
+    {
+        claims["iss"] = issuer;
+    }
+
+    var audience = NormalizeBlank(GetConfiguredClientAuthProviderAudience(options));
+    if (audience is not null)
+    {
+        claims["aud"] = audience;
+    }
+
+    var currentOrganizationId = ReadDictionaryString(permissionContext, "currentOrganizationId");
+    if (currentOrganizationId is not null)
+    {
+        claims["xiaolou_current_organization_id"] = currentOrganizationId;
+    }
+
+    return claims;
+}
+
+static string[] CollectOwnerGrants(Dictionary<string, object?> permissionContext, string actorId)
+{
+    var grants = new List<string>
+    {
+        actorId,
+        $"user:{actorId}",
+    };
+
+    if (ReadDictionaryEnumerable(permissionContext, "organizations") is { } organizations)
+    {
+        foreach (var organization in organizations)
+        {
+            var organizationId = ReadDictionaryString(organization, "id");
+            var status = ReadDictionaryString(organization, "status");
+            if (organizationId is null || string.Equals(status, "disabled", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            grants.Add(organizationId);
+            grants.Add($"organization:{organizationId}");
+        }
+    }
+
+    var currentOrganizationId = ReadDictionaryString(permissionContext, "currentOrganizationId");
+    if (currentOrganizationId is not null)
+    {
+        grants.Add(currentOrganizationId);
+        grants.Add($"organization:{currentOrganizationId}");
+    }
+
+    return grants.Distinct(StringComparer.Ordinal).ToArray();
+}
+
+static string GetAssertionPermissions(ClientApiOptions options)
+{
+    return string.IsNullOrWhiteSpace(GetConfiguredAllowedPermissions(options))
+        ? DefaultClientApiPermissions()
+        : GetConfiguredAllowedPermissions(options)!;
+}
+
+static string DefaultClientApiPermissions()
+{
+    return "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write,identity:read,identity:write,organization:read,organization:write,api-center:read,api-center:write,admin:read,admin:write,enterprise-applications:read,enterprise-applications:write,playground:read,playground:write,toolbox:read,toolbox:write";
+}
+
+static string[] NormalizeGrantArray(string value)
+{
+    return value.Split(',', ';', ' ', '\t', '\r', '\n')
+        .Select(item => item.Trim())
+        .Where(item => item.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+}
+
+static int ReadPositiveIntegerOption(string envName, int fallback)
+{
+    var raw = Environment.GetEnvironmentVariable(envName);
+    return int.TryParse(raw, out var value) && value > 0 ? value : fallback;
+}
+
+static string Base64UrlEncode(byte[] bytes)
+{
+    return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+}
+
+static Dictionary<string, object?>? TryReadDictionary(Dictionary<string, object?>? source, string key)
+{
+    return source is not null && source.TryGetValue(key, out var value)
+        ? value as Dictionary<string, object?>
+        : null;
+}
+
+static IEnumerable<Dictionary<string, object?>>? ReadDictionaryEnumerable(Dictionary<string, object?> source, string key)
+{
+    if (!source.TryGetValue(key, out var value) || value is null)
+    {
+        return null;
+    }
+
+    return value switch
+    {
+        IEnumerable<Dictionary<string, object?>> typed => typed,
+        IEnumerable<object> items => items.OfType<Dictionary<string, object?>>(),
+        _ => null,
+    };
+}
+
+static string? ReadDictionaryString(Dictionary<string, object?>? source, string key)
+{
+    return source is not null && source.TryGetValue(key, out var value) && value is not null
+        ? NormalizeBlank(Convert.ToString(value))
+        : null;
+}
+
+static bool ReadDictionaryBool(Dictionary<string, object?>? source, string key)
+{
+    if (source is null || !source.TryGetValue(key, out var value) || value is null)
+    {
+        return false;
+    }
+
+    return value switch
+    {
+        bool boolValue => boolValue,
+        JsonElement { ValueKind: JsonValueKind.True } => true,
+        JsonElement { ValueKind: JsonValueKind.False } => false,
+        JsonElement { ValueKind: JsonValueKind.String } element => bool.TryParse(element.GetString(), out var parsed) && parsed,
+        _ => bool.TryParse(Convert.ToString(value), out var parsed) && parsed,
+    };
+}
+
 static bool IsInternalRequestAllowed(HttpContext context, InternalApiOptions options)
 {
     var configuredToken = string.IsNullOrWhiteSpace(options.Token)
@@ -1394,6 +2774,15 @@ static bool IsPublicClientApiRequest(HttpContext context)
 {
     var path = context.Request.Path;
     return path.StartsWithSegments("/api/accounts/ensure")
+        || path.StartsWithSegments("/api/auth")
+        || string.Equals(path.Value, "/api/me", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWithSegments("/api/organizations")
+        || path.StartsWithSegments("/api/api-center")
+        || path.StartsWithSegments("/api/admin")
+        || path.StartsWithSegments("/api/enterprise-applications")
+        || path.StartsWithSegments("/api/playground")
+        || string.Equals(path.Value, "/api/capabilities", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWithSegments("/api/toolbox")
         || path.StartsWithSegments("/api/jobs")
         || path.StartsWithSegments("/api/media")
         || path.StartsWithSegments("/api/projects")
@@ -1404,6 +2793,20 @@ static bool IsPublicClientApiRequest(HttpContext context)
         || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
         || string.Equals(path.Value, "/api/wallet/usage-stats", StringComparison.OrdinalIgnoreCase)
         || path.StartsWithSegments("/api/wallets");
+}
+
+static bool IsAnonymousIdentityRequest(HttpContext context)
+{
+    var path = context.Request.Path;
+    var method = context.Request.Method;
+    return (HttpMethods.IsGet(method) && string.Equals(path.Value, "/api/auth/providers", StringComparison.OrdinalIgnoreCase))
+        || (HttpMethods.IsGet(method) && string.Equals(path.Value, "/api/me", StringComparison.OrdinalIgnoreCase))
+        || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/google/exchange", StringComparison.OrdinalIgnoreCase))
+        || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/login", StringComparison.OrdinalIgnoreCase))
+        || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/admin/login", StringComparison.OrdinalIgnoreCase))
+        || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/register/personal", StringComparison.OrdinalIgnoreCase))
+        || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/register/enterprise-admin", StringComparison.OrdinalIgnoreCase))
+        || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/enterprise-applications", StringComparison.OrdinalIgnoreCase));
 }
 
 static AccountScope ResolvePublicOwnerScope(
@@ -1428,7 +2831,11 @@ static AccountScope ResolvePublicOwnerScope(
     };
 }
 
-static IResult? AuthorizeAccountScope(HttpContext context, ClientApiOptions options, AccountScope scope)
+static IResult? AuthorizeAccountScope(
+    HttpContext context,
+    ClientApiOptions options,
+    AccountScope scope,
+    bool requireConfiguredAccountGrant = true)
 {
     if (!IsClientAuthModeEnabled(options) || !ShouldRequireAccountScope(options))
     {
@@ -1438,7 +2845,7 @@ static IResult? AuthorizeAccountScope(HttpContext context, ClientApiOptions opti
     var accountId = NormalizeBlank(scope.AccountId);
     var ownerType = NormalizeOwnerType(scope.AccountOwnerType);
     var ownerId = NormalizeBlank(scope.AccountOwnerId);
-    return IsAccountScopeAllowed(context, options, accountId, ownerType, ownerId)
+    return IsAccountScopeAllowed(context, options, accountId, ownerType, ownerId, requireConfiguredAccountGrant)
         ? null
         : AccountForbidden();
 }
@@ -1574,6 +2981,43 @@ static string? GetRequiredClientPermission(HttpContext context)
         return "accounts:ensure";
     }
 
+    if (path.StartsWithSegments("/api/auth")
+        || string.Equals(path.Value, "/api/me", StringComparison.OrdinalIgnoreCase))
+    {
+        return HttpMethods.IsGet(method) ? "identity:read" : "identity:write";
+    }
+
+    if (path.StartsWithSegments("/api/organizations"))
+    {
+        return HttpMethods.IsGet(method) ? "organization:read" : "organization:write";
+    }
+
+    if (path.StartsWithSegments("/api/api-center"))
+    {
+        return HttpMethods.IsGet(method) ? "api-center:read" : "api-center:write";
+    }
+
+    if (path.StartsWithSegments("/api/admin"))
+    {
+        return HttpMethods.IsGet(method) ? "admin:read" : "admin:write";
+    }
+
+    if (path.StartsWithSegments("/api/enterprise-applications"))
+    {
+        return HttpMethods.IsGet(method) ? "enterprise-applications:read" : "enterprise-applications:write";
+    }
+
+    if (path.StartsWithSegments("/api/playground"))
+    {
+        return HttpMethods.IsGet(method) ? "playground:read" : "playground:write";
+    }
+
+    if (string.Equals(path.Value, "/api/capabilities", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWithSegments("/api/toolbox"))
+    {
+        return HttpMethods.IsGet(method) ? "toolbox:read" : "toolbox:write";
+    }
+
     if (path.StartsWithSegments("/api/jobs"))
     {
         if (HttpMethods.IsGet(method))
@@ -1632,6 +3076,39 @@ static string? GetRequiredClientPermission(HttpContext context)
     }
 
     return null;
+}
+
+static async Task<IResult> QueueToolboxRunAsync(
+    string actionCode,
+    ToolboxRunRequest request,
+    HttpContext httpContext,
+    ClientApiOptions clientApi,
+    PostgresToolboxStore toolbox,
+    CancellationToken cancellationToken)
+{
+    var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+    var scopedRequest = request with
+    {
+        AccountOwnerType = scope.AccountOwnerType,
+        AccountOwnerId = scope.AccountOwnerId,
+        RegionCode = scope.RegionCode,
+        Currency = scope.Currency,
+    };
+    if (AuthorizeAccountScope(httpContext, clientApi, scopedRequest) is { } denied)
+    {
+        return denied;
+    }
+
+    try
+    {
+        return Results.Json(
+            await toolbox.QueueCapabilityRunAsync(scopedRequest, ResolveActorId(httpContext), actionCode, scopedRequest, cancellationToken),
+            statusCode: StatusCodes.Status202Accepted);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
 }
 
 static bool IsClientAuthModeEnabled(ClientApiOptions options)
@@ -1742,7 +3219,8 @@ static bool IsAccountScopeAllowed(
     ClientApiOptions options,
     string? accountId,
     string? ownerType,
-    string? ownerId)
+    string? ownerId,
+    bool requireConfiguredAccountGrant = true)
 {
     var headerAccountId = NormalizeGuidText(ReadHeader(context, "X-XiaoLou-Account-Id"));
     var normalizedAccountId = NormalizeGuidText(accountId);
@@ -1757,12 +3235,13 @@ static bool IsAccountScopeAllowed(
             return false;
         }
 
-        return !ShouldRequireConfiguredAccountGrant(options)
+        return !requireConfiguredAccountGrant
+            || !ShouldRequireConfiguredAccountGrant(options)
             || IsConfiguredAccountGrantAllowed(options, normalizedAccountId, normalizedOwnerType, ownerId);
     }
 
     var configuredGrantAllowed = IsConfiguredAccountGrantAllowed(options, normalizedAccountId, normalizedOwnerType, ownerId);
-    if (ShouldRequireConfiguredAccountGrant(options))
+    if (requireConfiguredAccountGrant && ShouldRequireConfiguredAccountGrant(options))
     {
         return configuredGrantAllowed;
     }
@@ -1847,9 +3326,11 @@ static string? GetConfiguredAllowedAccountOwnerIds(ClientApiOptions options)
 
 static string? GetConfiguredAllowedPermissions(ClientApiOptions options)
 {
-    return string.IsNullOrWhiteSpace(options.AllowedPermissions)
-        ? Environment.GetEnvironmentVariable("CLIENT_API_ALLOWED_PERMISSIONS")
-        : options.AllowedPermissions;
+    return JoinGrantLists(
+        options.AllowedPermissions,
+        Environment.GetEnvironmentVariable("ClientApi__AllowedPermissions"),
+        Environment.GetEnvironmentVariable("CLIENT_API_ALLOWED_PERMISSIONS"),
+        Environment.GetEnvironmentVariable("CONTROL_API_CLIENT_ASSERTION_PERMISSIONS"));
 }
 
 static string? GetConfiguredClientAuthProviderSecret(ClientApiOptions options)
@@ -2147,6 +3628,20 @@ static string? TryReadRowString(Dictionary<string, object?> row, string key)
     return row.TryGetValue(key, out var value) && value is not null
         ? NormalizeBlank(value.ToString())
         : null;
+}
+
+static string? ReadJsonString(JsonElement element, string propertyName)
+{
+    if (element.ValueKind != JsonValueKind.Object
+        || !element.TryGetProperty(propertyName, out var value)
+        || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+    {
+        return null;
+    }
+
+    return value.ValueKind == JsonValueKind.String
+        ? NormalizeBlank(value.GetString())
+        : NormalizeBlank(value.ToString());
 }
 
 static string? ReadHeader(HttpContext context, string name)

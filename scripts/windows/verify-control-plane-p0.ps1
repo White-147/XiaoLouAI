@@ -349,7 +349,21 @@ function New-ClientAuthProviderAssertion {
       "canvas:read",
       "canvas:write",
       "create:read",
-      "create:write"
+      "create:write",
+      "identity:read",
+      "identity:write",
+      "organization:read",
+      "organization:write",
+      "api-center:read",
+      "api-center:write",
+      "admin:read",
+      "admin:write",
+      "enterprise-applications:read",
+      "enterprise-applications:write",
+      "playground:read",
+      "playground:write",
+      "toolbox:read",
+      "toolbox:write"
     )
   }
 
@@ -430,7 +444,10 @@ function Test-PublicClientApiPath {
     -or $Path -eq "/api/wallets" `
     -or $Path.StartsWith("/api/wallets") `
     -or $Path.StartsWith("/api/wallet/usage-stats") `
-    -or $Path.StartsWith("/api/media")
+    -or $Path.StartsWith("/api/media") `
+    -or $Path.StartsWith("/api/playground") `
+    -or $Path.StartsWith("/api/capabilities") `
+    -or $Path.StartsWith("/api/toolbox")
 }
 
 function Get-BodyValue {
@@ -853,8 +870,13 @@ Assert-True ($timeoutJobId -eq [string]$timeoutJob.id) "Lease timeout test lease
 Invoke-ApiJson "Post" "/api/internal/jobs/$timeoutJobId/running" @{ workerId = "verify-timeout-worker" } | Out-Null
 Start-Sleep -Seconds 2
 $recovered = ConvertTo-Array (Invoke-ApiJson "Post" "/api/internal/jobs/recover-expired")
-Assert-True (@($recovered | Where-Object { [string]$_.id -eq $timeoutJobId }).Count -eq 1) "Expired running job was not recovered"
-$recoveredJob = Wait-JobStatus $timeoutJobId "retry_waiting"
+$recoveredByCall = @($recovered | Where-Object { [string]$_.id -eq $timeoutJobId }).Count -eq 1
+if ($recoveredByCall) {
+  $recoveredJob = Wait-JobStatus $timeoutJobId "retry_waiting"
+} else {
+  $recoveredJob = Invoke-ApiJson "Get" "/api/jobs/$timeoutJobId"
+  Assert-True ($recoveredJob.status -eq "retry_waiting") "Expired running job was not recovered by either the explicit verifier call or the Control API lease recovery service"
+}
 Assert-True ([string]$recoveredJob.last_error -match "lease expired") "Recovered job did not preserve an auditable lease timeout error"
 $timeoutAttempts = ConvertTo-Array (Invoke-ApiJson "Get" "/api/internal/jobs/$timeoutJobId/attempts")
 Assert-True ($timeoutAttempts.Count -eq 1) "Recovered running job should have exactly one attempt"
@@ -942,7 +964,13 @@ $listenJob = Start-Job -ScriptBlock {
 } -ArgumentList ($BaseUrl.TrimEnd("/") + "/api/internal/jobs/wait-signal?timeoutSeconds=10"), $signalHeaders
 Start-Sleep -Milliseconds 500
 New-TestJob $ManualProviderRoute "listen-notify" | Out-Null
-$signal = Receive-Job -Job $listenJob -Wait -AutoRemoveJob
+if (-not (Wait-Job -Job $listenJob -Timeout 25)) {
+  Stop-Job -Job $listenJob -ErrorAction SilentlyContinue
+  Remove-Job -Job $listenJob -Force -ErrorAction SilentlyContinue
+  throw "LISTEN/NOTIFY wait-signal job did not exit within 25 seconds"
+}
+$signal = Receive-Job -Job $listenJob -ErrorAction Stop
+Remove-Job -Job $listenJob -Force -ErrorAction SilentlyContinue
 Assert-True ($signal.notified -eq $true) "LISTEN/NOTIFY did not return a job signal"
 
 Write-Step "Verifying payment callback signature rejection"
@@ -1112,6 +1140,124 @@ $signed = Invoke-ApiJson "Post" "/api/media/signed-read-url" @{
   expiresInSeconds = 300
 }
 Assert-True (-not [string]::IsNullOrWhiteSpace($signed.signed_read_url)) "Signed read URL was not returned"
+
+Write-Step "Verifying Playground canonical surface"
+$encodedOwnerId = [Uri]::EscapeDataString($AccountOwnerId)
+$playgroundScopeQuery = "accountOwnerType=user&accountOwnerId=$encodedOwnerId"
+$playgroundHeaders = @{
+  "X-XiaoLou-Account-Owner-Type" = "user"
+  "X-XiaoLou-Account-Owner-Id" = $AccountOwnerId
+}
+$playgroundConfig = Invoke-ApiJson "Get" "/api/playground/config?$playgroundScopeQuery" $null $playgroundHeaders
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$playgroundConfig.defaultModel)) "Playground config did not return a default model"
+$playgroundModels = Invoke-ApiJson "Get" "/api/playground/models" $null $playgroundHeaders
+Assert-True ((ConvertTo-Array $playgroundModels.items).Count -ge 1) "Playground models did not return any model"
+$playgroundConversation = Invoke-ApiJson "Post" "/api/playground/conversations" @{
+  accountOwnerType = "user"
+  accountOwnerId = $AccountOwnerId
+  regionCode = "CN"
+  currency = "CNY"
+  title = "Verify Playground $RunId"
+  model = "qwen-plus"
+}
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$playgroundConversation.id)) "Playground conversation was not created"
+$playgroundChat = Invoke-ApiJson "Post" "/api/playground/chat-jobs" @{
+  accountOwnerType = "user"
+  accountOwnerId = $AccountOwnerId
+  regionCode = "CN"
+  currency = "CNY"
+  conversationId = $playgroundConversation.id
+  message = "verify playground canonical $RunId"
+  model = "qwen-plus"
+}
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$playgroundChat.job.id)) "Playground chat job was not created"
+Assert-True ($playgroundChat.conversation.id -eq $playgroundConversation.id) "Playground chat returned an unexpected conversation"
+Assert-True ($playgroundChat.userMessage.role -eq "user") "Playground chat did not persist the user message"
+Assert-True ($playgroundChat.assistantMessage.status -eq "queued") "Playground chat did not persist the queued assistant message"
+$playgroundMessages = Invoke-ApiJson "Get" "/api/playground/conversations/$($playgroundConversation.id)/messages?$playgroundScopeQuery" $null $playgroundHeaders
+Assert-True ((ConvertTo-Array $playgroundMessages.items).Count -ge 2) "Playground messages were not listed"
+$playgroundJobs = Invoke-ApiJson "Get" "/api/playground/chat-jobs?conversationId=$($playgroundConversation.id)&$playgroundScopeQuery" $null $playgroundHeaders
+Assert-True ((ConvertTo-Array $playgroundJobs.items).Count -ge 1) "Playground chat jobs were not listed"
+$playgroundPreference = Invoke-ApiJson "Put" "/api/playground/memories/preference" @{
+  accountOwnerType = "user"
+  accountOwnerId = $AccountOwnerId
+  regionCode = "CN"
+  currency = "CNY"
+  enabled = $true
+}
+Assert-True ($playgroundPreference.enabled -eq $true) "Playground memory preference was not updated"
+$playgroundMemoryKey = "verify-$RunId"
+$playgroundMemory = Invoke-ApiJson "Put" "/api/playground/memories/$playgroundMemoryKey" @{
+  accountOwnerType = "user"
+  accountOwnerId = $AccountOwnerId
+  regionCode = "CN"
+  currency = "CNY"
+  key = $playgroundMemoryKey
+  value = "canonical verifier"
+  enabled = $true
+}
+Assert-True ($playgroundMemory.key -eq $playgroundMemoryKey) "Playground memory was not upserted"
+$playgroundMemories = Invoke-ApiJson "Get" "/api/playground/memories?$playgroundScopeQuery" $null $playgroundHeaders
+Assert-True ((ConvertTo-Array $playgroundMemories.items).Count -ge 1) "Playground memories were not listed"
+Invoke-ApiJson "Delete" "/api/playground/memories/${playgroundMemoryKey}?$playgroundScopeQuery" $null $playgroundHeaders | Out-Null
+Invoke-ApiJson "Delete" "/api/playground/conversations/$($playgroundConversation.id)?$playgroundScopeQuery" $null $playgroundHeaders | Out-Null
+
+Write-Step "Verifying Toolbox canonical surface"
+$toolboxCapabilities = Invoke-ApiJson "Get" "/api/toolbox/capabilities" $null $playgroundHeaders
+Assert-True ((ConvertTo-Array $toolboxCapabilities.items).Count -ge 5) "Toolbox capabilities did not return the canonical tools"
+$systemCapabilities = Invoke-ApiJson "Get" "/api/capabilities" $null $playgroundHeaders
+Assert-True ((ConvertTo-Array $systemCapabilities.toolbox).Count -ge 5) "System capabilities did not expose toolbox"
+$toolboxMotion = Invoke-ApiJson "Post" "/api/toolbox/motion-transfer" @{
+  accountOwnerType = "user"
+  accountOwnerId = $AccountOwnerId
+  regionCode = "CN"
+  currency = "CNY"
+  projectId = "verify-project-$RunId"
+  target = "verify motion transfer"
+  note = "verify toolbox canonical $RunId"
+  idempotencyKey = "$RunId-toolbox-motion"
+}
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$toolboxMotion.taskId)) "Toolbox motion transfer did not create a canonical job"
+Assert-True ($toolboxMotion.job.job_type -eq "motion_transfer") "Toolbox motion transfer returned an unexpected job type"
+Remember-JobAccount $toolboxMotion.job
+$toolboxReverse = Invoke-ApiJson "Post" "/api/toolbox/video-reverse-prompt" @{
+  accountOwnerType = "user"
+  accountOwnerId = $AccountOwnerId
+  regionCode = "CN"
+  currency = "CNY"
+  videoUrl = "https://example.invalid/verify.mp4"
+  prompt = "extract camera motion"
+  model = "qwen3.5-omni-flash"
+  idempotencyKey = "$RunId-toolbox-reverse"
+}
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$toolboxReverse.taskId)) "Toolbox reverse prompt did not create a canonical job"
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$toolboxReverse.prompt)) "Toolbox reverse prompt did not return a queued prompt"
+Remember-JobAccount $toolboxReverse.job
+$toolboxStoryboard = Invoke-ApiJson "Post" "/api/toolbox/storyboard-grid25" @{
+  accountOwnerType = "user"
+  accountOwnerId = $AccountOwnerId
+  regionCode = "CN"
+  currency = "CNY"
+  plotText = "verify 25 grid storyboard $RunId"
+  model = "doubao-seedream-5-0-260128"
+  references = @()
+  idempotencyKey = "$RunId-toolbox-storyboard"
+}
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$toolboxStoryboard.taskId)) "Toolbox storyboard grid did not create a canonical job"
+Assert-True ($toolboxStoryboard.model -eq "doubao-seedream-5-0-260128") "Toolbox storyboard grid did not preserve model"
+Remember-JobAccount $toolboxStoryboard.job
+$toolboxTranslate = Invoke-ApiJson "Post" "/api/toolbox/translate-text" @{
+  accountOwnerType = "user"
+  accountOwnerId = $AccountOwnerId
+  regionCode = "CN"
+  currency = "CNY"
+  text = "verify toolbox translation"
+  targetLang = "zh"
+  idempotencyKey = "$RunId-toolbox-translate"
+}
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$toolboxTranslate.taskId)) "Toolbox translate did not create a canonical job"
+Assert-True ($toolboxTranslate.targetLang -eq "zh") "Toolbox translate did not preserve targetLang"
+Remember-JobAccount $toolboxTranslate.job
 
 Write-Step "Verifying provider health and outbox lease"
 $provider = Invoke-ApiJson "Put" "/api/providers/health" @{

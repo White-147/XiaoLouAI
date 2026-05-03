@@ -47,8 +47,13 @@ Windows smoke 还会自动发现 `src/routes.js` 中所有 `POST` / `PUT` / `PAT
 
 当前 P2 状态：前端 legacy write route 已迁移或退役；`/api/projects*`、
 `/api/canvas-projects*`、`/api/agent-canvas/projects*`、`/api/create/images|videos`
-已经有第一批 `.NET` canonical 源码实现。生产面应继续关闭 core-api 的这些旧写入口，
-不要为了让前端可用而恢复旧 Node 主写。
+已经有第一批 `.NET` canonical 实现，并已发布到运行中的 Windows 服务。第二批
+identity/config 的 `/api/auth*`、`/api/me`、`/api/organizations/*/members`、
+`/api/api-center*` 也已在 `.NET` Control API 实现并发布。第三批 project 相邻
+assets/storyboards/videos/dubbings/exports 也已发布并通过 4100 runtime smoke。admin/system 的
+`/api/admin/pricing-rules`、`/api/admin/orders` 和
+`/api/enterprise-applications*` 已在 `.NET` Control API canonical 化；手工 admin recharge
+review 继续退役并返回 410。生产面应继续关闭 core-api 的这些旧写入口，不要为了让前端可用而恢复旧 Node 主写。
 
 ## 快速开始
 
@@ -94,9 +99,11 @@ CORE_API_UPLOAD_DIR=./uploads
 切换后，PostgreSQL 是唯一运行时写入目标。SQLite 只作为停止写入后的迁移源和
 回滚备份。第一阶段 PostgreSQL 会把完整应用快照保存在
 `legacy_state_snapshot.snapshot_value`，同时把高价值实体投影到显式管理表，
-例如 `users`、`wallets`、`projects`、`project_assets`、`storyboards`、
-`videos`、`dubbings`、`tasks`、`canvas_projects`、`create_studio_*` 和
-`playground_*`。video-replace job metadata 会迁到 `video_replace_jobs`，
+例如 `users`、`wallets`、`projects`、`project_assets`、`project_storyboards`、
+`project_videos`、`project_dubbings`、`project_exports`、`tasks`、`canvas_projects`、
+`create_studio_*` 和 `playground_*`。旧 `storyboards`、`videos`、`dubbings`
+可以幂等投影到新的 `project_*` canonical 表；create-studio 媒体输出仍要求
+`media_objects` provenance。video-replace job metadata 会迁到 `video_replace_jobs`，
 Jaaz 画布、聊天和 workflow 数据会迁到 `jaaz_*` 表。
 
 初始化本地管理账号和数据库：
@@ -206,9 +213,10 @@ npm run verify:legacy-canonical-projection
 ```
 
 该脚本会检查 legacy snapshot/table 是否存在、canonical 表是否齐全、旧任务是否仍有
-非终态行、充值订单/支付事件是否已映射到 canonical 支付表，以及 wallet ledger 是否具备
-canonical 账务字段。`-AllowMissingLegacy` 只允许在没有真实 legacy source 的本机
-canonical smoke 库上直接调用 PowerShell 脚本时使用，不作为生产证据。
+非终态行、充值订单/支付事件是否已映射到 canonical 支付表、wallet ledger 是否具备
+canonical 账务字段、project 相邻旧行是否已投到 `project_*` 表，以及 create-studio
+媒体输出是否具备 `media_objects` provenance。`-AllowMissingLegacy` 只允许在没有真实
+legacy source 的本机 canonical smoke 库上直接调用 PowerShell 脚本时使用，不作为生产证据。
 
 如果报告显示 account/job/wallet projection 缺失，先生成 dry-run 计划，再执行：
 
@@ -235,6 +243,8 @@ Invoke-RestMethod http://127.0.0.1:4100/api/projects/proj_demo_001/overview
 Invoke-RestMethod http://127.0.0.1:4100/api/toolbox
 Invoke-RestMethod -Method Post http://127.0.0.1:4100/api/demo/reset
 ```
+
+Toolbox canonical 状态：`/api/capabilities` 和 `/api/toolbox*` 已由 `.NET` Control API 提供，数据进入 `toolbox_capabilities`、`toolbox_runs` 与 canonical `jobs`。`core-api` 的工具箱相关代码继续只作为迁移期参考，不要为了前端恢复旧 Node 写入口。
 
 ## 说明
 
@@ -268,3 +278,7 @@ debug，不属于默认运行栈。
 ## README 语言维护规则
 
 请保持本文件与 `README.md` 同步。后续修改 README 时必须同时更新中英文版本。
+
+## Playground canonical 更新 (2026-05-03)
+
+Playground 已在 `.NET` Control API canonical 化：`/api/playground/config|models|conversations|chat-jobs|memories` 已发布到真实 `http://127.0.0.1:4100` Windows service。`core-api` 继续只作为迁移期只读兼容面存在，不要为了 Playground 恢复旧 Node 写入口；Playground 会话、消息、记忆偏好和记忆写入 PostgreSQL canonical 表，聊天任务通过 canonical `jobs` 入队。

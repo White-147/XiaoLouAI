@@ -39,9 +39,10 @@ if "%CORE_API_RUNNING%"=="1" (
 set "CORE_DIR=%ROOT%\core-api"
 set "CORE_LOG=%CORE_DIR%\core-api.log"
 set "CORE_ERR=%CORE_DIR%\core-api.err.log"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=Start-Process -FilePath $env:NODE_BIN -ArgumentList 'src/server.js' -WorkingDirectory $env:CORE_DIR -RedirectStandardOutput $env:CORE_LOG -RedirectStandardError $env:CORE_ERR -WindowStyle Hidden -PassThru; Write-Host ('[backend] hidden core-api PID=' + $p.Id)"
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$p=Start-Process -FilePath $env:NODE_BIN -ArgumentList 'src/server.js' -WorkingDirectory $env:CORE_DIR -RedirectStandardOutput $env:CORE_LOG -RedirectStandardError $env:CORE_ERR -WindowStyle Hidden -PassThru; Write-Host ('[backend] hidden core-api PID=' + $p.Id)"
 if errorlevel 1 exit /b 1
 
 echo [backend] core-api started on port 4100.
 echo [backend] All video-replace routes (/api/video-replace, /vr-*) are handled natively by core-api.
 echo [backend] No separate sidecar process is required.
+exit /b 0

@@ -11,7 +11,7 @@ set "REG_NAME=XiaolouAI"
 
 echo.
 echo [autostart] 注册 %REG_KEY%\%REG_NAME%
-reg add "%REG_KEY%" /v "%REG_NAME%" /t REG_SZ /d "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"%PS1%\"" /f
+reg add "%REG_KEY%" /v "%REG_NAME%" /t REG_SZ /d "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File \"%PS1%\"" /f
 
 if %errorlevel%==0 (
     echo [autostart] 成功：下次 Administrator 登录时将自动后台启动所有服务。
@@ -26,4 +26,4 @@ if %errorlevel%==0 (
     echo [autostart] 失败，请检查权限后重试。
 )
 
-pause
+exit /b %ERRORLEVEL%

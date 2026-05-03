@@ -14,6 +14,20 @@ const DEFAULT_PERMISSIONS = Object.freeze([
   "canvas:write",
   "create:read",
   "create:write",
+  "identity:read",
+  "identity:write",
+  "organization:read",
+  "organization:write",
+  "api-center:read",
+  "api-center:write",
+  "admin:read",
+  "admin:write",
+  "enterprise-applications:read",
+  "enterprise-applications:write",
+  "playground:read",
+  "playground:write",
+  "toolbox:read",
+  "toolbox:write",
 ]);
 
 const DEFAULT_TTL_SECONDS = 60 * 60;

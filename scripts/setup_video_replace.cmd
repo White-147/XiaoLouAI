@@ -428,7 +428,7 @@ if not exist "%CUDA_CACHE_DIR%" mkdir "%CUDA_CACHE_DIR%" >nul 2>&1
 if not exist "%CUDA_NET_EXE%" (
     echo.
     echo [step] Download CUDA 12.4.1 network installer
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri '%CUDA124_URL%' -OutFile '%CUDA_NET_EXE%'"
+    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri '%CUDA124_URL%' -OutFile '%CUDA_NET_EXE%'"
     if errorlevel 1 (
         echo [error] Failed to download CUDA 12.4.1 network installer.
         exit /b 1

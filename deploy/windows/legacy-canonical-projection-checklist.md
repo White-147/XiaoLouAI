@@ -10,6 +10,7 @@ PostgreSQL-first.
 Canonical source of truth after cutover:
 
 - `accounts`, `users`, `organizations`, `organization_memberships`
+- `api_center_configs`, `pricing_rules`, `enterprise_applications`
 - `jobs`, `job_attempts`
 - `payment_orders`, `payment_callbacks`
 - `wallet_ledger`, `wallet_balances`
@@ -23,7 +24,8 @@ Legacy sources to freeze, audit, or project:
 - `wallet_recharge_orders`, `payment_events`
 - `wallets`, `wallet_ledger`
 - project/media output tables or snapshot fields such as `project_assets`,
-  `videos`, `dubbings`, `create_studio_images`, and `create_studio_videos`
+  `storyboards`, `videos`, `dubbings`, `create_studio_images`, and
+  `create_studio_videos`
 
 `core-api/` may run only as a read-only compatibility process during this
 phase. It must not write legacy snapshots or projection tables into the
@@ -44,6 +46,8 @@ source, missing legacy evidence is reported under `evidence_pending` rather
 than as an engineering blocker. Frontend legacy route literals that are guarded
 from mutating network calls are reported under `review_items`. The hard gate is
 still the absence of `blockers` and live frontend legacy write candidates.
+API-center provider health gaps are also folded into `evidence_pending` for
+routine local audits; they become operator evidence for real vendor routing.
 
 Run this before any legacy write shutdown:
 
@@ -64,6 +68,54 @@ command. Routine evidence gaps should be reported under `evidence_pending`, and
 guarded legacy literals should be reported under `review_items`; top-level
 `warnings` are reserved for engineering issues that still need operator
 attention before cutover.
+
+## Real Legacy Dump Strict Rerun
+
+When a real PostgreSQL legacy dump is available, do not run verifier cleanup
+directly on the live database. Restore the dump into a temporary staging
+database, run projection dry-run/evidence checks there, and keep the report as
+cutover evidence:
+
+```powershell
+$env:PGPASSWORD = "<restore-admin-password>"
+D:\code\XiaoLouAI\scripts\windows\verify-legacy-dump-cutover.ps1 `
+  -DumpFile D:\code\XiaoLouAI\.runtime\xiaolou-backups\incoming\legacy.dump `
+  -Username postgres
+```
+
+The script computes a SHA-256 evidence hash for the dump, restores it into a
+`xiaolou_legacy_verify_*` database, runs `project-legacy-to-canonical.ps1`
+dry-run, runs `verify-legacy-canonical-projection.ps1 -LegacyWritesFrozen` in
+strict mode, then runs the wallet ledger audit. The temporary database is
+dropped by default; pass `-KeepDatabase` only for a named operator inspection.
+
+If the restored dump contains legacy rows that still need projection before the
+strict verifier can pass, execute projection only inside the temporary
+verification database:
+
+```powershell
+$env:PGPASSWORD = "<restore-admin-password>"
+D:\code\XiaoLouAI\scripts\windows\verify-legacy-dump-cutover.ps1 `
+  -DumpFile D:\code\XiaoLouAI\.runtime\xiaolou-backups\incoming\legacy.dump `
+  -Username postgres `
+  -ExecuteProjection
+```
+
+`-ExecuteProjection` is refused unless the target database name starts with
+`xiaolou_legacy_verify_`. This keeps production cleanup separated from evidence
+generation. The restore account must be allowed to create and drop temporary
+databases. The consolidated P2 audit can also run this step when a dump is
+available:
+
+```powershell
+$env:PGPASSWORD = "<restore-admin-password>"
+D:\code\XiaoLouAI\scripts\windows\verify-p2-cutover-audit.ps1 `
+  -LegacyDumpFile D:\code\XiaoLouAI\.runtime\xiaolou-backups\incoming\legacy.dump `
+  -LegacyDumpUsername postgres `
+  -StrictLegacySource `
+  -LegacyWritesFrozen `
+  -FailOnFrontendLegacyWriteDependency
+```
 
 ## Projection Dry Run
 
@@ -129,6 +181,28 @@ verifier must show source-specific canonical job proof for both rows. This
 prevents unrelated `tasks` projections from accidentally satisfying the
 provider/video job gate.
 
+## API-center Vendor Integrity Gate
+
+`verify-legacy-canonical-projection.ps1` also reports `apiCenterHealth` for the
+canonical API vendor management surface. This is a read-only check against
+`api_center_configs` and `provider_health`.
+
+The verifier blocks cutover when:
+
+- API-center JSON is invalid or missing the canonical `vendors` / `defaults`
+  sections.
+- Vendor configs contain raw secret-looking fields such as `apiKey`, `token`,
+  `secret`, `privateKey`, or `password`. Canonical rows may store state flags
+  and `apiKeyHash`, but not plaintext secrets.
+- Vendor ids or model ids are invalid, duplicated, or ambiguous.
+- Default model assignments point at missing or disabled models.
+- `apiKeyHash` exists while `apiKeyConfigured=false`.
+
+Configured vendors that do not yet have `provider_health` evidence are reported
+as warnings. Keep real vendor routing gated until the provider health records
+exist; this warning does not block local canonical engineering runs without real
+provider material.
+
 ## Frontend and Reverse Proxy Dependency Audit
 
 Run this after changing frontend API wiring or Windows public-surface examples:
@@ -159,8 +233,11 @@ or explicitly retired behind the same guard.
 | `wallet_recharge_orders` | `payment_orders` | Paid/succeeded legacy orders are represented by `payment_orders.legacy_recharge_order_id`; provider trade uniqueness still holds. |
 | `payment_events` | `payment_callbacks` | Verified legacy events are represented by canonical `(provider, event_id)` callbacks; duplicate event bodies remain rejected. |
 | `wallets`, `wallet_ledger` | `wallet_ledger`, `wallet_balances` | Canonical ledger rows have `account_id`, `currency`, `idempotency_key`, and `immutable=true`; `wallet_balances` rebuild/audit has zero mismatch. |
-| project assets and generated output URLs | `media_objects` | Permanent object-storage keys exist; local paths are cache/temp only; legacy ids are retained in `media_objects.data`. |
+| `project_assets` | `project_assets` canonical columns | `project_id`, `asset_type`, media URLs, and `data` are present; JSON payload values do not conflict with canonical columns. |
+| `storyboards`, `videos`, `dubbings` | `project_storyboards`, `project_videos`, `project_dubbings` | Every legacy row with `project_id` is represented in the matching `project_*` table; missing `project_id`, orphan project/storyboard links, and JSON/column conflicts are blockers. |
+| create-studio generated output URLs | `media_objects` | Permanent object-storage keys exist; local paths are cache/temp only; legacy ids are retained in `media_objects.data`. |
 | legacy outbox/event side effects | `outbox_events` | Pending events are replayable and do not become a second source of truth. |
+| API vendor configuration | `api_center_configs`, `provider_health` | Vendor config JSON contains no plaintext secret fields; defaults point at enabled models; configured vendors have provider health evidence before real routing. |
 
 ## Cutover Steps
 
@@ -199,6 +276,12 @@ D:\code\XiaoLouAI\.runtime\app\scripts\windows\audit-wallet-ledger.ps1 -FailOnMi
   fields or has `immutable=false`.
 - Legacy media output rows are not represented by canonical `media_objects`
   with legacy provenance and permanent object keys.
+- Project-adjacent legacy rows are missing `project_id`, are not represented in
+  `project_*` canonical tables, reference orphan project/storyboard/job rows,
+  or preserve JSON fields that conflict with canonical columns.
+- API-center vendor config stores plaintext secret-looking fields, has invalid
+  JSON, invalid/duplicated vendor or model ids, or defaults that point at
+  missing/disabled models.
 - Wallet audit or replay reports any mismatch.
 - `core-api/` is not in read-only mode while exposed to production traffic.
 

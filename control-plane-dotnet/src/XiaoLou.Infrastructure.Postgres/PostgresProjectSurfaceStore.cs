@@ -194,23 +194,28 @@ public sealed class PostgresProjectSurfaceStore(NpgsqlDataSource dataSource, Pos
             return null;
         }
 
+        var assets = await ListAssetsAsync(projectId, null, cancellationToken);
+        var storyboards = await ListStoryboardsAsync(projectId, null, cancellationToken);
+        var videos = await ListVideosAsync(projectId, cancellationToken);
+        var dubbings = await ListDubbingsAsync(projectId, cancellationToken);
+
         return new Dictionary<string, object?>
         {
             ["project"] = new Dictionary<string, object?>(project)
             {
                 ["settings"] = await GetSettingsAsync(projectId, cancellationToken),
                 ["script"] = await GetScriptAsync(projectId, cancellationToken),
-                ["assetCount"] = 0,
-                ["storyboardCount"] = 0,
-                ["videoCount"] = 0,
-                ["dubbingCount"] = 0,
+                ["assetCount"] = assets.Count,
+                ["storyboardCount"] = storyboards.Count,
+                ["videoCount"] = videos.Count,
+                ["dubbingCount"] = dubbings.Count,
             },
             ["settings"] = await GetSettingsAsync(projectId, cancellationToken),
             ["script"] = await GetScriptAsync(projectId, cancellationToken),
-            ["assets"] = Array.Empty<object>(),
-            ["storyboards"] = Array.Empty<object>(),
-            ["videos"] = Array.Empty<object>(),
-            ["dubbings"] = Array.Empty<object>(),
+            ["assets"] = assets,
+            ["storyboards"] = storyboards,
+            ["videos"] = videos,
+            ["dubbings"] = dubbings,
             ["timeline"] = await GetTimelineAsync(projectId, cancellationToken),
             ["tasks"] = Array.Empty<object>(),
         };
@@ -353,6 +358,429 @@ public sealed class PostgresProjectSurfaceStore(NpgsqlDataSource dataSource, Pos
         command.Parameters.AddWithValue("now", NpgsqlDbType.Text, now);
         return ToTimeline(await PostgresRows.ReadSingleAsync(command, cancellationToken)
             ?? throw new InvalidOperationException("Failed to update timeline."));
+    }
+
+    public async Task<IReadOnlyList<Dictionary<string, object?>>> ListAssetsAsync(
+        string projectId,
+        string? assetType,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand
+        {
+            Connection = connection,
+            CommandText =
+                """
+                SELECT
+                  *,
+                  data::text AS data_json,
+                  source_metadata::text AS source_metadata_json,
+                  reference_image_urls::text AS reference_image_urls_json
+                FROM project_assets
+                WHERE project_id = @projectId
+                """,
+        };
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        if (!string.IsNullOrWhiteSpace(assetType))
+        {
+            command.CommandText += " AND asset_type = @assetType";
+            command.Parameters.AddWithValue("assetType", NpgsqlDbType.Text, assetType.Trim());
+        }
+        command.CommandText += " ORDER BY updated_at DESC, created_at DESC LIMIT 500";
+        return (await PostgresRows.ReadManyAsync(command, cancellationToken)).Select(ToAsset).ToArray();
+    }
+
+    public async Task<Dictionary<string, object?>?> GetAssetAsync(
+        string projectId,
+        string assetId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              *,
+              data::text AS data_json,
+              source_metadata::text AS source_metadata_json,
+              reference_image_urls::text AS reference_image_urls_json
+            FROM project_assets
+            WHERE project_id = @projectId AND id = @id
+            """,
+            connection);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Text, assetId);
+        var row = await PostgresRows.ReadSingleAsync(command, cancellationToken);
+        return row is null ? null : ToAsset(row);
+    }
+
+    public async Task<Dictionary<string, object?>?> UpsertAssetAsync(
+        string projectId,
+        string? assetId,
+        JsonElement request,
+        CancellationToken cancellationToken)
+    {
+        var now = NowIso();
+        var id = NormalizeBlank(assetId) ?? JsonText(request, "id") ?? CreateId("asset");
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO project_assets (
+              id, project_id, asset_type, name, description, preview_url,
+              media_kind, media_url, source_task_id, source_module, source_metadata,
+              generation_prompt, reference_image_urls, image_status, image_model,
+              aspect_ratio, negative_prompt, scope, data, created_at, updated_at
+            )
+            VALUES (
+              @id, @projectId, @assetType, @name, @description, @previewUrl,
+              @mediaKind, @mediaUrl, @sourceTaskId, @sourceModule, CAST(@sourceMetadata AS jsonb),
+              @generationPrompt, CAST(@referenceImageUrls AS jsonb), @imageStatus, @imageModel,
+              @aspectRatio, @negativePrompt, @scope, CAST(@data AS jsonb), @now, @now
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              asset_type = COALESCE(EXCLUDED.asset_type, project_assets.asset_type),
+              name = COALESCE(EXCLUDED.name, project_assets.name),
+              description = COALESCE(EXCLUDED.description, project_assets.description),
+              preview_url = COALESCE(EXCLUDED.preview_url, project_assets.preview_url),
+              media_kind = COALESCE(EXCLUDED.media_kind, project_assets.media_kind),
+              media_url = COALESCE(EXCLUDED.media_url, project_assets.media_url),
+              source_task_id = COALESCE(EXCLUDED.source_task_id, project_assets.source_task_id),
+              source_module = COALESCE(EXCLUDED.source_module, project_assets.source_module),
+              source_metadata = COALESCE(EXCLUDED.source_metadata, project_assets.source_metadata),
+              generation_prompt = COALESCE(EXCLUDED.generation_prompt, project_assets.generation_prompt),
+              reference_image_urls = COALESCE(EXCLUDED.reference_image_urls, project_assets.reference_image_urls),
+              image_status = COALESCE(EXCLUDED.image_status, project_assets.image_status),
+              image_model = COALESCE(EXCLUDED.image_model, project_assets.image_model),
+              aspect_ratio = COALESCE(EXCLUDED.aspect_ratio, project_assets.aspect_ratio),
+              negative_prompt = COALESCE(EXCLUDED.negative_prompt, project_assets.negative_prompt),
+              scope = COALESCE(EXCLUDED.scope, project_assets.scope),
+              data = project_assets.data || EXCLUDED.data,
+              updated_at = EXCLUDED.updated_at
+            WHERE project_assets.project_id = @projectId
+            RETURNING
+              *,
+              data::text AS data_json,
+              source_metadata::text AS source_metadata_json,
+              reference_image_urls::text AS reference_image_urls_json
+            """,
+            connection);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Text, id);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        command.Parameters.AddWithValue("assetType", NpgsqlDbType.Text, DbNullable(JsonText(request, "assetType")));
+        command.Parameters.AddWithValue("name", NpgsqlDbType.Text, DbNullable(JsonText(request, "name")));
+        command.Parameters.AddWithValue("description", NpgsqlDbType.Text, DbNullable(JsonText(request, "description")));
+        command.Parameters.AddWithValue("previewUrl", NpgsqlDbType.Text, DbNullable(JsonText(request, "previewUrl")));
+        command.Parameters.AddWithValue("mediaKind", NpgsqlDbType.Text, DbNullable(JsonText(request, "mediaKind")));
+        command.Parameters.AddWithValue("mediaUrl", NpgsqlDbType.Text, DbNullable(JsonText(request, "mediaUrl")));
+        command.Parameters.AddWithValue("sourceTaskId", NpgsqlDbType.Text, DbNullable(JsonText(request, "sourceTaskId")));
+        command.Parameters.AddWithValue("sourceModule", NpgsqlDbType.Text, DbNullable(JsonText(request, "sourceModule")));
+        command.Parameters.AddWithValue("sourceMetadata", NpgsqlDbType.Jsonb, DbNullable(JsonRawOrNull(request, "sourceMetadata")));
+        command.Parameters.AddWithValue("generationPrompt", NpgsqlDbType.Text, DbNullable(JsonText(request, "generationPrompt")));
+        command.Parameters.AddWithValue("referenceImageUrls", NpgsqlDbType.Jsonb, DbNullable(JsonRawOrNull(request, "referenceImageUrls")));
+        command.Parameters.AddWithValue("imageStatus", NpgsqlDbType.Text, DbNullable(JsonText(request, "imageStatus")));
+        command.Parameters.AddWithValue("imageModel", NpgsqlDbType.Text, DbNullable(JsonText(request, "imageModel")));
+        command.Parameters.AddWithValue("aspectRatio", NpgsqlDbType.Text, DbNullable(JsonText(request, "aspectRatio")));
+        command.Parameters.AddWithValue("negativePrompt", NpgsqlDbType.Text, DbNullable(JsonText(request, "negativePrompt")));
+        command.Parameters.AddWithValue("scope", NpgsqlDbType.Text, DbNullable(JsonText(request, "scope")));
+        command.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, JsonData(request));
+        command.Parameters.AddWithValue("now", NpgsqlDbType.Text, now);
+        var row = await PostgresRows.ReadSingleAsync(command, cancellationToken);
+        return row is null ? null : ToAsset(row);
+    }
+
+    public async Task<IReadOnlyList<Dictionary<string, object?>>> ListStoryboardsAsync(
+        string projectId,
+        int? episodeNo,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand
+        {
+            Connection = connection,
+            CommandText =
+                """
+                SELECT *, data::text AS data_json, asset_ids::text AS asset_ids_json
+                FROM project_storyboards
+                WHERE project_id = @projectId
+                """,
+        };
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        if (episodeNo is not null)
+        {
+            command.CommandText += " AND episode_no = @episodeNo";
+            command.Parameters.AddWithValue("episodeNo", NpgsqlDbType.Integer, episodeNo.Value);
+        }
+        command.CommandText += " ORDER BY COALESCE(episode_no, 0), COALESCE(shot_no, 0), updated_at DESC LIMIT 500";
+        return (await PostgresRows.ReadManyAsync(command, cancellationToken)).Select(ToStoryboard).ToArray();
+    }
+
+    public async Task<Dictionary<string, object?>?> GetStoryboardAsync(
+        string projectId,
+        string storyboardId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT *, data::text AS data_json, asset_ids::text AS asset_ids_json
+            FROM project_storyboards
+            WHERE project_id = @projectId AND id = @id
+            """,
+            connection);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Text, storyboardId);
+        var row = await PostgresRows.ReadSingleAsync(command, cancellationToken);
+        return row is null ? null : ToStoryboard(row);
+    }
+
+    public async Task<Dictionary<string, object?>?> UpsertStoryboardAsync(
+        string projectId,
+        string storyboardId,
+        JsonElement request,
+        CancellationToken cancellationToken)
+    {
+        var now = NowIso();
+        var id = NormalizeBlank(storyboardId) ?? JsonText(request, "id") ?? CreateId("story");
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO project_storyboards (
+              id, project_id, shot_no, episode_no, title, script, image_status,
+              video_status, duration_seconds, prompt_summary, image_url,
+              asset_ids, data, created_at, updated_at
+            )
+            VALUES (
+              @id, @projectId, @shotNo, @episodeNo, @title, @script, @imageStatus,
+              @videoStatus, @durationSeconds, @promptSummary, @imageUrl,
+              CAST(@assetIds AS jsonb), CAST(@data AS jsonb), @now, @now
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              shot_no = COALESCE(EXCLUDED.shot_no, project_storyboards.shot_no),
+              episode_no = COALESCE(EXCLUDED.episode_no, project_storyboards.episode_no),
+              title = COALESCE(EXCLUDED.title, project_storyboards.title),
+              script = COALESCE(EXCLUDED.script, project_storyboards.script),
+              image_status = COALESCE(EXCLUDED.image_status, project_storyboards.image_status),
+              video_status = COALESCE(EXCLUDED.video_status, project_storyboards.video_status),
+              duration_seconds = COALESCE(EXCLUDED.duration_seconds, project_storyboards.duration_seconds),
+              prompt_summary = COALESCE(EXCLUDED.prompt_summary, project_storyboards.prompt_summary),
+              image_url = COALESCE(EXCLUDED.image_url, project_storyboards.image_url),
+              asset_ids = COALESCE(EXCLUDED.asset_ids, project_storyboards.asset_ids),
+              data = project_storyboards.data || EXCLUDED.data,
+              updated_at = EXCLUDED.updated_at
+            WHERE project_storyboards.project_id = @projectId
+            RETURNING *, data::text AS data_json, asset_ids::text AS asset_ids_json
+            """,
+            connection);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Text, id);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        command.Parameters.AddWithValue("shotNo", NpgsqlDbType.Integer, DbNullable(JsonInt(request, "shotNo")));
+        command.Parameters.AddWithValue("episodeNo", NpgsqlDbType.Integer, DbNullable(JsonInt(request, "episodeNo")));
+        command.Parameters.AddWithValue("title", NpgsqlDbType.Text, DbNullable(JsonText(request, "title")));
+        command.Parameters.AddWithValue("script", NpgsqlDbType.Text, DbNullable(JsonText(request, "script")));
+        command.Parameters.AddWithValue("imageStatus", NpgsqlDbType.Text, DbNullable(JsonText(request, "imageStatus")));
+        command.Parameters.AddWithValue("videoStatus", NpgsqlDbType.Text, DbNullable(JsonText(request, "videoStatus")));
+        command.Parameters.AddWithValue("durationSeconds", NpgsqlDbType.Numeric, DbNullable(JsonDecimal(request, "durationSeconds")));
+        command.Parameters.AddWithValue("promptSummary", NpgsqlDbType.Text, DbNullable(JsonText(request, "promptSummary")));
+        command.Parameters.AddWithValue("imageUrl", NpgsqlDbType.Text, DbNullable(JsonText(request, "imageUrl")));
+        command.Parameters.AddWithValue("assetIds", NpgsqlDbType.Jsonb, DbNullable(JsonRawOrNull(request, "assetIds")));
+        command.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, JsonData(request));
+        command.Parameters.AddWithValue("now", NpgsqlDbType.Text, now);
+        var row = await PostgresRows.ReadSingleAsync(command, cancellationToken);
+        return row is null ? null : ToStoryboard(row);
+    }
+
+    public async Task<IReadOnlyList<Dictionary<string, object?>>> ListVideosAsync(
+        string projectId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT *, data::text AS data_json
+            FROM project_videos
+            WHERE project_id = @projectId
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 500
+            """,
+            connection);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        return (await PostgresRows.ReadManyAsync(command, cancellationToken)).Select(ToVideo).ToArray();
+    }
+
+    public async Task<Dictionary<string, object?>?> UpsertVideoAsync(
+        string projectId,
+        string videoId,
+        JsonElement request,
+        CancellationToken cancellationToken)
+    {
+        var now = NowIso();
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO project_videos (
+              id, project_id, storyboard_id, version, status, duration_seconds,
+              video_url, thumbnail_url, data, created_at, updated_at
+            )
+            VALUES (
+              @id, @projectId, @storyboardId, @version, @status, @durationSeconds,
+              @videoUrl, @thumbnailUrl, CAST(@data AS jsonb), @now, @now
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              storyboard_id = COALESCE(EXCLUDED.storyboard_id, project_videos.storyboard_id),
+              version = COALESCE(EXCLUDED.version, project_videos.version),
+              status = COALESCE(EXCLUDED.status, project_videos.status),
+              duration_seconds = COALESCE(EXCLUDED.duration_seconds, project_videos.duration_seconds),
+              video_url = COALESCE(EXCLUDED.video_url, project_videos.video_url),
+              thumbnail_url = COALESCE(EXCLUDED.thumbnail_url, project_videos.thumbnail_url),
+              data = project_videos.data || EXCLUDED.data,
+              updated_at = EXCLUDED.updated_at
+            WHERE project_videos.project_id = @projectId
+            RETURNING *, data::text AS data_json
+            """,
+            connection);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Text, NormalizeBlank(videoId) ?? JsonText(request, "id") ?? CreateId("video"));
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        command.Parameters.AddWithValue("storyboardId", NpgsqlDbType.Text, DbNullable(JsonText(request, "storyboardId")));
+        command.Parameters.AddWithValue("version", NpgsqlDbType.Integer, DbNullable(JsonInt(request, "version")));
+        command.Parameters.AddWithValue("status", NpgsqlDbType.Text, DbNullable(JsonText(request, "status")));
+        command.Parameters.AddWithValue("durationSeconds", NpgsqlDbType.Numeric, DbNullable(JsonDecimal(request, "durationSeconds")));
+        command.Parameters.AddWithValue("videoUrl", NpgsqlDbType.Text, DbNullable(JsonText(request, "videoUrl")));
+        command.Parameters.AddWithValue("thumbnailUrl", NpgsqlDbType.Text, DbNullable(JsonText(request, "thumbnailUrl")));
+        command.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, JsonData(request));
+        command.Parameters.AddWithValue("now", NpgsqlDbType.Text, now);
+        var row = await PostgresRows.ReadSingleAsync(command, cancellationToken);
+        return row is null ? null : ToVideo(row);
+    }
+
+    public async Task<IReadOnlyList<Dictionary<string, object?>>> ListDubbingsAsync(
+        string projectId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT *, data::text AS data_json
+            FROM project_dubbings
+            WHERE project_id = @projectId
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 500
+            """,
+            connection);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        return (await PostgresRows.ReadManyAsync(command, cancellationToken)).Select(ToDubbing).ToArray();
+    }
+
+    public async Task<Dictionary<string, object?>?> UpsertDubbingAsync(
+        string projectId,
+        string dubbingId,
+        JsonElement request,
+        CancellationToken cancellationToken)
+    {
+        var now = NowIso();
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO project_dubbings (
+              id, project_id, storyboard_id, speaker_name, voice_preset,
+              text_content, status, audio_url, data, created_at, updated_at
+            )
+            VALUES (
+              @id, @projectId, @storyboardId, @speakerName, @voicePreset,
+              @textContent, @status, @audioUrl, CAST(@data AS jsonb), @now, @now
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              storyboard_id = COALESCE(EXCLUDED.storyboard_id, project_dubbings.storyboard_id),
+              speaker_name = COALESCE(EXCLUDED.speaker_name, project_dubbings.speaker_name),
+              voice_preset = COALESCE(EXCLUDED.voice_preset, project_dubbings.voice_preset),
+              text_content = COALESCE(EXCLUDED.text_content, project_dubbings.text_content),
+              status = COALESCE(EXCLUDED.status, project_dubbings.status),
+              audio_url = COALESCE(EXCLUDED.audio_url, project_dubbings.audio_url),
+              data = project_dubbings.data || EXCLUDED.data,
+              updated_at = EXCLUDED.updated_at
+            WHERE project_dubbings.project_id = @projectId
+            RETURNING *, data::text AS data_json
+            """,
+            connection);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Text, NormalizeBlank(dubbingId) ?? JsonText(request, "id") ?? CreateId("dub"));
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        command.Parameters.AddWithValue("storyboardId", NpgsqlDbType.Text, DbNullable(JsonText(request, "storyboardId")));
+        command.Parameters.AddWithValue("speakerName", NpgsqlDbType.Text, DbNullable(JsonText(request, "speakerName")));
+        command.Parameters.AddWithValue("voicePreset", NpgsqlDbType.Text, DbNullable(JsonText(request, "voicePreset")));
+        command.Parameters.AddWithValue("textContent", NpgsqlDbType.Text, DbNullable(JsonText(request, "text")));
+        command.Parameters.AddWithValue("status", NpgsqlDbType.Text, DbNullable(JsonText(request, "status")));
+        command.Parameters.AddWithValue("audioUrl", NpgsqlDbType.Text, DbNullable(JsonText(request, "audioUrl")));
+        command.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, JsonData(request));
+        command.Parameters.AddWithValue("now", NpgsqlDbType.Text, now);
+        var row = await PostgresRows.ReadSingleAsync(command, cancellationToken);
+        return row is null ? null : ToDubbing(row);
+    }
+
+    public async Task<IReadOnlyList<Dictionary<string, object?>>> ListExportsAsync(
+        string projectId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT *, data::text AS data_json
+            FROM project_exports
+            WHERE project_id = @projectId
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 100
+            """,
+            connection);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        return (await PostgresRows.ReadManyAsync(command, cancellationToken)).Select(ToExport).ToArray();
+    }
+
+    public async Task<Dictionary<string, object?>?> CreateExportAsync(
+        string projectId,
+        JsonElement request,
+        Guid? jobId,
+        CancellationToken cancellationToken)
+    {
+        var now = NowIso();
+        var id = JsonText(request, "id") ?? CreateId("export");
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO project_exports (id, project_id, format, status, job_id, output_url, data, created_at, updated_at)
+            VALUES (@id, @projectId, @format, @status, @jobId, @outputUrl, CAST(@data AS jsonb), @now, @now)
+            ON CONFLICT (id) DO UPDATE SET
+              format = COALESCE(EXCLUDED.format, project_exports.format),
+              status = COALESCE(EXCLUDED.status, project_exports.status),
+              job_id = COALESCE(EXCLUDED.job_id, project_exports.job_id),
+              output_url = COALESCE(EXCLUDED.output_url, project_exports.output_url),
+              data = project_exports.data || EXCLUDED.data,
+              updated_at = EXCLUDED.updated_at
+            WHERE project_exports.project_id = @projectId
+            RETURNING *, data::text AS data_json
+            """,
+            connection);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Text, id);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        command.Parameters.AddWithValue("format", NpgsqlDbType.Text, JsonText(request, "format") ?? "mp4");
+        command.Parameters.AddWithValue("status", NpgsqlDbType.Text, JsonText(request, "status") ?? "queued");
+        command.Parameters.AddWithValue("jobId", NpgsqlDbType.Uuid, DbNullable(jobId));
+        command.Parameters.AddWithValue("outputUrl", NpgsqlDbType.Text, DbNullable(JsonText(request, "outputUrl")));
+        command.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, JsonData(request));
+        command.Parameters.AddWithValue("now", NpgsqlDbType.Text, now);
+        var row = await PostgresRows.ReadSingleAsync(command, cancellationToken);
+        return row is null ? null : ToExport(row);
+    }
+
+    public async Task<bool> DeleteProjectItemAsync(
+        string tableName,
+        string projectId,
+        string itemId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            $"DELETE FROM {tableName} WHERE project_id = @projectId AND id = @id",
+            connection);
+        command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Text, itemId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
     public async Task<IReadOnlyList<Dictionary<string, object?>>> ListCanvasProjectsAsync(
@@ -735,6 +1163,114 @@ public sealed class PostgresProjectSurfaceStore(NpgsqlDataSource dataSource, Pos
         return timeline;
     }
 
+    private static Dictionary<string, object?> ToAsset(Dictionary<string, object?> row)
+    {
+        var data = JsonDict(row, "data_json");
+        var result = new Dictionary<string, object?>(data)
+        {
+            ["id"] = Text(row, "id") ?? FirstText(data, "id") ?? "",
+            ["projectId"] = Text(row, "project_id") ?? FirstText(data, "projectId") ?? "",
+            ["assetType"] = Text(row, "asset_type") ?? FirstText(data, "assetType") ?? "asset",
+            ["name"] = Text(row, "name") ?? FirstText(data, "name") ?? "Project asset",
+            ["description"] = Text(row, "description") ?? FirstText(data, "description") ?? "",
+            ["previewUrl"] = Text(row, "preview_url") ?? FirstText(data, "previewUrl", "mediaUrl"),
+            ["mediaKind"] = Text(row, "media_kind") ?? FirstText(data, "mediaKind"),
+            ["mediaUrl"] = Text(row, "media_url") ?? FirstText(data, "mediaUrl", "previewUrl"),
+            ["sourceTaskId"] = Text(row, "source_task_id") ?? FirstText(data, "sourceTaskId"),
+            ["sourceModule"] = Text(row, "source_module") ?? FirstText(data, "sourceModule"),
+            ["sourceMetadata"] = JsonValue(row, "source_metadata_json") ?? data.GetValueOrDefault("sourceMetadata"),
+            ["generationPrompt"] = Text(row, "generation_prompt") ?? FirstText(data, "generationPrompt"),
+            ["referenceImageUrls"] = JsonValue(row, "reference_image_urls_json") ?? data.GetValueOrDefault("referenceImageUrls"),
+            ["imageStatus"] = Text(row, "image_status") ?? FirstText(data, "imageStatus"),
+            ["imageModel"] = Text(row, "image_model") ?? FirstText(data, "imageModel"),
+            ["aspectRatio"] = Text(row, "aspect_ratio") ?? FirstText(data, "aspectRatio"),
+            ["negativePrompt"] = Text(row, "negative_prompt") ?? FirstText(data, "negativePrompt"),
+            ["scope"] = Text(row, "scope") ?? FirstText(data, "scope") ?? "manual",
+            ["createdAt"] = Text(row, "created_at") ?? FirstText(data, "createdAt") ?? NowIso(),
+            ["updatedAt"] = Text(row, "updated_at") ?? FirstText(data, "updatedAt") ?? NowIso(),
+        };
+        return result;
+    }
+
+    private static Dictionary<string, object?> ToStoryboard(Dictionary<string, object?> row)
+    {
+        var data = JsonDict(row, "data_json");
+        var result = new Dictionary<string, object?>(data)
+        {
+            ["id"] = Text(row, "id") ?? FirstText(data, "id") ?? "",
+            ["projectId"] = Text(row, "project_id") ?? FirstText(data, "projectId") ?? "",
+            ["shotNo"] = Number(row, "shot_no") == 0 ? NumberFromData(data, "shotNo", 1) : Number(row, "shot_no"),
+            ["title"] = Text(row, "title") ?? FirstText(data, "title") ?? "Storyboard",
+            ["script"] = Text(row, "script") ?? FirstText(data, "script") ?? "",
+            ["imageStatus"] = Text(row, "image_status") ?? FirstText(data, "imageStatus") ?? "pending",
+            ["videoStatus"] = Text(row, "video_status") ?? FirstText(data, "videoStatus") ?? "pending",
+            ["durationSeconds"] = Number(row, "duration_seconds"),
+            ["promptSummary"] = Text(row, "prompt_summary") ?? FirstText(data, "promptSummary") ?? "",
+            ["imageUrl"] = Text(row, "image_url") ?? FirstText(data, "imageUrl"),
+            ["assetIds"] = JsonValue(row, "asset_ids_json") ?? data.GetValueOrDefault("assetIds"),
+            ["episodeNo"] = row.GetValueOrDefault("episode_no") is null ? data.GetValueOrDefault("episodeNo") : Number(row, "episode_no"),
+            ["createdAt"] = Text(row, "created_at") ?? FirstText(data, "createdAt") ?? NowIso(),
+            ["updatedAt"] = Text(row, "updated_at") ?? FirstText(data, "updatedAt") ?? NowIso(),
+        };
+        if ((decimal)result["durationSeconds"]! == 0)
+        {
+            result["durationSeconds"] = NumberFromData(data, "durationSeconds", 0);
+        }
+        return result;
+    }
+
+    private static Dictionary<string, object?> ToVideo(Dictionary<string, object?> row)
+    {
+        var data = JsonDict(row, "data_json");
+        return new Dictionary<string, object?>(data)
+        {
+            ["id"] = Text(row, "id") ?? FirstText(data, "id") ?? "",
+            ["projectId"] = Text(row, "project_id") ?? FirstText(data, "projectId") ?? "",
+            ["storyboardId"] = Text(row, "storyboard_id") ?? FirstText(data, "storyboardId") ?? "",
+            ["version"] = Number(row, "version") == 0 ? NumberFromData(data, "version", 1) : Number(row, "version"),
+            ["status"] = Text(row, "status") ?? FirstText(data, "status") ?? "pending",
+            ["durationSeconds"] = Number(row, "duration_seconds") == 0 ? NumberFromData(data, "durationSeconds", 0) : Number(row, "duration_seconds"),
+            ["videoUrl"] = Text(row, "video_url") ?? FirstText(data, "videoUrl"),
+            ["thumbnailUrl"] = Text(row, "thumbnail_url") ?? FirstText(data, "thumbnailUrl"),
+            ["createdAt"] = Text(row, "created_at") ?? FirstText(data, "createdAt") ?? NowIso(),
+            ["updatedAt"] = Text(row, "updated_at") ?? FirstText(data, "updatedAt") ?? NowIso(),
+        };
+    }
+
+    private static Dictionary<string, object?> ToDubbing(Dictionary<string, object?> row)
+    {
+        var data = JsonDict(row, "data_json");
+        return new Dictionary<string, object?>(data)
+        {
+            ["id"] = Text(row, "id") ?? FirstText(data, "id") ?? "",
+            ["projectId"] = Text(row, "project_id") ?? FirstText(data, "projectId") ?? "",
+            ["storyboardId"] = Text(row, "storyboard_id") ?? FirstText(data, "storyboardId") ?? "",
+            ["speakerName"] = Text(row, "speaker_name") ?? FirstText(data, "speakerName") ?? "",
+            ["voicePreset"] = Text(row, "voice_preset") ?? FirstText(data, "voicePreset") ?? "",
+            ["text"] = Text(row, "text_content") ?? FirstText(data, "text") ?? "",
+            ["status"] = Text(row, "status") ?? FirstText(data, "status") ?? "pending",
+            ["audioUrl"] = Text(row, "audio_url") ?? FirstText(data, "audioUrl"),
+            ["createdAt"] = Text(row, "created_at") ?? FirstText(data, "createdAt") ?? NowIso(),
+            ["updatedAt"] = Text(row, "updated_at") ?? FirstText(data, "updatedAt") ?? NowIso(),
+        };
+    }
+
+    private static Dictionary<string, object?> ToExport(Dictionary<string, object?> row)
+    {
+        var data = JsonDict(row, "data_json");
+        return new Dictionary<string, object?>(data)
+        {
+            ["id"] = Text(row, "id") ?? FirstText(data, "id") ?? "",
+            ["projectId"] = Text(row, "project_id") ?? FirstText(data, "projectId") ?? "",
+            ["format"] = Text(row, "format") ?? FirstText(data, "format") ?? "mp4",
+            ["status"] = Text(row, "status") ?? FirstText(data, "status") ?? "queued",
+            ["jobId"] = Text(row, "job_id") ?? FirstText(data, "jobId"),
+            ["outputUrl"] = Text(row, "output_url") ?? FirstText(data, "outputUrl"),
+            ["createdAt"] = Text(row, "created_at") ?? FirstText(data, "createdAt") ?? NowIso(),
+            ["updatedAt"] = Text(row, "updated_at") ?? FirstText(data, "updatedAt") ?? NowIso(),
+        };
+    }
+
     private static Dictionary<string, object?> ToCanvasProject(
         Dictionary<string, object?> row,
         bool agentCanvas,
@@ -935,6 +1471,13 @@ public sealed class PostgresProjectSurfaceStore(NpgsqlDataSource dataSource, Pos
             : 0;
     }
 
+    private static decimal NumberFromData(Dictionary<string, object?> data, string key, decimal fallback)
+    {
+        return data.TryGetValue(key, out var value) && value is not null && decimal.TryParse(value.ToString(), out var number)
+            ? number
+            : fallback;
+    }
+
     private static string? FirstText(Dictionary<string, object?> row, params string[] keys)
     {
         foreach (var key in keys)
@@ -949,6 +1492,75 @@ public sealed class PostgresProjectSurfaceStore(NpgsqlDataSource dataSource, Pos
             }
         }
         return null;
+    }
+
+    private static string? JsonText(JsonElement element, string propertyName)
+    {
+        if (!TryGetJsonProperty(element, propertyName, out var value)
+            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return value.ValueKind == JsonValueKind.String
+            ? NormalizeBlank(value.GetString())
+            : NormalizeBlank(value.ToString());
+    }
+
+    private static int? JsonInt(JsonElement element, string propertyName)
+    {
+        if (!TryGetJsonProperty(element, propertyName, out var value)
+            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number))
+        {
+            return number;
+        }
+
+        return int.TryParse(value.ToString(), out var parsed) ? parsed : null;
+    }
+
+    private static decimal? JsonDecimal(JsonElement element, string propertyName)
+    {
+        if (!TryGetJsonProperty(element, propertyName, out var value)
+            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number))
+        {
+            return number;
+        }
+
+        return decimal.TryParse(value.ToString(), out var parsed) ? parsed : null;
+    }
+
+    private static string? JsonRawOrNull(JsonElement element, string propertyName)
+    {
+        return TryGetJsonProperty(element, propertyName, out var value)
+            && value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined
+            ? value.GetRawText()
+            : null;
+    }
+
+    private static string JsonData(JsonElement element)
+    {
+        return element.ValueKind == JsonValueKind.Object ? element.GetRawText() : "{}";
+    }
+
+    private static bool TryGetJsonProperty(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(propertyName, out value))
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
     }
 
     private static string? NormalizeBlank(string? value)

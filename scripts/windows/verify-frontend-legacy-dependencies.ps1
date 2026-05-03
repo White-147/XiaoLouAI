@@ -48,6 +48,15 @@ function Test-ControlApiPublicPath {
   param([string]$Path)
 
   return $Path -match "^/api/accounts/ensure($|[/?#])" `
+    -or $Path -match "^/api/capabilities($|[/?#])" `
+    -or $Path -match "^/api/auth($|/|[?#])" `
+    -or $Path -match "^/api/me($|[/?#])" `
+    -or $Path -match "^/api/organizations($|/|[?#])" `
+    -or $Path -match "^/api/api-center($|/|[?#])" `
+    -or $Path -match "^/api/admin($|/|[?#])" `
+    -or $Path -match "^/api/enterprise-applications($|/|[?#])" `
+    -or $Path -match "^/api/playground($|/|[?#])" `
+    -or $Path -match "^/api/toolbox($|/|[?#])" `
     -or $Path -match "^/api/jobs($|[/?#])" `
     -or $Path -match "^/api/jobs/" `
     -or $Path -match "^/api/wallet($|[/?#])" `
@@ -135,6 +144,15 @@ if (Test-Path -LiteralPath $caddyPath) {
   $hasCatchAllBlock = $caddyText -match "handle\s+/api/\*\s*\{[\s\S]*?respond\s+404"
   $hasMetricsBlock = $caddyText -match "handle\s+/metrics\s*\{[\s\S]*?respond\s+404"
   $hasControlApiRoutes = $caddyText -match "handle\s+/api/accounts/ensure\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/capabilities\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/auth\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/me\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/organizations\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/api-center\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/admin\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/enterprise-applications\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/playground\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/toolbox\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/jobs\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/wallet\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/wallet/usage-stats\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
@@ -168,7 +186,7 @@ if (Test-Path -LiteralPath $iisPath) {
   $hasOperationalBlock = $iisText -match '\^\(metrics\|api/\(schema\.\*\|providers/health\.\*\)\)\$'
   $hasUnlistedBlock = $iisText -match 'Block Unlisted XiaoLou API'
   $hasHealthProxy = $iisText -match '\^\(healthz\|livez\|readyz\)\$'
-  $hasPublicProxy = $iisText -match 'windows-native/status\|accounts/ensure\|jobs\(/.\*\)\?\|wallet\|wallet/usage-stats\|wallets\(/.\*\)\?\|projects\(/.\*\)\?\|canvas-projects\(/.\*\)\?\|agent-canvas/projects\(/.\*\)\?\|create/\(images\|videos\)\(/.\*\)\?\|payments/\(callbacks/\[\^/\]\+\|alipay/notify\|wechat/notify\)\|media/\(upload-begin\|upload-complete\|move-temp-to-permanent\|signed-read-url\)'
+  $hasPublicProxy = $iisText -match 'windows-native/status\|capabilities\|accounts/ensure\|auth\(/.\*\)\?\|me\|organizations\(/.\*\)\?\|api-center\(/.\*\)\?\|admin\(/.\*\)\?\|enterprise-applications\(/.\*\)\?\|playground\(/.\*\)\?\|toolbox\(/.\*\)\?\|jobs\(/.\*\)\?\|wallet\|wallet/usage-stats\|wallets\(/.\*\)\?\|projects\(/.\*\)\?\|canvas-projects\(/.\*\)\?\|agent-canvas/projects\(/.\*\)\?\|create/\(images\|videos\)\(/.\*\)\?\|payments/\(callbacks/\[\^/\]\+\|alipay/notify\|wechat/notify\)\|media/\(upload-begin\|upload-complete\|move-temp-to-permanent\|signed-read-url\)'
   if ($hasInternalBlock -and $hasOperationalBlock -and $hasUnlistedBlock -and $hasHealthProxy -and $hasPublicProxy) {
     Add-Item $checks "iis-public-surface" "ok" "IIS routes only explicit Control API public paths and blocks unlisted legacy surfaces."
   } else {

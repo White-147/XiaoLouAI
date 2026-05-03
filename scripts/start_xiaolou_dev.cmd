@@ -15,5 +15,6 @@ if not defined NPM_CMD (
 set "FRONTEND_DIR=%ROOT%\XIAOLOU-main"
 set "VITE_LOG=%FRONTEND_DIR%\vite-dev.log"
 set "VITE_ERR=%FRONTEND_DIR%\vite-dev.err.log"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$argsList=@('run','dev'); if ($env:DEV_ARGS) { $argsList += ($env:DEV_ARGS -split ' ') }; $p=Start-Process -FilePath $env:NPM_CMD -ArgumentList $argsList -WorkingDirectory $env:FRONTEND_DIR -RedirectStandardOutput $env:VITE_LOG -RedirectStandardError $env:VITE_ERR -WindowStyle Hidden -PassThru; Write-Host ('[frontend] hidden Vite PID=' + $p.Id)"
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$argsList=@('run','dev'); if ($env:DEV_ARGS) { $argsList += ($env:DEV_ARGS -split ' ') }; $p=Start-Process -FilePath $env:NPM_CMD -ArgumentList $argsList -WorkingDirectory $env:FRONTEND_DIR -RedirectStandardOutput $env:VITE_LOG -RedirectStandardError $env:VITE_ERR -WindowStyle Hidden -PassThru; Write-Host ('[frontend] hidden Vite PID=' + $p.Id)"
 if errorlevel 1 exit /b 1
+exit /b 0
