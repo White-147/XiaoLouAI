@@ -156,6 +156,8 @@ export default function Video() {
                       src={coverUrl}
                       alt={item.title}
                       className="h-full w-full object-cover"
+                      loading="lazy"
+                      decoding="async"
                       referrerPolicy="no-referrer"
                     />
                   ) : (

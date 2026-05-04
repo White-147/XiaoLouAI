@@ -1,14 +1,14 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { Suspense, lazy, useCallback, useMemo } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, RotateCcw, TriangleAlert, X } from 'lucide-react';
 import { getRuntimeConfig } from '../../runtimeConfig';
 import { isEndpointConfigured } from '../../services/cameraAngleService';
-import {
-    ANGLE_ROTATION_MIN,
-    ANGLE_ROTATION_MAX,
-    ANGLE_TILT_MIN,
-    ANGLE_TILT_MAX,
-    OrbitCameraControl,
-} from './OrbitCameraControl';
+
+const OrbitCameraControl = lazy(() => import('./OrbitCameraControl'));
+
+const ANGLE_ROTATION_MIN = -90;
+const ANGLE_ROTATION_MAX = 90;
+const ANGLE_TILT_MIN = -30;
+const ANGLE_TILT_MAX = 60;
 
 interface AngleSettings {
     mode?: 'subject' | 'camera';
@@ -180,28 +180,30 @@ export const ChangeAnglePanel: React.FC<ChangeAnglePanelProps> = ({
 
                 {/* 3D scene + direction buttons */}
                 <div className="relative">
-                    <OrbitCameraControl
-                        imageUrl={imageUrl}
-                        mode={activeMode}
-                        rotation={settings.rotation}
-                        tilt={settings.tilt}
-                        zoom={settings.scale}
-                        onRotationChange={(rotation) =>
-                            onSettingsChange({
-                                ...settings,
-                                rotation: clamp(rotation, ANGLE_ROTATION_MIN, ANGLE_ROTATION_MAX),
-                            })
-                        }
-                        onTiltChange={(tilt) =>
-                            onSettingsChange({
-                                ...settings,
-                                tilt: clamp(tilt, ANGLE_TILT_MIN, ANGLE_TILT_MAX),
-                            })
-                        }
-                        onZoomChange={(scale) =>
-                            onSettingsChange({ ...settings, scale: clamp(scale, 0, 100) })
-                        }
-                    />
+                    <Suspense fallback={<div className="relative aspect-square w-full overflow-hidden rounded-2xl border border-[#ecebf3] bg-[#fafafa]" />}>
+                        <OrbitCameraControl
+                            imageUrl={imageUrl}
+                            mode={activeMode}
+                            rotation={settings.rotation}
+                            tilt={settings.tilt}
+                            zoom={settings.scale}
+                            onRotationChange={(rotation) =>
+                                onSettingsChange({
+                                    ...settings,
+                                    rotation: clamp(rotation, ANGLE_ROTATION_MIN, ANGLE_ROTATION_MAX),
+                                })
+                            }
+                            onTiltChange={(tilt) =>
+                                onSettingsChange({
+                                    ...settings,
+                                    tilt: clamp(tilt, ANGLE_TILT_MIN, ANGLE_TILT_MAX),
+                                })
+                            }
+                            onZoomChange={(scale) =>
+                                onSettingsChange({ ...settings, scale: clamp(scale, 0, 100) })
+                            }
+                        />
+                    </Suspense>
 
                     {/* direction buttons (camera mode) */}
                     {activeMode === 'camera' && (

@@ -12,7 +12,7 @@
 
 - `3000` 或当前 Vite 端口：`XIAOLOU-main` 前端。
 - `4100`：`.NET` Control API，生产 canonical public routes 的主入口。
-- `core-api`：仅用于迁移期只读兼容、登录/签发过渡或本地对照；不要恢复旧写入口。
+- `legacy/core-api`：已归档的迁移期只读兼容、登录/签发过渡或本地对照参考；不要恢复旧写入口，也不要把它作为生产控制面。
 - `5174` / `57988`：Jaaz UI / Jaaz API 仅用于本地 agent-canvas 对照或 embed 调试，不是生产控制面。
 
 一键启动：

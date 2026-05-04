@@ -1,6 +1,7 @@
 param(
   [string]$RepoRoot = "",
   [string]$EnvFile = "$PSScriptRoot\.env.windows",
+  [string]$CoreApiRoot = "",
   [string]$NodeExe = "",
   [string]$DatabaseUrl = "",
   [string]$ReportPath = "",
@@ -15,6 +16,14 @@ $ErrorActionPreference = "Stop"
 if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
+$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -54,7 +63,6 @@ function Resolve-DTool {
 }
 
 $NodeExe = Resolve-DTool $NodeExe "NODE_EXE" "D:\soft\program\nodejs\node.exe" "Node.js"
-$CoreApiRoot = Join-Path $RepoRoot "core-api"
 $Verifier = Join-Path $CoreApiRoot "scripts\verify-legacy-canonical-projection.js"
 $PgModule = Join-Path $CoreApiRoot "node_modules\pg\package.json"
 

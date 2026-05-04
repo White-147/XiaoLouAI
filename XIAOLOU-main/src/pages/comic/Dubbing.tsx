@@ -261,6 +261,8 @@ export default function Dubbing() {
                         src={coverUrl}
                         alt="Shot"
                         className="h-full w-full object-cover"
+                        loading="lazy"
+                        decoding="async"
                         referrerPolicy="no-referrer"
                       />
                     ) : (

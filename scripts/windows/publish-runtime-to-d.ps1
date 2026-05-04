@@ -400,6 +400,7 @@ $envValues = [ordered]@{
   LOCAL_TEMP_DIR = $tempRoot
   LOG_DIR = "$runtimeStateRoot\xiaolou-logs"
   BACKUP_DIR = "$runtimeStateRoot\xiaolou-backups"
+  XDG_CACHE_HOME = "$cacheRoot\tooling-cache"
   TMP = $tempRoot
   TEMP = $tempRoot
   DOTNET_CLI_HOME = "$cacheRoot\dotnet-cli-home"

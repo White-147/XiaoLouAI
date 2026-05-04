@@ -4,6 +4,17 @@
 
 $ROOT = (Split-Path $PSScriptRoot -Parent)
 
+function Resolve-WorkspacePath($path, $fallback) {
+    $value = if ($path) { $path } else { $fallback }
+    if ([System.IO.Path]::IsPathRooted($value)) {
+        return [System.IO.Path]::GetFullPath($value)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $ROOT $value))
+}
+
+$legacyCoreApiRoot = Resolve-WorkspacePath $env:LEGACY_CORE_API_ROOT "legacy\core-api"
+$legacyJaazRoot = Resolve-WorkspacePath $env:LEGACY_JAAZ_ROOT "legacy\jaaz"
+
 function Test-Port($port) {
     $out = netstat -ano 2>$null | Select-String ":$port\s+\S+\s+LISTENING"
     return ($null -ne $out -and ($out | Measure-Object).Count -gt 0)
@@ -32,7 +43,7 @@ Write-Host "=== XiaoLou AI -- Service Status ===" -ForegroundColor Cyan
 Write-Host ""
 
 $services = @(
-    @{ Port = 4100; Label = "core-api" },
+    @{ Port = 4100; Label = "legacy core-api" },
     @{ Port = 3000; Label = "Vite    " },
     @{ Port = 57988; Label = "Jaaz API" },
     @{ Port = 5174; Label = "Jaaz UI " }
@@ -56,10 +67,10 @@ Write-Host "  http://127.0.0.1:3000        local"
 # Log tails
 Write-Host ""
 Write-Host "Recent logs (last 15 lines):" -ForegroundColor Cyan
-Show-LogTail "$ROOT\core-api\core-api.log"     "core-api"
+Show-LogTail (Join-Path $legacyCoreApiRoot "core-api.log") "legacy core-api"
 Show-LogTail "$ROOT\XIAOLOU-main\vite-dev.log" "Vite"
-Show-LogTail "$ROOT\jaaz\jaaz-server-57988.out.log" "Jaaz API"
-Show-LogTail "$ROOT\jaaz\react\vite-dev.log" "Jaaz UI"
+Show-LogTail (Join-Path $legacyJaazRoot "jaaz-server-57988.out.log") "Jaaz API"
+Show-LogTail (Join-Path $legacyJaazRoot "react\vite-dev.log") "Jaaz UI"
 
 Write-Host ""
 Write-Host "Commands:" -ForegroundColor DarkGray

@@ -12,7 +12,7 @@ Required services:
 
 - `3000`, or the current Vite port: `XIAOLOU-main` frontend
 - `4100`: `.NET` Control API, the primary entry for production canonical public routes
-- `core-api`: migration-only read-only compatibility, login/assertion transition, or local comparison; do not reopen old write routes
+- `legacy/core-api`: archived reference for migration-only read-only compatibility, login/assertion transition, or local comparison; do not reopen old write routes or use it as the production control plane.
 - `5174` / `57988`: Jaaz UI / Jaaz API only for local agent-canvas comparison or embed debugging, not the production control plane
 
 One-command startup:

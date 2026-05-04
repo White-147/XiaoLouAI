@@ -1,255 +1,151 @@
-﻿# XiaoLouAI 最终收口交接
+﻿# XiaoLouAI 短棒交接
 
-更新时间：2026-05-03 22:39 +08
+更新时间：2026-05-04 13:03 +08
 工作目录：`D:\code\XiaoLouAI`
 
-继续执行前先读：
+本文件只保留下一棒必须执行和核对的内容。历史记录看 `docs/xiaolouai-finalization-handoff.md`；deep research 映射看 `docs/xiaolouai-deep-research-structured.md`；G7a 目录盘点看 `docs/xiaolouai-top-level-directory-organization-inventory.md`。
 
-- `docs/xiaolouai-finalization-handoff.md`
-- `docs/xiaolouai-deep-research-structured.md`
+## PowerShell 读取
 
-## 当前权威状态
+```powershell
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Get-Content .\XIAOLOU_REFACTOR_HANDOFF.md -Encoding UTF8
+Get-Content .\docs\xiaolouai-finalization-handoff.md -Encoding UTF8
+```
 
-- 当前生产路线只走 `.NET 8 / ASP.NET Core Control API + PostgreSQL canonical + Windows Service workers`。
-- 不推进 Docker、Docker Compose、Linux、Linux container、Kubernetes、WSL、Windows + Celery 或 Redis Open Source on Windows 作为生产路径。
-- `core-api/` 只保留为迁移期只读兼容层、登录/断言过渡、旧实现参考和导入校验工具，不再作为长期生产控制面。
-- Python 只允许作为本地模型 adapter / inference runner，不承载主控制面和异步主控。
-- PostgreSQL canonical 是运行时唯一事实源；旧 SQLite、旧 PostgreSQL snapshot 和旧表只允许作为导入、dry-run、校验和最终验收 evidence。
-- 真实 production legacy dump/source、真实支付材料、真实 provider health evidence、真实 PostgreSQL restore drill 都统一归入根 README 的“Operator-Supplied Final Acceptance Evidence / 运营侧最终验收材料”模块，不再作为当前工程下一步 blocker。
+## 固定路线
 
-## 已完成并发布到真实 4100 Windows service 的批次
+- 生产路线只走 `.NET 8 / ASP.NET Core Control API + PostgreSQL canonical + Windows Service workers + 前端静态构建`。
+- 不推进 Docker、Linux、Kubernetes、WSL、Windows + Celery 或 Redis Open Source on Windows 作为生产路径。
+- `legacy/core-api` 与 `legacy/services-api` 是 legacy reference，不作为生产控制面或生产写入口。
+- 不清理 `legacy_quarantine`，除非用户明确要求回滚或归档压缩。
+- 每一步开始前都先核对本文件和 `docs/xiaolouai-finalization-handoff.md`，再执行 owner。
 
-以下批次不要重复做，只有后续改动触碰相关 flow 时才复核：
+## 本轮状态
 
-1. A/B/C/D 工程收口与 Windows-native P0 基础设施。
-2. 前端 P2 legacy route 批次：media/upload、`/uploads/*`、`/vr-*`、`/api/tasks* -> /api/jobs*`、wallet/recharge/admin billing、project/canvas/create、playground/toolbox、auth/profile/organization/admin/API-center review。
-3. 第一批 `.NET` canonical project/create/canvas surface：
-   - `/api/projects*`
-   - `/api/create/images*`
-   - `/api/create/videos*`
-   - `/api/canvas-projects*`
-   - `/api/agent-canvas/projects*`
-4. 第二批 `.NET` canonical identity/config surface：
-   - `/api/auth*`
-   - `/api/me`
-   - `/api/organizations/{organizationId}/members`
-   - `/api/api-center*`
-5. 第三批 project 相邻 canonical surface：
-   - `/api/projects/{projectId}/assets*`
-   - `/api/projects/{projectId}/storyboards*`
-   - `/api/projects/{projectId}/videos`
-   - `/api/projects/{projectId}/dubbings`
-   - `/api/projects/{projectId}/exports`
-6. 第四批 admin/system canonical surface：
-   - `/api/admin/pricing-rules`
-   - `/api/admin/orders`
-   - `/api/admin/orders/{orderId}/review` 返回 410 retired boundary
-   - `/api/enterprise-applications*`
-7. 第五批 Playground canonical surface：
-   - `/api/playground/config`
-   - `/api/playground/models`
-   - `/api/playground/conversations*`
-   - `/api/playground/chat-jobs*`
-   - `/api/playground/memories*`
-8. 第六批 Toolbox canonical surface：
-   - `GET /api/capabilities`
-   - `GET /api/toolbox`
-   - `GET /api/toolbox/capabilities`
-   - `POST /api/toolbox/character-replace`
-   - `POST /api/toolbox/motion-transfer`
-   - `POST /api/toolbox/upscale-restore`
-   - `POST /api/toolbox/video-reverse-prompt`
-   - `POST /api/toolbox/storyboard-grid25`
-   - `POST /api/toolbox/translate-text`
+- 当前 shell：`IsAdministrator=True`，用户：`JYL\10045`。
+- P0-admin：已完成。2026-05-04 09:34-09:41 只运行 `.\scripts\windows\verify-release-candidate.ps1 -PublishFrontend`。
+- RC 报告：`D:\code\XiaoLouAI\.runtime\xiaolou-logs\release-candidate-s5-20260504-093456.json`。
+- RC 结果：`status=warning`，`administrator=true`，`publish_frontend=true`，`blockers=0`，`physical_cleanup_executed=false`，所有 required gates 均为 `ok`。
+- publish/restart/P0：`fixed-publish-restart-p0=ok`；报告 `D:\code\XiaoLouAI\.runtime\xiaolou-logs\release-candidate-publish-restart-p0-20260504-093456.json`；runtime 发布到 `D:\code\XiaoLouAI\.runtime\app`；rollback snapshot 为 `D:\code\XiaoLouAI\.runtime\xiaolou-backups\runtime-snapshots\runtime-20260504-093458`。
+- 服务停启：依次停止 `XiaoLou-ClosedApiWorker`、`XiaoLou-LocalModelWorker`、`XiaoLou-ControlApi`，随后启动 `XiaoLou-ControlApi`、`XiaoLou-LocalModelWorker`、`XiaoLou-ClosedApiWorker`；当前三项服务均为 Running/Automatic。
+- warning 说明：projection verifier 有 3 个运营 evidence warning（missing legacy snapshot、API-center provider health missing、staged-only），无 blocker；最终真实 provider health、真实 legacy dump/source、真实支付材料和真实 restore drill 仍作为最终验收 evidence pending。
+- cleanup 边界：未执行 `execute-legacy-cleanup.ps1`，未做 physical cleanup；RC 内只跑 `cleanup-dry-run=ok`。
+- G7a：已完成。新增 `docs/xiaolouai-top-level-directory-organization-inventory.md`，只做 inventory，没有移动、删除或重命名目录。
+- G7b-1 `xiaolou-backups`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-backups` 存在但为空；17 处有效引用均指向 `.runtime\xiaolou-backups` 或由 `.runtime` 派生的 `$runtimeRoot` / `$runtimeStateRoot`；未移动、未删除目录。
+- G7b-2 `xiaolou-cache`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-cache` 存在但为空；33 处有效引用均指向 `.runtime\xiaolou-cache` 或由 `.runtime` 派生的 `$runtimeRoot` / `$runtimeStateRoot` / `$cacheRoot`；未移动、未删除目录。
+- G7b-3 `xiaolou-temp`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-temp` 存在但为空；24 处有效引用均指向 `.runtime\xiaolou-temp` 或由 `.runtime` 派生的 `$runtimeRoot` / `$runtimeStateRoot` / `$tempRoot`；未移动、未删除目录。
+- G7b-4 `xiaolou-logs`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-logs` 存在但为空；44 处有效引用均指向 `.runtime\xiaolou-logs` 或由 `.runtime` 派生的 `$runtimeRoot` / `$runtimeStateRoot` / `$logRoot` / `XIAOLOU_ROOT -> .runtime\app`；未移动、未删除目录。
+- G7b-5 `xiaolou-inputs`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-inputs` 存在但为空；3 处有效引用均指向 `.runtime\xiaolou-inputs` 或由 `.runtime` 派生路径；未移动、未删除目录。
+- G7b-6 `xiaolou-replay`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-replay` 存在但为空；19 处有效引用均指向 `.runtime\xiaolou-replay` 或由 `.runtime` 派生路径；未移动、未删除目录。
+- G7b-7 `.cache`：moved。旧脚本 `scripts\setup_video_replace.cmd`、`scripts\start_background.ps1`、`scripts\start_core_api.cmd` 已改为 `XIAOLOU_RUNTIME_ROOT -> .runtime\xiaolou-cache\legacy-cache` 派生路径；顶层 `.cache` 内容已移动到 `D:\code\XiaoLouAI\.runtime\xiaolou-cache\legacy-cache`，源目录已删除；2 个 `gh` 同名/重现残余保存在 `_root-cache-conflicts\gh-20260504-101421` 与 `_root-cache-conflicts\gh-20260504-101807`。
+- G7c-1 `caddy`：moved。顶层 `D:\code\XiaoLouAI\caddy` 已迁入 `D:\code\XiaoLouAI\deploy\caddy`，源目录已删除；`README.md`、`README.zh-CN.md`、`scripts\start_caddy.cmd`、`deploy\caddy\DEPLOY.md`、legacy readiness/contract docs 的有效引用已更新；`deploy\caddy\Caddyfile` 对齐 Windows Control API allowlist、static asset cache 与 SPA fallback 边界。
+- 2026-05-04 10:34 G7 completion audit：G7 仍未完成，不能进入 G8。根目录仍有空 `xiaolou-backups`、`xiaolou-cache`、`xiaolou-inputs`、`xiaolou-logs`、`xiaolou-replay`、`xiaolou-temp`，而 `.runtime\xiaolou-*` 是真实 runtime owner；根目录 `.cache\gh` 已重新出现；根目录还有 `.codex-control-api.err.log` 与 `.codex-control-api.out.log`；`video-replace-service` 仍暴露在根目录且应按首页 AI 工具箱卡片 / `/create/video-replace` / `/api/toolbox*` 归入 `tools\video\video-replace-service`。
+- G7d-1 `runtime-root-residue`：moved/removed。空根目录 `xiaolou-backups`、`xiaolou-cache`、`xiaolou-inputs`、`xiaolou-logs`、`xiaolou-replay`、`xiaolou-temp` 已删除；根 `.cache\gh` 重现均已迁入 `.runtime\xiaolou-cache\legacy-cache\_root-cache-conflicts\root-cache-20260504-104208`、`root-cache-20260504-104336`、`root-cache-20260504-104727` 与 `root-cache-20260504-104857`；根 `.codex-control-api.err.log` 与 `.codex-control-api.out.log` 已迁入 `.runtime\xiaolou-logs\codex-control-api\20260504-104208`。
+- G7d-1b `root-cache-gh-recurrence`：env-fixed/moved。根 `.cache\gh` 反复生成的直接原因是 User/Process `XDG_CACHE_HOME=D:\code\XiaoLouAI\.cache`；User env 已改为 `D:\code\XiaoLouAI\.runtime\xiaolou-cache\tooling-cache`。`scripts\windows\load-env.ps1` 已能纠正继承到的 repo-root `.cache` 坏值；`scripts\windows\.env.windows.example`、`publish-runtime-to-d.ps1`、`register-services.ps1`、`migrate-user-tool-data-to-d.ps1` 已同步 `XDG_CACHE_HOME`。本轮根 `.cache\gh` 已迁入 `.runtime\xiaolou-cache\tooling-cache\_root-cache-conflicts\root-cache-gh-20260504-111137`；由于当前 Codex 桌面父进程仍继承旧 Process env，验证 shell 又重现一次，最终再迁入 `root-cache-gh-20260504-111500` 并删除根 `.cache`。验证：强制坏值后 dot-source `load-env.ps1` 会改回 tooling-cache；`git diff --check` 通过（仅 CRLF 提示）。新终端或 dot-source `load-env.ps1` 后不应再写根 `.cache`。
+- G7d-2 `video-replace-service`：moved。顶层 `D:\code\XiaoLouAI\video-replace-service` 已迁入 `D:\code\XiaoLouAI\tools\video\video-replace-service`，源目录不存在；`scripts\setup_video_replace.cmd` 与 `scripts\start_core_api.cmd` 默认路径已改到 tools/video，保留 `LEGACY_CORE_API_ROOT\video-replace-service` 作为 legacy-only fallback；前端 `/create/video-replace` 与 Control API `/api/toolbox*` 用户入口未改变。验证：423 个 scoped files 复扫后 ActiveRootVideoRefs=0；frontend legacy dependency gate `status=ok`、blockers/warnings 为空；`git diff --check` 无 whitespace error（仅 CRLF 提示）。
+- G7d-3 `jaaz`：moved。顶层 `D:\code\XiaoLouAI\jaaz` 已迁入 `D:\code\XiaoLouAI\legacy\jaaz`，源目录不存在；`scripts\start_background.ps1`、`scripts\status.ps1` 和 `scripts\start_xiaolou_stack.cmd` 已改为 `LEGACY_JAAZ_ROOT -> legacy\jaaz`；Caddy/IIS 对 `/jaaz*` 仍是阻断/legacy surface，不反代到生产 Jaaz；前端 `ensureJaazServices()` 仍 retired。验证：422 个 scoped files 复扫后 active physical root Jaaz refs=0（保留 `/jaaz*` route literal review）；frontend legacy dependency gate `status=ok`、blockers/warnings 为空。
+- README：本轮 README 中英文已同步；公开顶层目录契约已从 `caddy/` 改为 `deploy/caddy/`，从 `video-replace-service/` 改为 `tools/video/video-replace-service/`，从 `jaaz/` 改为 `legacy/jaaz/`。
+- G8a frontend high-risk optimization readiness：已完成。`npm --prefix XIAOLOU-main run build` 成功，Vite v6.4.1 transformed 3169 modules，built in 11.56s；输出 66 个 JS、1 个 CSS、3 个 PNG、1 个 HTML，无 `.gz`/`.br` 预压缩产物。最大 chunk：`useCreateCreditQuote` 890.67 kB raw / 241.06 kB gzip、`AgentCanvasCreate` 663.32 / 188.80、`index` 530.72 / 163.09、`CanvasCreate` 513.00 / 140.88、CSS 209.38 / 28.44。`vite.config.ts` 当前只有 React/Tailwind plugins 与 `chunkSizeWarningLimit=1000`，无 `manualChunks`、compression、SW、CDN、modulepreload/preload 配置；route lazy 边界仍在 `src\App.tsx` 和 `src\components\Layout.tsx`，不在 readiness 阶段批量改动。
+- G8b-1 `manualChunks-react-shell`：已完成。只改 `XIAOLOU-main\vite.config.ts`，新增单一 `manualChunks` 规则，范围限定 `react`、`react-dom`、`react-router-dom`，没有引入 compression、Service Worker、CDN、WebP 或自定义 preload/prefetch 策略。before build top chunks：`useCreateCreditQuote` 869.79 KiB、`AgentCanvasCreate` 647.77 KiB、`index` 518.28 KiB、`CanvasCreate` 500.98 KiB。after build：新增 `vendor-react-shell-DqgF9kLt.js` 226.53 KiB，`index-D9QfRRPB.js` 降为 290.88 KiB；`useCreateCreditQuote`、`AgentCanvasCreate`、`CanvasCreate` 基本不变。Vite 自动在 `dist\index.html` 加 `modulepreload` 指向 vendor chunk；这不是额外 preload owner。frontend legacy dependency gate `status=ok`，`git diff --check` 通过（仅 CRLF 提示）。
+- G8b-2 `canvas-heavy-chunks`：已完成。复扫确认 `CanvasCreate` 静态拥有 `src\canvas`，`AgentCanvasCreate` 静态拥有 `src\agent-canvas`；`useCreateCreditQuote` 被两套 canvas 的 `NodeControls` 与 agent `ChatPanel` 共用；`@react-three/fiber`、`@react-three/drei`、`three` 只由两套 `OrbitCameraControl` 引入。曾试验配置级 `vendor-canvas-3d` manualChunks，但 `dist\index.html` 会从首页 modulepreload 约 859 KiB 3D vendor，已回退。最终只改两个 `ChangeAnglePanel.tsx`，把 `OrbitCameraControl` 改为面板级 `React.lazy` + `Suspense`，没有引入 compression、Service Worker、CDN、WebP 或自定义 preload/prefetch。before build top chunks：`useCreateCreditQuote-BnG8VYYd.js` 869.83 KiB、`AgentCanvasCreate-Cf_hWX-Q.js` 647.81 KiB、`CanvasCreate-jriDaGTE.js` 501.02 KiB、`index-D9QfRRPB.js` 290.88 KiB、`vendor-react-shell-DqgF9kLt.js` 226.53 KiB。after build：`useCreateCreditQuote-BXJCvgbq.js` 降为 11.74 KiB；3D vendor 延后为 lazy chunk `RoundedBox-D92AitKx.js` 858.04 KiB；`AgentCanvasCreate-CPlYCPjw.js` 639.73 KiB、`CanvasCreate-BGV8jFo1.js` 492.93 KiB、`index-CJDM2e8c.js` 290.88 KiB、`vendor-react-shell-DqgF9kLt.js` 226.53 KiB；两套 `OrbitCameraControl` lazy wrapper 各 8.69 KiB。`dist\index.html` 仍只 modulepreload `vendor-react-shell`，未预加载 3D vendor。build、frontend legacy dependency gate、`git diff --check` 通过（仅 CRLF 提示）。
+- G8c `compression`：已完成。复扫确认 before 状态无 Vite compression 插件/脚本、`dist` 无 `.gz`/`.br`，Caddy/IIS 只有静态 cache policy。最终不新增 npm 依赖，只把 `npm run build` 改为 `vite build && node scripts/precompress-dist.mjs`，用 Node 内置 `zlib` 为 `dist` 里的 JS/CSS/HTML/JSON/SVG/TXT/WASM/XML 生成 `.br` 与 `.gz` sidecar；Caddy 生产配置和 Windows 示例均加 `file_server { precompressed br gzip }`，IIS 示例开启 `doStaticCompression=true`、`doDynamicCompression=false`。after build top raw chunks 不变：`RoundedBox` 858.04 KiB、`AgentCanvasCreate` 639.73 KiB、`CanvasCreate` 492.93 KiB、`index` 290.88 KiB、`vendor-react-shell` 226.53 KiB；新增 84 个压缩 sidecar（42 `.br` 777.04 KiB，42 `.gz` 953.28 KiB，总 1730.32 KiB）。`npm --prefix XIAOLOU-main run build`、frontend legacy dependency gate、IIS XML parse/static compression check、Caddy precompressed static scan、`git diff --check` 通过；本机未找到 `caddy.exe`，未做 Caddy runtime validate。未引入 Service Worker、CDN、WebP 或 preload/prefetch 策略。
+- G8d `preload-prefetch`：已完成。复扫确认 before `dist\index.html` 只有 Vite 自动 `modulepreload` 到 `vendor-react-shell-DqgF9kLt.js`，没有自定义 preload/prefetch；route lazy 边界在 `App.tsx` 和 `Layout.tsx`，已有 prefetch 仅是 `Assets.tsx` 的 sessionStorage 数据缓存。最终只改 `XIAOLOU-main\src\components\Layout.tsx`：新增侧栏导航 hover/focus 的 intent-based route module prefetch，复用现有 dynamic import 目标；不新增 HTML `<link rel=preload/prefetch>`，不引入 Service Worker、CDN、WebP 或新的 compression 策略。before top chunks：`RoundedBox` 858.04 KiB、`AgentCanvasCreate` 639.73 KiB、`CanvasCreate` 492.93 KiB、`index-CJDM2e8c.js` 290.88 KiB、`vendor-react-shell` 226.53 KiB。after `dist\index.html` 仍只 modulepreload `vendor-react-shell`，主 chunk 变为 `index-BdODh3KS.js` 295.05 KiB；top heavy chunks 保持同级，`.br/.gz` sidecar 仍为 84 个（42 `.br`、42 `.gz`，总 1731.63 KiB）。frontend legacy dependency gate `status=ok` 且 review items 保持 7 项；`git diff --check` 通过（仅 CRLF 提示）。
+- G8e `static-media-format`：已完成。复扫确认 `XIAOLOU-main\public` 与 `dist` 只有 3 个 PNG，`src` 无随包静态图片；实际 UI 使用 `chuangjing-logo-shell.png` 9.94 KiB 和 `chuangjing-favicon-32.png` 1.85 KiB，`chuangjing-logo.png` 673x673 / 210.44 KiB 只剩 Agent Studio fallback 字符串指纹，不是首屏或 UI 图片。当前环境无 `magick`/`cwebp`/`ffmpeg`，前端依赖无 `sharp`/`squoosh`，因此不引入转换工具；最终只删除未使用大 PNG，并把 `AgentStudio.tsx` fallback 改为 `/src/main.tsx` + `chuangjing-favicon-32.png`。after build：public/dist 媒体均为 2 个 PNG（合计 11.79 KiB），top chunks 和 84 个 `.br/.gz` sidecar 策略不变；deleted logo 引用扫描为 0，frontend legacy dependency gate `status=ok`，`git diff --check` 通过（仅 CRLF 提示）。
+- G8f `dependency-audit`：已完成。复扫 `package.json`、`package-lock.json`、`src` imports 与 build chunks：`face-api.js`、`@google/genai`、`dotenv`、`express` importCount 均为 0；`@react-three/fiber`、`@react-three/drei`、`three` 只由两套 `OrbitCameraControl` lazy chunk 使用；`motion` 只在 `Layout.tsx` 使用；`lucide-react` 为广泛 UI 图标依赖。按单 owner 最小改动只移除未引用 `face-api.js`，没有同时移除 `@google/genai`、`dotenv`、`express`，也没有引入 Service Worker、CDN、WebP/AVIF、新 compression 或 preload/prefetch 策略。`package-lock` 包数量从 487 降为 478，并移除 `face-api.js`、`@tensorflow/tfjs-core`、相关 `@types/*` 与 `seedrandom` transitive entries。before/after top chunks 保持：`RoundedBox` 858.04 KiB、`AgentCanvasCreate` 639.73 KiB、`CanvasCreate` 492.93 KiB、`index-BdODh3KS.js` 295.05 KiB、`vendor-react-shell` 226.53 KiB；`.br/.gz` sidecar 保持 84 个（42 `.br` 777.25 KiB，42 `.gz` 954.38 KiB）。`npm --prefix XIAOLOU-main run build`、frontend legacy dependency gate、`git diff --check` 通过（仅 CRLF 提示）。
+- G8g `service-worker-cdn`：已完成。复扫确认前端无 `registerSW`/workbox/SW 注册，`dist\index.html` 仍只有 Vite 对 `vendor-react-shell` 的自动 `modulepreload`；Caddy/IIS 只对 `/assets/*` 使用 immutable cache，SPA shell/root files revalidate，`/api/*`、auth/session/profile、payment notify/callback、provider health、SSE/WebSocket/`socket.io` 和 legacy route 均不进入静态缓存。最终只改 `XIAOLOU-main\src\main.tsx` 与新增 `src\lib\service-worker-retirement.ts`：启动时 unregister 当前同源/当前作用域内旧 Service Worker，并只清理 `xiaolou*`、`xiaolouai*`、`workbox*`、`vite-precache*` 命名的旧 cache；没有注册新 Service Worker，没有新增 CDN/public base path/static host，没有改 compression、WebP/AVIF 或 preload/prefetch 策略。after build：`index-DiGSEMVB.js` 295.54 KiB（约 +0.49 KiB），其他 top chunks 保持同级；`.br/.gz` sidecar 仍 84 个（42 `.br` 777.68 KiB，42 `.gz` 954.54 KiB）。build、frontend legacy gate、Caddy/IIS static cache scan、`git diff --check` 通过。
 
-## 最新实现要点
+## 下一步唯一提示词
 
-- `control-plane-dotnet` 已新增或保留 PostgreSQL-backed stores：`PostgresIdentityConfigStore`、`PostgresProjectSurfaceStore`、`PostgresAdminSystemStore`、`PostgresPlaygroundStore`、`PostgresToolboxStore`。
-- Toolbox 使用 canonical `toolbox_capabilities` 和 `toolbox_runs`，可运行工具通过 canonical `jobs` 入队，lane 为 `account-control`，provider route 为 `closed-api`。
-- 前端首页工具箱能力发现和可运行工具已切到 `/api/capabilities` 和 `/api/toolbox*`，不再走旧 `/api/jobs` 快捷写入。
-- public reverse proxy allowlist、client assertion、runtime env permissions、P0 assertion 和 frontend legacy dependency gate 均已包含 `toolbox:read/write` 与 toolbox routes。
-- legacy/canonical projection verifier 已新增 `apiCenterHealth`，会读取 canonical `api_center_configs` 与 `provider_health`，把 API-center 明文密钥字段、无效 JSON、vendor/model id 冲突、默认模型悬空或指向禁用模型、apiKeyHash 状态冲突作为 blocker；已配置 vendor 缺少 `provider_health` 作为日常审计 `evidence_pending`。
-- API-center vendor test 已补 canonical provider-health plumbing：`POST /api/api-center/vendors/{vendorId}/test` 会在更新 vendor JSON 后写入 `provider_health` 的 `evidence_pending` 阶段性记录，并在响应返回 `providerHealth`；该记录不冒充真实 provider health，真实 vendor evidence 仍只进根 README 最终验收材料模块。
-- provider health verifier 已区分真实 health 与 staged-only health：`apiCenterHealth` 现在统计 `providerHealthStatusCounts`、`realProviderHealthProviders`、`stagedProviderHealthProviders` 和 `configuredVendorsOnlyStagedProviderHealth`；`evidence_pending` 行不会再让 configured vendor 看起来已有真实 provider health evidence。
-- provider health route 真实/阶段性语义展示已完成并发布到真实 4100 runtime：`PostgresProviderHealthStore` 的 `ListAsync` 和 `UpsertAsync` 返回行追加 `evidenceKind`、`isStagedEvidence`、`isRealProviderHealth`、`acceptanceEvidenceRequired` 和 `providerHealthSemantics`；P0 已补断言，要求 `healthy` 写入显示为 `real_provider_health`。真实 4100 smoke 已确认 `healthy -> real_provider_health`、`evidence_pending -> staged_evidence`。
-- API-center vendor route 展示细节已完成并发布到真实 4100 frontend/runtime：前端 `ApiCenter` 不再把 vendor test 文案写成“连接正常”，改为“配置已测试/阶段性健康记录”；`providerHealth` 类型显式包含 real/staged 语义字段；4100 `POST /api/api-center/vendors/dashscope/test` 已确认返回 `providerHealth.status=evidence_pending`、`evidenceKind=staged_evidence`、`isStagedEvidence=true`、`isRealProviderHealth=false`。
-- S3 旧表 runtime 依赖隔离已完成源码闸门：新增 `scripts/windows/verify-legacy-runtime-dependencies.ps1`，扫描 `.NET`、worker、frontend、core-api 的旧表 SQL、旧 route 和旧写入口引用；`.NET/worker` 无旧表事实源或旧 route blocker，frontend 剩余旧 route 仅限 retired/dev/guard allowlist，core-api 剩余旧入口只允许 read-only compatibility / migration verifier。该 verifier 已接入 `verify-p2-cutover-audit.ps1` 的 `legacy-runtime-dependency-isolation` step。
-- S4 第 5 阶段清理 dry-run 方案已完成：新增 `scripts/windows/verify-legacy-cleanup-dry-run.ps1`，会盘点旧表清理候选、保留 canonical/non-cleanable 清单、生成 quarantine/cleanup/rollback SQL 模板，并验证 quarantine SQL 在 `ROLLBACK` 下执行后没有留下 archive table。
-- S5 Release Candidate 验证包已落地：新增 `scripts/windows/verify-release-candidate.ps1`，统一编排 fixed publish/restart/P0、frontend hard gate、P2 audit、wallet ledger audit、projection verifier、service ops drill 和 S4 cleanup dry-run 复核；报告显式记录 `physical_cleanup_executed=false`，真实材料仍只进入 README 最终验收 evidence。
-- S6 旧表旧字段物理清理窗口已按用户授权执行：新增 `scripts/windows/execute-legacy-cleanup.ps1`，先跑 fresh backup、restore drill、4100 P0、frontend hard gate、P2 audit、wallet audit、projection verifier、service ops drill 与 S4 dry-run，再执行 quarantine-then-drop SQL，并生成 rollback SQL。当前本机 runtime DB 中 `tasks`、`video_replace_jobs`、`wallet_recharge_orders`、`wallets`、`storyboards`、`videos`、`dubbings` 已从 `public` schema 移入 `legacy_quarantine` archive table 后 drop；`provider_jobs`、`payment_events` 原本不存在。canonical 表保持存在且 post-cleanup P0/projection/wallet/P2 audit 通过。
-- `verify-windows-service-ops-drill.ps1` 已补非管理员回退：当普通 PowerShell 无法读取 `Win32_Service` CIM 元数据时，改用 `Get-Service` + `sc.exe qc/qfailure` 验证运行态、binPath、failure action 和依赖，不再把 CIM 拒绝访问误报成 Windows service 未注册。
-- `complete-control-api-publish-restart-p0.ps1` 已补一处 Windows PowerShell `Start-Process` false-negative：当子进程 stdout 完整、stderr 为空但 ExitCode 未被 API 回填时，不再把成功 P0 误判成失败；带前端发布的完整 elevated publish/restart/P0 报告已成功。
-- F3 finalization gate 已完成：新增 `scripts/windows/verify-final-legacy-surface.ps1`，输出 `status/blockers/warnings/review_items/checked_files`，检查 core-api public allowlist、F1 route closure 默认值、`services/api` production API 文案、根 README 中英文定位和 Windows service 注册面；已接入 `scripts/windows/verify-release-candidate.ps1` 的 required gates。
-- Windows runtime env 同步链路已显式固定 F1 core-api 关闭开关：`scripts/windows/.env.windows.example`、`scripts/windows/publish-runtime-to-d.ps1` 和 `scripts/windows/register-services.ps1` 均保留 `CORE_API_COMPAT_DISABLE_TASKS_STREAM=1` 与 `CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY=0`。
-- F4 worker stub 边界显式化已完成：local-model worker 与 ClosedApiWorker 的默认成功结果继续保留 `status=stubbed`，并新增 `executionMode=stubbed-simulated`、`runtimeBoundary=canonical-queue-worker-skeleton`、`adapterStatus=not_connected`、`isStubbed=true`、`isSimulated=true`、`contract` 和 `requiredForRealExecution`；该结果只证明 canonical queue + worker skeleton 的 lease/running/succeed/fail 链路，不代表真实模型或真实 closed API provider 已接入。
-- README 中英文版、`services/local-model-worker` README 中英文版和 `control-plane-dotnet` README 中英文版已同步 worker skeleton 契约，避免把 P0 succeed/fail smoke 误读为真实执行接入完成。
-- 2026-05-03 22:20 的外部 `C:\Users\10045\Downloads\deep-research-report.md` 已复核；报告中的 P0/P1/P2 未指定工程项已由 F1-F4 覆盖，剩余 F5 仍是 post-cleanup RC 观察和运营侧 evidence 对接，不是源码 blocker。
-- 2026-05-03 13:16：一次 elevated publish 在 publish 完成后卡在父脚本的 service restart/P0 flow。已确认问题点是 publish 后阶段缺少开始前实时打点，且 P0/ops drill 没有父级硬超时；已修复 `scripts/windows/complete-control-api-publish-restart-p0.ps1`，新增 timestamp stage log、P0 stdout/stderr 实时转发日志、`P0TimeoutSeconds`、`OpsDrillTimeoutSeconds` 和 timeout 后写报告退出。旧卡住进程已清理，三个 Windows service 已恢复 Running，`/healthz` 与 `/readyz` 通过；4100 窄口 smoke 已确认 `dashscope/api-center` 写入 `provider_health.status=evidence_pending`。2026-05-03 17:52 的 S5 管理员 RC 已用 fixed publish/restart/P0 重跑通过。
-- 2026-05-03 物理清理窗口的一次长时间卡住原因是临时 PostgreSQL 探测命令 `createdb.exe --username=postgres` 没带 `-w/--no-password`，进程在密码提示处等待输入；这不是 cleanup SQL、Windows service 或 4100 runtime 卡死。残留 `createdb.exe` 已清理，后续管理员只读进程检查确认没有 `createdb/psql/dropdb/pg_restore/pg_dump` 残留。`restore-postgres.ps1` 与 `verify-postgres-backup.ps1` 已给 `dropdb`、`createdb`、`pg_restore` 补 `--no-password`，缺凭据时会快速失败，不再无期限等待交互输入。
-- 根 README 中英文版已新增独立最终验收材料模块，集中记录真实 legacy dump/source、真实支付、真实 vendor/provider health、真实 restore drill 等运营侧材料；handoff 后续只引用该模块，不再重复把真实材料缺口写进下一步。
-- 仓库源码侧 README*.md（排除虚拟环境、构建产物和依赖缓存）已统一归一化为 UTF-8 BOM；PowerShell `Get-Content` 直接读取中文 README 正常，乱码扫描无命中。
-- 支付体系继续留在 canonical `payment_orders`、`payment_callbacks`、`wallet_ledger`、`wallet_balances`、callback/ledger 路线；手工 admin recharge review 继续退役。
-- 真实 runtime 当前指向本机 `xiaolou_windows_native_test`。库存报告 `runtime-legacy-source-inventory-20260503-084026.json` 显示 canonical 表有当前运行数据，legacy 旧表为空或不存在。
-- 当前库备份 `D:\code\XiaoLouAI\.runtime\xiaolou-backups\runtime-current-source\xiaolou-20260503-084033.dump` 只能作为当前运行库状态证据，不能冒充历史 production legacy dump/source。
+### G9a：API bandwidth / SSE-WebSocket ownership
 
-## 发布脚本卡住问题的结论
-
-用户截图中管理员 PowerShell 在 build 后长时间无输出，原因不是 Windows service 运行卡死：
-
-- `complete-control-api-publish-restart-p0.ps1` 之前把 P0 输出缓存在变量里，导致 publish 后 P0 阶段没有实时日志。
-- `publish-runtime-to-d.ps1` 在组合发布流程里仍打印 standalone `register-services.ps1` 提示，容易误导用户以为脚本停在手工步骤。
-- `verify-control-plane-p0.ps1` 的 lease recovery 断言会和后台 `LeaseRecoveryService` 抢恢复；后台先恢复时，旧断言会误判失败。
-
-已完成加固：
-
-- `complete-control-api-publish-restart-p0.ps1` 现在实时转发 P0 输出，同时仍捕获输出用于报告。
-- `complete-control-api-publish-restart-p0.ps1` 继续加固：publish 后的 env sync、service start、P0 和 ops drill 都有 timestamp stage log；P0/ops drill 通过独立 PowerShell 子进程运行，stdout/stderr 落到报告同目录并实时转发，超过 timeout 会停止子进程、写失败报告并恢复 worker services。
-- `complete-control-api-publish-restart-p0.ps1` 调用 publish 时传入 `-SuppressRegistrationHint`。
-- `publish-runtime-to-d.ps1` 新增 `-SuppressRegistrationHint`，组合流程里不再打印 standalone 注册服务提示。
-- `verify-control-plane-p0.ps1` 接受后台 `LeaseRecoveryService` 先恢复 expired running job 的合法状态。
-- `restore-postgres.ps1` 与 `verify-postgres-backup.ps1` 调用 PostgreSQL CLI 时显式使用 `--no-password`，避免脚本在没有 `PGPASSWORD` 或密码错误时停在交互提示。
-
-结论：build/publish 本身仍可能正常耗时，但后续 P0 不应再安静到像假死。数据库 restore/cleanup 类脚本也不应再停在密码交互提示。此前 elevated combined report `control-api-publish-restart-p0-toolbox-20260503-105110.json` 是 verifier race 失败；publish 和 Windows service restart 已完成，真实 4100 patched P0 后续已通过。2026-05-03 12:55 的 interrupted publish 已完成 runtime DLL 更新，但完整父脚本 P0 未写最终报告；旧进程已清理，服务已恢复。2026-05-03 17:52 的 S5 管理员 RC 已用 fixed publish/restart/P0 重跑通过。2026-05-03 20:01 的 S6 cleanup 执行报告已证明物理清理完成且 post-cleanup P0 通过。
-
-## 最新验证记录
-
-已通过：
-
-- F1 core-api final surface 收口：
-  - `D:\soft\program\nodejs\node.exe --check core-api\src\server.js`
-  - `D:\soft\program\nodejs\node.exe --check core-api\src\routes.js`
-  - PowerShell parser check：`scripts/windows/verify-core-api-compat-readonly.ps1`
-  - `.\scripts\windows\verify-core-api-compat-readonly.ps1`：`ok=true`，`/api/tasks/stream` 返回 `410 CORE_API_COMPAT_ROUTE_CLOSED`，`CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST` 保持 `GET /healthz;GET /api/windows-native/status`，87 个 mutating route 返回 `410 CORE_API_COMPAT_READ_ONLY`。
-  - 轻量 route contract smoke：`GET /api/tasks/stream`、`POST /api/payments/alipay/notify`、`POST /api/payments/wechat/notify` 在默认退役开关下均返回 `410 CORE_API_COMPAT_ROUTE_CLOSED`。
-- F2 services/api 归档契约：
-  - `services\api\.venv\Scripts\python.exe -m py_compile services\api\app\main.py`
-  - `services\api\.venv\Scripts\python.exe -m pytest services\api\tests\test_health.py -q`：`1 passed`
-  - `services/api` 下 `production API` / `Python production API` 文案无命中。
-- F3 finalization gate：
-  - PowerShell parser check 通过：`scripts/windows/verify-final-legacy-surface.ps1`、`scripts/windows/verify-release-candidate.ps1`、`scripts/windows/publish-runtime-to-d.ps1`、`scripts/windows/register-services.ps1`。
-  - `.\scripts\windows\verify-final-legacy-surface.ps1`：`status=ok`、`blockers=0`、`warnings=0`、`review_items=1`，已检查 54 个文件；`services/api` 47 个文本文件无 `production API` / `Python production API` 文案。
-  - RC 编排接入 smoke：`.\scripts\windows\verify-release-candidate.ps1 -SkipPublishRestartP0 -SkipFrontendHardGate -SkipP2Audit -SkipWalletAudit -SkipProjectionVerifier -SkipServiceOpsDrill -SkipCleanupDryRun`；`final-legacy-surface` step 为 `ok`、`blockers=0`。本次为 F3 接入 smoke，旧 S5/S6 重型 gate 按“不重复”要求跳过，所以顶层 `status=warning` 仅来自 skipped required gate。
-- F4 worker stub 边界显式化：
-  - `D:\soft\program\Python\Python312\python.exe -m py_compile services\local-model-worker\app\worker.py` 通过。
-  - `D:\soft\program\dotnet\dotnet.exe build control-plane-dotnet\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj -v:minimal`：0 warning / 0 error。
-  - `D:\soft\program\dotnet\dotnet.exe build control-plane-dotnet\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj -v:minimal`：0 warning / 0 error。
-- 外部 deep research 复核：
-  - 已确认外部报告提出的 `core-api` 收口、`services/api` 归档、finalization gate、worker stub 显式化均已映射并完成。
-  - 报告中的真实 provider health、真实 legacy dump/source、真实支付材料与真实 restore drill 继续只归入 README/F5 运营 evidence，不新增工程任务。
-- `.NET build` 0 warning / 0 error。
-- `npm --prefix .\XIAOLOU-main run build`。
-- `verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency`：`status=ok`、`blockers=0`、`warnings=0`、`review_items=7`。
-- 临时 `http://127.0.0.1:4110` Control API P0 smoke：`p0-c28dfce9e0974728b75bc40467d0a147`。
-- strict legacy/canonical projection verifier：`toolbox_capabilities` count 为 5，`toolbox_runs` 存在。
-- `D:\soft\program\nodejs\node.exe --check core-api\scripts\verify-legacy-canonical-projection.js` 通过。
-- 当前库 verifier smoke：`legacy-canonical-api-center-verifier-smoke-20260503-current.json`，`apiCenterHealth` 无 blocker；`bytedance` provider health evidence 仍为 warning。
-- 裁剪版 P2 audit smoke：`p2-cutover-api-center-verifier-smoke-20260503-current.json`，`status=ok`、`blockers=0`、`warnings=0`；缺真实 legacy snapshot 与 provider health evidence 均归入 `evidence_pending`。
-- synthetic projection gate：`legacy-canonical-projection-gate-fixture-20260503-113743.json`，`status=ok`、`exitPolicy=strict-ok`。
-- README 中英文同步：`README.md` 与 `README.zh-CN.md` 新增运营侧最终验收材料模块，均已规范为 UTF-8 BOM，PowerShell 直接读取中文正常。
-- 真实 `http://127.0.0.1:4100` patched P0 smoke：`p0-f48924a66257420ba521ac5844fb896c`，本次为 `-SkipWorkers`。
-- 4100 API-center/provider-health 窄口 runtime smoke：`POST /api/api-center/vendors/dashscope/test` 返回 `providerHealth.status=evidence_pending`，`GET /api/providers/health` 可见 `dashscope/CN/api-center` staged row。
-- provider-health staged-only verifier smoke：`legacy-canonical-provider-health-staged-verifier-20260503-132713.json`，`status=ok`、`exitPolicy=strict-ok`，`configuredVendorsMissingProviderHealth=5`，`configuredVendorsOnlyStagedProviderHealth=1`。
-- 裁剪版 P2 audit smoke：`p2-cutover-provider-health-staged-audit-20260503-132732.json`，`status=ok`、`blockers=0`、`warnings=0`；`api-center-provider-health-staged-only` 已归入 `evidence_pending`。
-- 临时 `http://127.0.0.1:4110` provider health route smoke：`healthy` 返回 `evidenceKind=real_provider_health`、`isRealProviderHealth=true`、`isStagedEvidence=false`；`evidence_pending` 返回 `evidenceKind=staged_evidence`、`isRealProviderHealth=false`、`isStagedEvidence=true`；`GET /api/providers/health` 列表包含语义字段。
-- 真实 4100 provider health route smoke：`healthy` 返回 `evidenceKind=real_provider_health`、`isRealProviderHealth=true`、`isStagedEvidence=false`；`evidence_pending` 返回 `evidenceKind=staged_evidence`、`isRealProviderHealth=false`、`isStagedEvidence=true`；`GET /api/providers/health` 列表包含语义字段。
-- provider health semantics publish/restart/P0：`control-api-publish-restart-p0-provider-health-semantics-20260503-162800.json`，`status=ok`、`p0_run_id=p0-aa4ae5a5e96648bf902d45f183c20ea4`、`workersVerified=true`、`service-ops-drill=ok`。
-- API-center provider health UI publish/restart/P0：`control-api-publish-restart-p0-api-center-provider-health-ui-20260503-163500.json`，`status=ok`、`publish_frontend=true`、`p0_run_id=p0-4361d93dc9e64b10ab4529e30af0dd59`、`workersVerified=true`、`service-ops-drill=ok`。
-- 4100 API-center vendor test smoke：`dashscope` 返回 `providerHealth.status=evidence_pending`、`evidenceKind=staged_evidence`、`isStagedEvidence=true`、`isRealProviderHealth=false`。
-- frontend legacy dependency gate：`frontend-legacy-dependencies-provider-health-ui-20260503-165300.json`，`status=ok`、`blockers=0`、`warnings=0`。
-- P2 cutover audit：`p2-cutover-provider-health-ui-20260503-165300.json`，`status=ok`、`blockers=0`、`warnings=0`；真实 legacy/provider evidence 与 staged-only 仍归入 `evidence_pending`。
-- S2 permission matrix verifier：`.runtime\xiaolou-logs\control-api-permission-matrix-s2-final.json`，`status=ok`、`blockers=0`、`warnings=0`；矩阵覆盖 public client token、internal、operational、payment callback、public status 五类路由。
-- S2 P2 audit 接入验证：`.runtime\xiaolou-logs\p2-cutover-audit-s2-permission-matrix-final.json`，`status=ok`、`control-api-permission-matrix` step `ok`；缺真实 legacy/provider evidence 仍只进 `evidence_pending`。
-- S2 frontend dependency gate：`.runtime\xiaolou-logs\frontend-legacy-dependencies-s2-permission-matrix-local.json`，`status=ok`、`blockers=0`、`warnings=0`。
-- S2 真实 4100 P0 smoke：`p0-1dee70abd26946afa286200510001a1a`，本次为 `-SkipWorkers`，新增 internal/operational/public-client forbidden checks 通过。
-- S3 legacy runtime dependency verifier：`.runtime\xiaolou-logs\legacy-runtime-dependencies-s3-final.json`，`status=ok`、`blockers=0`、`warnings=0`、`allowlist=111`、`review_items=1`；扫描 `.NET=35`、worker `2`、frontend `284`、core-api `37` 个 runtime/source 文件。
-- S3 P2 audit 接入验证：`.runtime\xiaolou-logs\p2-cutover-audit-s3-legacy-runtime-local.json`，`status=ok`、`blockers=0`、`warnings=0`；`legacy-runtime-dependency-isolation` step `ok`，真实 legacy/provider evidence 仍只进 `evidence_pending`。
-- S3 frontend hard gate：`.runtime\xiaolou-logs\frontend-legacy-dependencies-s3-runtime-isolation.json`，`status=ok`、`blockers=0`、`warnings=0`。
-- S3 core-api read-only smoke：临时 `http://127.0.0.1:4114` 通过；87 个 mutating routes 均返回 `410 CORE_API_COMPAT_READ_ONLY`，legacy reads 返回 `410 CORE_API_COMPAT_ROUTE_CLOSED`，允许读接口 `/healthz` 与 `/api/windows-native/status` 返回 200。
-- S4 legacy cleanup dry-run：`.runtime\xiaolou-logs\legacy-cleanup-dry-run-s4-final.json`，`status=ok`、`physical_cleanup_executed=false`、`blockers=0`、`warnings=0`、`review_items=1`；当前 runtime DB 中 `tasks`、`video_replace_jobs`、`wallet_recharge_orders`、`wallets`、`storyboards`、`videos`、`dubbings` 存在但均为 0 行，`provider_jobs`、`payment_events` 不存在。
-- S4 生成的 SQL 模板：`.runtime\xiaolou-logs\legacy-cleanup-dry-run-20260503-173702\legacy-cleanup-quarantine-dry-run.sql`、`legacy-cleanup-candidate.sql`、`legacy-cleanup-rollback-template.sql`；quarantine dry-run 已在当前 DB 上执行并 `ROLLBACK`，未留下 `legacy_quarantine` archive table。
-- S5 Release Candidate 管理员验证：`.runtime\xiaolou-logs\release-candidate-s5-final-admin.json`，`status=warning`、`administrator=true`、`blockers=0`、`warnings=1`、`evidence_pending=1`、`physical_cleanup_executed=false`；全部 required gates 均为 `ok`。顶层 warning 仅来自 projection verifier 对真实 legacy snapshot / provider health evidence 的运营侧提醒，不是工程 blocker。
-- S5 fixed publish/restart/P0：`.runtime\xiaolou-logs\release-candidate-publish-restart-p0-20260503-175206.json`，`status=ok`、`publish_frontend=true`、`p0_run_id=p0-80b1e8ed9dcd4634914a2f8570760310`。
-- S5 gate 报告归档：`release-candidate-frontend-legacy-dependencies-20260503-175206.json`、`release-candidate-p2-cutover-audit-20260503-175206.json`、`release-candidate-wallet-ledger-20260503-175206.json`、`release-candidate-legacy-canonical-projection-20260503-175206.json`、`release-candidate-service-ops-drill-20260503-175206.json`、`release-candidate-legacy-cleanup-dry-run-20260503-175206.json` 均无 blocker；管理员 service ops drill 为 `status=ok`、三项 Windows service 均 Running/Automatic/CIM metadata。
-- 非管理员 ops drill 回退 smoke：`.runtime\xiaolou-logs\windows-service-ops-drill-nonadmin-fallback-smoke.json`，`status=warning`、`blockers=0`；普通 PowerShell 下可通过 `Get-Service` + `sc.exe` 正确识别三项服务 Running，不再误报 service missing。
-- S5 后运行态复核：`XiaoLou-ControlApi`、`XiaoLou-LocalModelWorker`、`XiaoLou-ClosedApiWorker` 均 Running/Automatic；`http://127.0.0.1:4100/healthz` 为 `ok`，`/readyz` 为 `ready`。
-- S6 物理清理执行：`.runtime\xiaolou-logs\legacy-cleanup-execute-final.json`，`status=warning`、`physical_cleanup_executed=true`、`blockers=0`、`warnings=1`；warning 仅来自 pre-cleanup service ops drill 在普通权限下的 CIM/ops metadata 提醒。fresh backup 为 `.runtime\xiaolou-backups\xiaolou-20260503-200155.dump`，run dir 为 `.runtime\xiaolou-logs\legacy-cleanup-execute-20260503-200155`，cleanup SQL 为 `legacy-cleanup-execute.sql`，rollback SQL 为 `legacy-cleanup-rollback.sql`。
-- S6 清理前后 gate：restore drill `postgres-backup-verify.json` 为 `ok`；pre-cleanup P0 为 `p0-c16710670d9b4c9e80821d288cd1b454`；post-cleanup P0 为 `p0-2c04902a47104d1d92c39f9b2727d0c2`；post-cleanup projection verifier 与 wallet ledger audit 均为 `ok`。
-- S6 post-cleanup 复核：`.runtime\xiaolou-logs\legacy-cleanup-post-execute-review.json` 为 `status=ok`、`blockers=0`；`.runtime\xiaolou-logs\p2-cutover-audit-post-legacy-cleanup-final.json` 为 `status=ok`、`blockers=0`、`warnings=0`；`.runtime\xiaolou-logs\frontend-legacy-dependencies-post-legacy-cleanup-final.json` 为 `status=ok`。
-- S6 后运行态和进程复核：`XiaoLou-ControlApi`、`XiaoLou-LocalModelWorker`、`XiaoLou-ClosedApiWorker` 仍为 Running/Automatic，`http://127.0.0.1:4100/healthz` 为 `ok`，`/readyz` 为 `ready`；只读进程检查未发现 `createdb/psql/dropdb/pg_restore/pg_dump` 残留。
-- S6 后 service ops drill 补充报告：`.runtime\xiaolou-logs\windows-service-ops-drill-post-legacy-cleanup-admin.json` 为 `status=ok`、`blockers=0`、`warnings=0`，三项 Windows service 均 Running/Automatic，binPath、failure action 和 dependency 校验通过。
-- S6 cleanup/parser 检查通过：
-  - `scripts/windows/execute-legacy-cleanup.ps1`
-  - `scripts/windows/restore-postgres.ps1`
-  - `scripts/windows/verify-postgres-backup.ps1`
-  - `scripts/windows/verify-legacy-cleanup-dry-run.ps1`
-- 五个发布/验证脚本 PowerShell parser 检查通过：
-  - `scripts/windows/publish-runtime-to-d.ps1`
-  - `scripts/windows/complete-control-api-publish-restart-p0.ps1`
-  - `scripts/windows/verify-control-plane-p0.ps1`
-  - `scripts/windows/verify-control-api-permission-matrix.ps1`
-  - `scripts/windows/verify-p2-cutover-audit.ps1`
-- `git diff --check` 无 whitespace error，仅保留 Git 的 LF/CRLF 工作区提示。
-
-历史通过的关键报告：
-
-- admin/system publish/restart/P0：`control-api-publish-restart-p0-admin-system-20260503-091100.json`
-- admin/system runtime smoke：`control-api-admin-system-runtime-smoke-20260503-091831.json`
-- Playground publish/restart/P0：`control-api-publish-restart-p0-playground-20260503-101541.json`
-- frontend legacy gate：`frontend-legacy-dependencies-20260503-102934.json`
-- P2 audit：`p2-cutover-audit-20260503-102945.json`
-
-## 旧表统合与退役策略
-
-目标：生产运行态只保留 PostgreSQL canonical 表、字段和约束。旧表和旧字段不能继续作为运行时事实源。
-
-阶段：
-
-1. 盘点与冻结：逐域列出旧表、旧字段、旧 route、旧 worker 和 canonical 目标表，冻结旧主写入口。
-2. 补列与投影：同名旧表只做向前兼容 `ADD COLUMN IF NOT EXISTS`、索引、约束和 JSON backfill；语义不同的旧表通过幂等 `INSERT ... SELECT ... ON CONFLICT DO UPDATE` 投影到 canonical 表。
-3. 运行时切断：Control API、worker、P0 smoke、frontend 调用只能读写 canonical 表和字段。
-4. 一致性闸门：verifier 检查旧表未投影、canonical 必填缺失、孤儿引用、JSON/列字段冲突，并作为 blocker。
-5. 清理退役：只有完成 publish/restart/P0、4100 smoke、硬闸门、备份，并进入 README 定义的最终验收 evidence 流程后，才允许隔离或物理清理旧表旧字段。
-6. 迁移保留：只保留 SQLite/旧架构到 canonical PostgreSQL 的导入脚本、staging schema、dry-run plan、校验报告和回滚证据。
-
-project 相邻域已经完成第 3/4/5 阶段：`projectAdjacentHealth` 会把旧表未投影、canonical 必填缺失、孤儿引用、JSON/列字段冲突作为 blocker，synthetic fixture 与当前测试库均通过。API-center/vendor 域已补 `apiCenterHealth`，用于守住 canonical vendor 配置不含明文 secret、默认模型引用可解析、provider health evidence 不被误作当前 blocker。S3 旧表 runtime 依赖隔离已通过源码扫描、P2 audit 接入、frontend hard gate 与 core-api read-only smoke。S4 dry-run、S5 RC 与 S6 物理清理均已完成；旧表 archive 保留在 `legacy_quarantine` schema 作为回滚 evidence，不再作为 runtime 事实源。
-
-## 当前有效下一步
-
-deep research 的结论已经合并到 `docs/xiaolouai-deep-research-structured.md`。后续不再按“继续大迁移”推进，而是只做下面几个有限任务卡；每次只取一个任务卡完成、验证、回写 handoff。
-
-1. 不重复 project/create/canvas、identity/config、project-adjacent、admin/system、Playground、Toolbox、S0 provider health、S1 API-center vendor、S2 权限矩阵、S3 legacy runtime dependency isolation、S4 cleanup dry-run、S5 Release Candidate、S6 physical legacy cleanup 已完成批次。
-2. F1、F2、F3、F4 已完成；当前只剩 F5 持续观察与运营 evidence 对接，不是工程 blocker。
-3. 真实 provider health、真实 legacy dump/source、真实支付材料与真实 restore drill 仍只按根 README 最终验收模块补齐，不写成工程 blocker。
-4. 默认不再次清理 public legacy 表，也不清理 `legacy_quarantine` archive，除非用户明确要求进入回滚或归档压缩窗口。
-5. 每批收尾必须同步本文件和 `docs/xiaolouai-finalization-handoff.md`；若涉及 README，必须同步中英文双版。
-
-### 去循环化任务卡
-
-| 任务 | 当前状态 | 只允许修改的主要范围 | 完成条件 | 必跑验证 |
-|---|---|---|---|---|
-| F1 core-api final surface 收口 | 已完成。`/api/tasks/stream` 默认由 `CORE_API_COMPAT_DISABLE_TASKS_STREAM=1` 关闭；`/api/payments/alipay/notify` 和 `/api/payments/wechat/notify` 默认由 `CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY=0` 关闭。 | 已修改 `core-api/src/routes.js` 与 `scripts/windows/verify-core-api-compat-readonly.ps1`。 | legacy route 状态：`GET /api/tasks/stream -> 410 CORE_API_COMPAT_ROUTE_CLOSED`；`POST /api/payments/alipay/notify -> 410 CORE_API_COMPAT_ROUTE_CLOSED`；`POST /api/payments/wechat/notify -> 410 CORE_API_COMPAT_ROUTE_CLOSED`；`GET /healthz` 与 `GET /api/windows-native/status` 保持允许。 | 已通过 `node --check core-api/src/server.js`；`node --check core-api/src/routes.js`；`.\scripts\windows\verify-core-api-compat-readonly.ps1`；轻量 route contract smoke。 |
-| F2 services/api 归档契约 | 已完成。`services/api/app/main.py` 已改成 `XiaoLouAI Legacy Reference API`；`services/api` 中无 `production API` 文案。 | 已修改 `services/api/app/main.py`、`services/api/README.md`、`services/api/README.zh-CN.md`、`services/api/tests/test_health.py`，并同步根 README 中英文版。 | 归档定位明确：不进入 Windows publish/register service；仅保留到旧路由映射、schema 对照或历史支付/上传/video-replace 参考不再需要，且 final legacy-surface gate 无依赖后迁入 `legacy/` 或删除。 | 已通过 `services\api\.venv\Scripts\python.exe -m py_compile services\api\app\main.py`；`services\api\.venv\Scripts\python.exe -m pytest services\api\tests\test_health.py -q`；`services/api` 下无 `production API` 文案命中。 |
-| F3 finalization gate | 已完成。`scripts/windows/verify-final-legacy-surface.ps1` 已新增并接入 RC required gate；F1 core-api 关闭开关已同步到 Windows env 示例、publish 和 register 链路。 | 已修改 `scripts/windows/verify-final-legacy-surface.ps1`、`scripts/windows/verify-release-candidate.ps1`、`scripts/windows/.env.windows.example`、`scripts/windows/publish-runtime-to-d.ps1`、`scripts/windows/register-services.ps1`。 | gate 输出 JSON：`status/blockers/warnings/review_items/checked_files`；检查 core-api allowlist、services/api production wording、README 定位、未计划 runtime service；作为 RC required gate。legacy route 状态延续 F1：tasks stream 与两类 legacy payment notify 默认 410 closed。 | 已通过 `.\scripts\windows\verify-final-legacy-surface.ps1`；RC 编排接入 smoke：`.\scripts\windows\verify-release-candidate.ps1 -SkipPublishRestartP0 -SkipFrontendHardGate -SkipP2Audit -SkipWalletAudit -SkipProjectionVerifier -SkipServiceOpsDrill -SkipCleanupDryRun` |
-| F4 worker stub 边界显式化 | 已完成。local-model worker 与 ClosedApiWorker 的默认成功结果均显式标记 `stubbed-simulated` / `not_connected`，并保留旧 `status=stubbed`。 | 已修改 `services/local-model-worker/app/worker.py`、`control-plane-dotnet/src/XiaoLou.ClosedApiWorker/Program.cs`、README 中英文版、`services/local-model-worker` README 中英文版、`control-plane-dotnet` README 中英文版。 | 文档和结果字段明确：已完成的是 canonical queue + worker skeleton，不等于真实模型/provider 接入；JSON 形状向后兼容。legacy route 状态不变，仍延续 F1 三个 core-api legacy route 默认 410 closed。 | 已通过 `D:\soft\program\Python\Python312\python.exe -m py_compile services\local-model-worker\app\worker.py`；`D:\soft\program\dotnet\dotnet.exe build control-plane-dotnet\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj -v:minimal`；`D:\soft\program\dotnet\dotnet.exe build control-plane-dotnet\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj -v:minimal` |
-| F5 post-cleanup RC 观察 / 运营 evidence 对接 | 持续中，不是工程 blocker。 | README 最终验收模块、运行态报告归档、handoff。 | 真实 provider health、真实支付、真实 legacy dump/source、真实 restore drill 只作为运营 evidence 跟踪；不改成源码缺陷。 | `verify-release-candidate.ps1`、service ops drill、4100 health/ready smoke |
-
-执行规则：
-
-- 每轮只做一个 F 任务；不要把 F1-F4 合并成“继续完善迁移收尾”。
-- 每轮输出必须列出：变更文件、legacy route 最终状态、运行命令、未处理 TODO、handoff 同步点。
-- 如果某个任务发现已被前一轮完成，就只补 verifier 或文档证据，不再重复改业务代码。
-- 如需回滚 S6 物理清理，优先使用 `.runtime\xiaolou-logs\legacy-cleanup-execute-20260503-200155\legacy-cleanup-rollback.sql` 与 `.runtime\xiaolou-backups\xiaolou-20260503-200155.dump`，并在回滚后重跑 4100 P0、frontend hard gate、P2 audit、projection verifier、wallet audit 和 service ops drill。
-
-## 禁止回退
-
-- 不回到 Docker、Docker Compose、Linux、Linux container、Kubernetes 或 WSL 生产路线。
-- 不把 Windows + Celery 作为生产异步控制面。
-- 不把 Redis Open Source on Windows 作为关键生产依赖。
-- 不把 RabbitMQ 作为默认队列；它只保留为可选后续 adapter。
-- 前端生产入口仍是静态构建产物，不允许由 Vite dev server / preview 承担线上流量。
-
-## 下一棒提示词
+状态：下一步默认执行。
 
 ```text
-继续 XiaoLouAI 最终收口。先读 XIAOLOU_REFACTOR_HANDOFF.md 获取当前权威交接，再读 docs/xiaolouai-finalization-handoff.md 和 docs/xiaolouai-deep-research-structured.md。当前路线只走 .NET 8 / ASP.NET Core Control API + PostgreSQL canonical + Windows Service workers，不推进 Docker/Linux/Kubernetes、Windows + Celery 或 Redis Open Source on Windows。A/B/C/D、前序 P2 frontend legacy route 批次、project/create/canvas、identity/config、project 相邻、admin/system、Playground、Toolbox、S0 provider health、S1 API-center vendor、S2 权限矩阵、S3 legacy runtime dependency isolation、S4 cleanup dry-run、S5 Release Candidate 与 S6 physical legacy cleanup 均已完成，不要重复。F1 core-api final surface 收口、F2 services/api 归档契约、F3 finalization gate 与 F4 worker stub 边界显式化均已完成；worker 成功结果显式标记 `executionMode=stubbed-simulated`、`adapterStatus=not_connected`，只代表 canonical queue + worker skeleton，不代表真实模型/provider 接入。当前只剩 F5 post-cleanup RC 观察与运营侧 evidence 对接，且不是工程 blocker。每轮必须列出变更文件、legacy route 最终状态、验证命令、未处理 TODO，并同步 XIAOLOU_REFACTOR_HANDOFF.md 与 docs/xiaolouai-finalization-handoff.md；若涉及 README，按中英文双版同步更新。真实 provider health、真实 legacy dump/source、真实支付材料与真实 restore drill 只进 README 最终验收模块，不写成源码 blocker；不要清理 legacy_quarantine archive，除非用户明确要求回滚或归档压缩。
+执行 G9a API bandwidth / SSE-WebSocket ownership。先读取并核对 XIAOLOU_REFACTOR_HANDOFF.md、docs/xiaolouai-finalization-handoff.md、docs/xiaolouai-deep-research-structured.md、docs/xiaolouai-top-level-directory-organization-inventory.md。只分析并处理 API bandwidth owner：复扫 `XIAOLOU-main\src` 的 fetch/stream/EventSource/WebSocket/轮询调用、`control-plane-dotnet` public API endpoints、`deploy\caddy`、`deploy\windows`、`scripts` 中 `/api/*`、`/healthz`、`/metrics`、provider health、payment callbacks、SSE/WebSocket 现状；输出高带宽/高频 API、payload 风险、缓存禁区和监控证据缺口。若能做最小可验证改动，只允许一个窄范围改动；不得恢复 legacy/core-api、legacy/services-api、legacy/jaaz，不得引入 Service Worker、CDN、新 compression、WebP/AVIF 或 preload/prefetch 策略。验证至少包括 frontend legacy dependency gate、必要的静态扫描、git diff --check；若触碰前端生产构建则跑 npm --prefix XIAOLOU-main run build。同步 handoff/docs。不要碰 legacy/core-api、legacy/services-api、legacy/jaaz、legacy_quarantine；不要执行 execute-legacy-cleanup.ps1。
 ```
+
+验收边界：
+
+- G7 corrective、G8a readiness、G8b-1 manualChunks react shell split、G8b-2 canvas-heavy-chunks、G8c compression、G8d preload-prefetch、G8e static-media-format、G8f dependency-audit、G8g service-worker-cdn 已完成；不要再移动目录，除非用户明确指定。
+- 若 `rg` 仍报 `Access is denied`，使用 `Select-String`。
+- 每轮只处理一个 G8 owner，不一次性混入 manualChunks、compression、preload、WebP、Service Worker 等多项高风险改动。
+- 若触碰前端生产构建，至少跑 `npm --prefix XIAOLOU-main run build` 或记录明确 blocker。
+- 不允许把 legacy reference 注册回 production runtime。
+
+## 队列索引
+
+G7b runtime-artifact 队列来自 `docs/xiaolouai-top-level-directory-organization-inventory.md`：
+
+```text
+1. xiaolou-backups -> no-op, root empty; effective refs point to .runtime\xiaolou-backups
+2. xiaolou-cache   -> no-op, root empty; effective refs point to .runtime\xiaolou-cache
+3. xiaolou-temp    -> no-op, root empty; effective refs point to .runtime\xiaolou-temp
+4. xiaolou-logs    -> no-op, root empty; effective refs point to .runtime\xiaolou-logs
+5. xiaolou-inputs  -> no-op, root empty; effective refs point to .runtime\xiaolou-inputs
+6. xiaolou-replay  -> no-op, root empty; effective refs point to .runtime\xiaolou-replay
+7. .cache          -> moved, content now under .runtime\xiaolou-cache\legacy-cache
+```
+
+G7c active/support 队列现在进入：
+
+```text
+1. caddy                  -> moved, deploy\caddy
+2. video-replace-service  -> moved, tools\video\video-replace-service
+3. jaaz                   -> moved, legacy\jaaz
+```
+
+G7 corrective 队列必须先完成或 blocked，再进入 G8/G9：
+
+```text
+1. runtime-root-residue   -> moved/removed, empty root dirs removed; root .cache/.codex logs moved under .runtime; root .cache\gh recurrence env-fixed
+2. video-replace-service  -> moved, tools\video\video-replace-service, aligned with homepage toolbox cards and /create/video-replace
+3. jaaz                   -> moved, legacy\jaaz
+```
+
+G7 corrective 队列已完成；G8 可以开始。P0-admin 已完成，不再重开，除非出现新的 RC 失败报告或用户要求重新验证。
+
+G8 frontend high-risk optimization owner 队列：
+
+```text
+1. G8b-1 manualChunks-react-shell  -> done, 只拆 react/react-dom/react-router-dom vendor。
+2. G8b-2 canvas-heavy-chunks       -> done, OrbitCameraControl 面板级 lazy，3D vendor 不再挂在 useCreateCreditQuote shared chunk。
+3. G8c compression                 -> done, build 生成 .br/.gz sidecar；Caddy 使用 precompressed；IIS 示例开启 static compression。
+4. G8d preload-prefetch            -> done, 侧栏导航 hover/focus intent-based route module prefetch；HTML preload 不变。
+5. G8e static-media-format         -> done, 删除未使用 210.44 KiB 大 PNG；当前发布包媒体只剩 shell logo/favicon。
+6. G8f dependency-audit            -> done, 移除未引用 face-api.js；package-lock 487 -> 478；未同轮处理其他 0-import 依赖。
+7. G8g service-worker-cdn          -> done, 不新增 SW/CDN；只退役旧 SW 与旧 XiaoLou/Workbox/Vite precache。
+8. G9a API bandwidth/SSE-WebSocket -> next, 复扫高频 API、payload、SSE/WebSocket 与监控证据缺口。
+```
+
+## 验证入口
+
+G9a 建议命令：
+
+```powershell
+$env:XDG_CACHE_HOME = 'D:\code\XiaoLouAI\.runtime\xiaolou-cache\tooling-cache'
+Select-String -Path .\XIAOLOU-main\src\**\*.ts,.\XIAOLOU-main\src\**\*.tsx -Pattern @('fetch(','EventSource','WebSocket','ReadableStream','setInterval','poll','stream','/api/','/healthz','/metrics') -Encoding UTF8
+Select-String -Path .\control-plane-dotnet\**\*.cs -Pattern @('MapGet','MapPost','/api/','/healthz','/metrics','text/event-stream','WebSocket') -Encoding UTF8
+Select-String -Path .\deploy\caddy\*,.\deploy\windows\*,.\scripts\**\* -Pattern @('/api/','/healthz','/metrics','providers/health','payments','EventSource','WebSocket','Cache-Control') -Encoding UTF8
+.\scripts\windows\verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency
+git diff --check
+```
+
+## 禁止项
+
+- 不执行 `scripts\windows\execute-legacy-cleanup.ps1`。
+- 不清理 `legacy_quarantine`。
+- 不把 Docker/Linux/Kubernetes/WSL、Windows + Celery 或 Redis OSS on Windows 写成生产方案。
+- 不把 legacy reference 注册回 production runtime。
+- 不跳过当前 owner 的验证。
+
+## 输出要求
+
+每轮必须列出：
+
+- 变更文件。
+- legacy route 最终状态。
+- 验证命令和结果。
+- 未处理 TODO。
+- 是否同步 `XIAOLOU_REFACTOR_HANDOFF.md`、`docs/xiaolouai-finalization-handoff.md`、`docs/xiaolouai-deep-research-structured.md`、`docs/xiaolouai-top-level-directory-organization-inventory.md`。
+- README 是否修改；若未改，说明原因。

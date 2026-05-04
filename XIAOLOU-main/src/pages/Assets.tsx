@@ -1348,6 +1348,8 @@ export default function Assets() {
                                 src={previewUrl}
                                 alt={asset.name}
                                 className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                                loading="lazy"
+                                decoding="async"
                                 referrerPolicy="no-referrer"
                               />
                             ) : isVideoAsset(asset) && assetMediaUrl(asset) ? (
@@ -1520,6 +1522,8 @@ export default function Assets() {
                                       src={previewUrl}
                                       alt={asset.name}
                                       className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                                      loading="lazy"
+                                      decoding="async"
                                       referrerPolicy="no-referrer"
                                     />
                                   ) : isVideoAsset(asset) && assetMediaUrl(asset) ? (
@@ -1683,6 +1687,8 @@ export default function Assets() {
                                     src={previewUrl}
                                     alt={asset.name}
                                     className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                                    loading="lazy"
+                                    decoding="async"
                                     referrerPolicy="no-referrer"
                                   />
                                 ) : (
@@ -1813,6 +1819,8 @@ export default function Assets() {
                                     src={getGeneratedMediaUrl(cp.thumbnailUrl) || cp.thumbnailUrl}
                                     alt={cp.title}
                                     className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                                    loading="lazy"
+                                    decoding="async"
                                     referrerPolicy="no-referrer"
                                   />
                                 ) : (
@@ -1930,6 +1938,8 @@ export default function Assets() {
                             src={getGeneratedMediaUrl(cp.thumbnailUrl) || cp.thumbnailUrl}
                             alt={cp.title}
                             className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                            loading="lazy"
+                            decoding="async"
                             referrerPolicy="no-referrer"
                           />
                         ) : (

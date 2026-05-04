@@ -7,15 +7,25 @@
 $ErrorActionPreference = "Continue"
 
 $ROOT = (Split-Path $PSScriptRoot -Parent)
-$CACHE_ROOT = Join-Path $ROOT ".cache"
+$runtimeStateRoot = if ($env:XIAOLOU_RUNTIME_ROOT) { $env:XIAOLOU_RUNTIME_ROOT } else { Join-Path $ROOT ".runtime" }
+$CACHE_ROOT = Join-Path $runtimeStateRoot "xiaolou-cache\legacy-cache"
 $HF_ROOT = Join-Path $CACHE_ROOT "huggingface"
 
+New-Item -ItemType Directory -Force -Path $CACHE_ROOT | Out-Null
 $env:XDG_CACHE_HOME = $CACHE_ROOT
 $env:PIP_CACHE_DIR = Join-Path $CACHE_ROOT "pip"
 $env:HF_HOME = $HF_ROOT
 $env:HUGGINGFACE_HUB_CACHE = Join-Path $HF_ROOT "hub"
 $env:TRANSFORMERS_CACHE = Join-Path $HF_ROOT "transformers"
 $env:TORCH_HOME = Join-Path $CACHE_ROOT "torch"
+
+function Resolve-WorkspacePath($path, $fallback) {
+    $value = if ($path) { $path } else { $fallback }
+    if ([System.IO.Path]::IsPathRooted($value)) {
+        return [System.IO.Path]::GetFullPath($value)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $ROOT $value))
+}
 
 function Test-Port($port) {
     $out = netstat -ano 2>$null | Select-String ":$port\s+\S+\s+LISTENING"
@@ -38,21 +48,24 @@ Write-Host ""
 # ===========================================================
 # 1. core-api  (port 4100)
 # ===========================================================
-$coreLog = "$ROOT\core-api\core-api.log"
-$coreErr = "$ROOT\core-api\core-api.err.log"
+$legacyCoreApiRoot = Resolve-WorkspacePath $env:LEGACY_CORE_API_ROOT "legacy\core-api"
+$legacyJaazRoot = Resolve-WorkspacePath $env:LEGACY_JAAZ_ROOT "legacy\jaaz"
+$coreLog = Join-Path $legacyCoreApiRoot "core-api.log"
+$coreErr = Join-Path $legacyCoreApiRoot "core-api.err.log"
 
 if (Test-Port 4100) {
-    Write-Host "[core-api] Already running on :4100, skipping." -ForegroundColor Yellow
+    Write-Host "[legacy core-api] Already running on :4100, skipping." -ForegroundColor Yellow
 } else {
     Rotate-Log $coreLog
     Rotate-Log $coreErr
     $proc = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c node src/server.js >> `"$coreLog`" 2>> `"$coreErr`"" `
-        -WorkingDirectory "$ROOT\core-api" `
+        -WorkingDirectory $legacyCoreApiRoot `
         -WindowStyle Hidden `
         -PassThru
-    Write-Host "[core-api] Started  PID=$($proc.Id)" -ForegroundColor Green
-    Write-Host "           Log: core-api\core-api.log" -ForegroundColor DarkGray
+    Write-Host "[legacy core-api] Started  PID=$($proc.Id)" -ForegroundColor Green
+    Write-Host "                  Root: $legacyCoreApiRoot" -ForegroundColor DarkGray
+    Write-Host "                  Log:  $coreLog" -ForegroundColor DarkGray
 }
 
 # ===========================================================
@@ -78,9 +91,10 @@ if (Test-Port 3000) {
 # ===========================================================
 # 3. Jaaz server  (port 57988)
 # ===========================================================
-$jaazServerLog = "$ROOT\jaaz\jaaz-server-57988.out.log"
-$jaazServerErr = "$ROOT\jaaz\jaaz-server-57988.err.log"
-$jaazPython = "$ROOT\jaaz\.venv\Scripts\python.exe"
+$jaazServerLog = Join-Path $legacyJaazRoot "jaaz-server-57988.out.log"
+$jaazServerErr = Join-Path $legacyJaazRoot "jaaz-server-57988.err.log"
+$jaazPython = Join-Path $legacyJaazRoot ".venv\Scripts\python.exe"
+$jaazServerRoot = Join-Path $legacyJaazRoot "server"
 
 if (Test-Port 57988) {
     Write-Host "[jaaz-api] Already running on :57988, skipping." -ForegroundColor Yellow
@@ -91,18 +105,20 @@ if (Test-Port 57988) {
     Rotate-Log $jaazServerErr
     $proc3 = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c `"$jaazPython`" main.py --port 57988 >> `"$jaazServerLog`" 2>> `"$jaazServerErr`"" `
-        -WorkingDirectory "$ROOT\jaaz\server" `
+        -WorkingDirectory $jaazServerRoot `
         -WindowStyle Hidden `
         -PassThru
     Write-Host "[jaaz-api] Started  PID=$($proc3.Id)" -ForegroundColor Green
-    Write-Host "           Log: jaaz\jaaz-server-57988.out.log" -ForegroundColor DarkGray
+    Write-Host "           Root: $legacyJaazRoot" -ForegroundColor DarkGray
+    Write-Host "           Log:  $jaazServerLog" -ForegroundColor DarkGray
 }
 
 # ===========================================================
 # 4. Jaaz frontend  (port 5174)
 # ===========================================================
-$jaazViteLog = "$ROOT\jaaz\react\vite-dev.log"
-$jaazViteErr = "$ROOT\jaaz\react\vite-dev.err.log"
+$jaazReactRoot = Join-Path $legacyJaazRoot "react"
+$jaazViteLog = Join-Path $jaazReactRoot "vite-dev.log"
+$jaazViteErr = Join-Path $jaazReactRoot "vite-dev.err.log"
 
 if (Test-Port 5174) {
     Write-Host "[jaaz-ui]  Already running on :5174, skipping." -ForegroundColor Yellow
@@ -111,18 +127,19 @@ if (Test-Port 5174) {
     Rotate-Log $jaazViteErr
     $proc4 = Start-Process -FilePath "cmd.exe" `
         -ArgumentList "/c npm run dev >> `"$jaazViteLog`" 2>> `"$jaazViteErr`"" `
-        -WorkingDirectory "$ROOT\jaaz\react" `
+        -WorkingDirectory $jaazReactRoot `
         -WindowStyle Hidden `
         -PassThru
     Write-Host "[jaaz-ui]  Started  PID=$($proc4.Id)" -ForegroundColor Green
-    Write-Host "           Log: jaaz\react\vite-dev.log" -ForegroundColor DarkGray
+    Write-Host "           Root: $legacyJaazRoot" -ForegroundColor DarkGray
+    Write-Host "           Log:  $jaazViteLog" -ForegroundColor DarkGray
 }
 
 # ===========================================================
-# Wait for core-api to be ready (up to 20s)
+# Wait for legacy core-api to be ready (up to 20s)
 # ===========================================================
 Write-Host ""
-Write-Host "Waiting for core-api..." -NoNewline
+Write-Host "Waiting for legacy core-api..." -NoNewline
 $waited = 0
 while (-not (Test-Port 4100) -and $waited -lt 20) {
     Start-Sleep -Seconds 1
@@ -137,17 +154,17 @@ Write-Host ""
 Write-Host ""
 Write-Host "--- Port status ---" -ForegroundColor DarkGray
 
-if (Test-Port 4100) { Write-Host "  core-api  :4100  OK" -ForegroundColor Green } `
-else                 { Write-Host "  core-api  :4100  TIMEOUT (check core-api.log)" -ForegroundColor Red }
+if (Test-Port 4100) { Write-Host "  legacy core-api :4100  OK" -ForegroundColor Green } `
+else                 { Write-Host "  legacy core-api :4100  TIMEOUT (check $coreLog)" -ForegroundColor Red }
 
 if (Test-Port 3000) { Write-Host "  Vite      :3000  OK" -ForegroundColor Green } `
 else                 { Write-Host "  Vite      :3000  starting... (check vite-dev.log)" -ForegroundColor Yellow }
 
 if (Test-Port 57988) { Write-Host "  Jaaz API  :57988 OK" -ForegroundColor Green } `
-else                 { Write-Host "  Jaaz API  :57988 not listening (check jaaz-server-57988.err.log)" -ForegroundColor Yellow }
+else                 { Write-Host "  Jaaz API  :57988 not listening (check $jaazServerErr)" -ForegroundColor Yellow }
 
 if (Test-Port 5174) { Write-Host "  Jaaz UI   :5174  OK" -ForegroundColor Green } `
-else                { Write-Host "  Jaaz UI   :5174  starting... (check jaaz\react\vite-dev.log)" -ForegroundColor Yellow }
+else                { Write-Host "  Jaaz UI   :5174  starting... (check $jaazViteLog)" -ForegroundColor Yellow }
 
 Write-Host ""
 Write-Host "Access:" -ForegroundColor Cyan

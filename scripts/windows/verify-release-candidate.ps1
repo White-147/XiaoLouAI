@@ -1,6 +1,8 @@
 param(
   [string]$RepoRoot = "",
   [string]$EnvFile = "$PSScriptRoot\.env.windows",
+  [string]$CoreApiRoot = "",
+  [string]$ServicesApiRoot = "",
   [string]$NodeExe = "",
   [string]$BaseUrl = "",
   [string]$P0AccountOwnerId = "",
@@ -25,6 +27,20 @@ if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
+
+if (-not $ServicesApiRoot) {
+  $ServicesApiRoot = Join-Path $RepoRoot "legacy\services-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($ServicesApiRoot)) {
+  $ServicesApiRoot = Join-Path $RepoRoot $ServicesApiRoot
+}
+$ServicesApiRoot = [System.IO.Path]::GetFullPath($ServicesApiRoot)
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -237,6 +253,8 @@ if ($SkipFinalLegacySurface) {
     Invoke-ReportScript "final-legacy-surface" $finalSurfaceReport {
       & "$PSScriptRoot\verify-final-legacy-surface.ps1" `
         -RepoRoot $RepoRoot `
+        -CoreApiRoot $CoreApiRoot `
+        -ServicesApiRoot $ServicesApiRoot `
         -ReportPath $finalSurfaceReport | Out-Null
     }
   } | Out-Null
@@ -292,6 +310,7 @@ if ($SkipP2Audit) {
       & "$PSScriptRoot\verify-p2-cutover-audit.ps1" `
         -RepoRoot $RepoRoot `
         -EnvFile $EnvFile `
+        -CoreApiRoot $CoreApiRoot `
         -NodeExe $NodeExe `
         -ReportPath $p2Report `
         -CoreApiPort $CoreApiPort `
@@ -320,6 +339,7 @@ if ($SkipProjectionVerifier) {
       & "$PSScriptRoot\verify-legacy-canonical-projection.ps1" `
         -RepoRoot $RepoRoot `
         -EnvFile $EnvFile `
+        -CoreApiRoot $CoreApiRoot `
         -NodeExe $NodeExe `
         -ReportPath $projectionReport `
         -AllowMissingLegacy `
@@ -371,6 +391,8 @@ $report = [ordered]@{
   status = $status
   phase = "S5-release-candidate"
   source_root = $RepoRoot
+  core_api_root = $CoreApiRoot
+  services_api_root = $ServicesApiRoot
   env_file = $EnvFile
   base_url = $BaseUrl
   administrator = $administrator

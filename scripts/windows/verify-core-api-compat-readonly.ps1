@@ -1,6 +1,7 @@
 param(
   [string]$RepoRoot = "",
   [string]$EnvFile = "$PSScriptRoot\.env.windows",
+  [string]$CoreApiRoot = "",
   [string]$NodeExe = "",
   [string]$DatabaseUrl = "",
   [int]$Port = 4113,
@@ -44,6 +45,14 @@ $ErrorActionPreference = "Stop"
 if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
+$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
 
 . "$PSScriptRoot\load-env.ps1" -EnvFile $EnvFile
 
@@ -294,7 +303,6 @@ function Assert-CoreApiFinalSurfaceSource {
 }
 
 $NodeExe = Resolve-DTool $NodeExe "NODE_EXE" "D:\soft\program\nodejs\node.exe" "Node.js"
-$CoreApiRoot = Join-Path $RepoRoot "core-api"
 $PackageJson = Join-Path $CoreApiRoot "package.json"
 $PgModule = Join-Path $CoreApiRoot "node_modules\pg\package.json"
 if (-not (Test-Path -LiteralPath $PackageJson)) {
@@ -455,6 +463,7 @@ try {
     baseUrl = "http://127.0.0.1:$Port"
     databaseUrl = $DatabaseUrl
     nodeExe = $NodeExe
+    coreApiRoot = $CoreApiRoot
     compatPublicRouteAllowlist = $CompatPublicRouteAllowlist
     stdoutLog = $stdoutLog
     stderrLog = $stderrLog

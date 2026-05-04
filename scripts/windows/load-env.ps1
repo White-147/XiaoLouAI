@@ -26,6 +26,46 @@ function Ensure-DirectoryEnv {
   }
 }
 
+function Get-NormalizedPathForCompare {
+  param([string]$Path)
+
+  if (-not $Path) {
+    return ""
+  }
+
+  return [System.IO.Path]::GetFullPath($Path).TrimEnd([char[]]@("\", "/"))
+}
+
+function Ensure-XdgCacheHome {
+  param(
+    [string]$RepoRoot,
+    [string]$CacheRoot
+  )
+
+  $defaultValue = Join-Path $CacheRoot "tooling-cache"
+  $currentValue = [Environment]::GetEnvironmentVariable("XDG_CACHE_HOME", "Process")
+  $repoRootCache = Join-Path $RepoRoot ".cache"
+  $shouldSet = -not $currentValue
+
+  if ($currentValue) {
+    $currentFull = Get-NormalizedPathForCompare $currentValue
+    $repoRootCacheFull = Get-NormalizedPathForCompare $repoRootCache
+    if ($currentFull.Equals($repoRootCacheFull, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $currentFull.StartsWith("$repoRootCacheFull\", [System.StringComparison]::OrdinalIgnoreCase)) {
+      $shouldSet = $true
+    }
+  }
+
+  if ($shouldSet) {
+    [Environment]::SetEnvironmentVariable("XDG_CACHE_HOME", $defaultValue, "Process")
+  }
+
+  $path = [Environment]::GetEnvironmentVariable("XDG_CACHE_HOME", "Process")
+  if ($path) {
+    New-Item -ItemType Directory -Force -Path $path | Out-Null
+  }
+}
+
 function Get-DefaultRuntimeLayout {
   $candidateRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
   $candidateParent = Split-Path -Parent $candidateRoot
@@ -86,6 +126,7 @@ Ensure-DirectoryEnv "BACKUP_DIR" (Join-Path $runtimeRoot "xiaolou-backups")
 $cacheRoot = [Environment]::GetEnvironmentVariable("LOCAL_CACHE_DIR", "Process")
 $tempRoot = [Environment]::GetEnvironmentVariable("LOCAL_TEMP_DIR", "Process")
 
+Ensure-XdgCacheHome $defaultRepoRoot $cacheRoot
 Ensure-DirectoryEnv "TMP" $tempRoot
 Ensure-DirectoryEnv "TEMP" $tempRoot
 Ensure-DirectoryEnv "DOTNET_CLI_HOME" (Join-Path $cacheRoot "dotnet-cli-home")

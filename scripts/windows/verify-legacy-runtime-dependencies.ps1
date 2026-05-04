@@ -1,5 +1,6 @@
 param(
   [string]$RepoRoot = "",
+  [string]$CoreApiRoot = "",
   [string]$ReportPath = ""
 )
 
@@ -9,6 +10,13 @@ if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
 
 if (-not $ReportPath) {
   $logDir = [Environment]::GetEnvironmentVariable("LOG_DIR", "Process")
@@ -80,7 +88,14 @@ function Test-AllowedLegacyFinding {
   $line = [string]$Finding.detail
   $route = [string]$Finding.route
 
-  if ($file -match "^core-api\\src\\") {
+  $isCoreApiSource = $file -match "^(core-api|legacy\\core-api)\\src\\"
+  if (-not $isCoreApiSource -and $script:CoreApiSourceDisplayRoot) {
+    $prefix = "$($script:CoreApiSourceDisplayRoot)\"
+    $isCoreApiSource = $file.Equals($script:CoreApiSourceDisplayRoot, [StringComparison]::OrdinalIgnoreCase) `
+      -or $file.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+  }
+
+  if ($isCoreApiSource) {
     return [ordered]@{
       allowed = $true
       reason = "core-api is retained only as read-only compatibility/migration reference; S3 requires CORE_API_COMPAT_READ_ONLY and the compat-readonly smoke."
@@ -143,7 +158,9 @@ $findings = New-List
 $dotnetFiles = @(Get-SourceFiles (Join-Path $RepoRoot "control-plane-dotnet\src") @("*.cs", "*.json"))
 $workerFiles = @(Get-SourceFiles (Join-Path $RepoRoot "services\local-model-worker\app") @("*.py"))
 $frontendFiles = @(Get-SourceFiles (Join-Path $RepoRoot "XIAOLOU-main\src") @("*.ts", "*.tsx", "*.js", "*.jsx"))
-$coreApiFiles = @(Get-SourceFiles (Join-Path $RepoRoot "core-api\src") @("*.js"))
+$coreApiSourceRoot = Join-Path $CoreApiRoot "src"
+$script:CoreApiSourceDisplayRoot = Get-DisplayPath $coreApiSourceRoot
+$coreApiFiles = @(Get-SourceFiles $coreApiSourceRoot @("*.js"))
 
 $legacyTablePattern = "(?i)\b(from|join|insert\s+into|update|delete\s+from)\s+(tasks|wallet_recharge_orders|storyboards|videos|dubbings)\b"
 $legacyHelperPattern = 'DeleteProjectItemAsync\("(?<table>storyboards|videos|dubbings)"'
@@ -153,7 +170,7 @@ foreach ($sourceGroup in @(
   [ordered]@{ name = "dotnet"; files = $dotnetFiles; runtime = "control-plane-dotnet/src" },
   [ordered]@{ name = "worker"; files = $workerFiles; runtime = "services/local-model-worker/app" },
   [ordered]@{ name = "frontend"; files = $frontendFiles; runtime = "XIAOLOU-main/src" },
-  [ordered]@{ name = "core-api"; files = $coreApiFiles; runtime = "core-api/src" }
+  [ordered]@{ name = "core-api"; files = $coreApiFiles; runtime = $script:CoreApiSourceDisplayRoot }
 )) {
   foreach ($file in @($sourceGroup.files)) {
     $text = Get-Content -LiteralPath $file.FullName -Raw
@@ -230,13 +247,13 @@ if ($allowlist.Count -gt 0) {
   Add-Item $reviewItems "legacy-runtime-dependency-allowlist" "review" "S3 found $($allowlist.Count) legacy reference(s) retained only under read-only, retired, dev-only, or migration compatibility rules." $allowlist
 }
 
-$serverText = Read-TextFile (Join-Path $RepoRoot "core-api\src\server.js")
-$postgresStoreText = Read-TextFile (Join-Path $RepoRoot "core-api\src\postgres-store.js")
+$serverText = Read-TextFile (Join-Path $CoreApiRoot "src\server.js")
+$postgresStoreText = Read-TextFile (Join-Path $CoreApiRoot "src\postgres-store.js")
 $envText = Read-TextFile (Join-Path $RepoRoot "scripts\windows\.env.windows.example")
 $publishText = Read-TextFile (Join-Path $RepoRoot "scripts\windows\publish-runtime-to-d.ps1")
 $registerText = Read-TextFile (Join-Path $RepoRoot "scripts\windows\register-services.ps1")
 $p2Text = Read-TextFile (Join-Path $RepoRoot "scripts\windows\verify-p2-cutover-audit.ps1")
-$projectionText = Read-TextFile (Join-Path $RepoRoot "core-api\scripts\verify-legacy-canonical-projection.js")
+$projectionText = Read-TextFile (Join-Path $CoreApiRoot "scripts\verify-legacy-canonical-projection.js")
 
 if ($serverText -match "CORE_API_COMPAT_READ_ONLY" -and $serverText -match "CORE_API_COMPAT_ROUTE_CLOSED" -and $serverText -match "CORE_API_COMPAT_READ_ONLY") {
   Add-Item $checks "core-api-readonly-middleware" "ok" "core-api server defaults to read-only compatibility and closes non-allowlisted routes."
@@ -286,6 +303,7 @@ $report = [ordered]@{
   generated_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
   status = $status
   source_root = $RepoRoot
+  core_api_root = $CoreApiRoot
   policy = [ordered]@{
     canonical_runtime = ".NET 8 Control API + Windows Service workers + PostgreSQL canonical"
     legacy_allowed_only_for = @("core-api read-only compatibility", "frontend retired/dev guards", "legacy import/projection verification")

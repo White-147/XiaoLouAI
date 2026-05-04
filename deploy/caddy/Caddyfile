@@ -1,4 +1,8 @@
-www.example.com {
+# XiaoLouAI Windows-native Caddy config.
+# Production serves the built frontend from .runtime/app and proxies only the
+# approved public Control API routes to the .NET service on 127.0.0.1:4100.
+
+(xiaolou_site) {
 	root * D:/code/XiaoLouAI/.runtime/app/XIAOLOU-main/dist
 
 	handle /api/internal/* {
@@ -97,8 +101,8 @@ www.example.com {
 		reverse_proxy 127.0.0.1:4100
 	}
 
-	# Legacy provider callback aliases are exposed only for payment-provider
-	# cutover compatibility. Frontend legacy writes stay blocked below.
+	# Provider callback aliases are exposed only for payment-provider cutover
+	# compatibility. Frontend legacy writes stay blocked below.
 	handle /api/payments/alipay/notify {
 		reverse_proxy 127.0.0.1:4100
 	}
@@ -147,8 +151,22 @@ www.example.com {
 		respond 404
 	}
 
-	# Vite asset filenames are content-hashed. Cache only static assets here;
-	# API/auth/payment/provider-health routes above must never inherit this.
+	handle /uploads/* {
+		respond 404
+	}
+
+	handle /jaaz* {
+		respond 404
+	}
+
+	handle /jaaz-api* {
+		respond 404
+	}
+
+	handle /socket.io/* {
+		respond 404
+	}
+
 	handle /assets/* {
 		header Cache-Control "public, max-age=31536000, immutable"
 		file_server {
@@ -163,4 +181,36 @@ www.example.com {
 			precompressed br gzip
 		}
 	}
+}
+
+www.xiaolouai.cn {
+	import xiaolou_site
+
+	log {
+		output stdout
+	}
+}
+
+http://www.xiaolou.cn, http://xiaolou.cn {
+	import xiaolou_site
+
+	log {
+		output stdout
+	}
+}
+
+http://www.aitianmu.cn, http://aitianmu.cn {
+	import xiaolou_site
+
+	log {
+		output stdout
+	}
+}
+
+:80 {
+	import xiaolou_site
+}
+
+:8080 {
+	import xiaolou_site
 }

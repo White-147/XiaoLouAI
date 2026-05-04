@@ -29,7 +29,7 @@ function Stop-PortProcess($port, $label) {
 }
 
 Stop-PortProcess 3000 "vite    "
-Stop-PortProcess 4100 "core-api"
+Stop-PortProcess 4100 "legacy core-api"
 Stop-PortProcess 5174 "jaaz-ui "
 Stop-PortProcess 57988 "jaaz-api"
 

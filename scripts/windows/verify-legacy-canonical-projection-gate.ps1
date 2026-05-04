@@ -1,6 +1,7 @@
 param(
   [string]$RepoRoot = "",
   [string]$EnvFile = "$PSScriptRoot\.env.windows",
+  [string]$CoreApiRoot = "",
   [string]$NodeExe = "",
   [string]$DatabaseUrl = "",
   [string]$ReportDir = "",
@@ -12,6 +13,14 @@ $ErrorActionPreference = "Stop"
 if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
+$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -61,7 +70,6 @@ function Add-SearchPathToDatabaseUrl {
 }
 
 $NodeExe = Resolve-DTool $NodeExe "NODE_EXE" "D:\soft\program\nodejs\node.exe" "Node.js"
-$CoreApiRoot = Join-Path $RepoRoot "core-api"
 if (-not (Test-Path -LiteralPath (Join-Path $CoreApiRoot "scripts\project-legacy-to-canonical.js"))) {
   throw "core-api projector not found under $CoreApiRoot"
 }
@@ -321,6 +329,7 @@ $verifyReport = Join-Path $ReportDir "legacy-canonical-projection-gate-fixture-$
 & "$PSScriptRoot\project-legacy-to-canonical.ps1" `
   -RepoRoot $RepoRoot `
   -EnvFile $EnvFile `
+  -CoreApiRoot $CoreApiRoot `
   -NodeExe $NodeExe `
   -DatabaseUrl $schemaDatabaseUrl `
   -Execute `
@@ -332,6 +341,7 @@ if ($LASTEXITCODE -ne 0) {
 & "$PSScriptRoot\verify-legacy-canonical-projection.ps1" `
   -RepoRoot $RepoRoot `
   -EnvFile $EnvFile `
+  -CoreApiRoot $CoreApiRoot `
   -NodeExe $NodeExe `
   -DatabaseUrl $schemaDatabaseUrl `
   -LegacyWritesFrozen `

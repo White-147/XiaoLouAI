@@ -267,7 +267,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           aria-expanded={isMenuOpen}
         >
           <img
-            src="/chuangjing-logo.png"
+            src="/chuangjing-logo-shell.png"
             alt=""
             className="h-full w-full object-contain p-1.5"
             draggable={false}

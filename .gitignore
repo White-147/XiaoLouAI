@@ -59,6 +59,14 @@ core-api/logs/
 core-api/tmp/
 core-api/uploads/
 core-api/video-replace-service/
+legacy/core-api/vertex-sa.json
+legacy/core-api/credentials/
+legacy/core-api/backup/
+legacy/core-api/data/
+legacy/core-api/logs/
+legacy/core-api/tmp/
+legacy/core-api/uploads/
+legacy/core-api/video-replace-service/
 video-replace-service/data/
 video-replace-service/weights/
 jaaz/.git/

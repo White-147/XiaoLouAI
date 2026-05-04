@@ -94,6 +94,77 @@ const CanvasLoadingFallback = () => (
   </div>
 );
 
+type RoutePrefetchEntry = {
+  matches: (path: string) => boolean;
+  loaders: Array<() => Promise<unknown>>;
+};
+
+const pathMatches = (path: string, route: string) =>
+  path === route || path.startsWith(`${route}/`);
+
+const routePrefetchEntries: RoutePrefetchEntry[] = [
+  { matches: (path) => pathMatches(path, "/playground"), loaders: [() => import("../pages/Playground")] },
+  { matches: (path) => pathMatches(path, "/enterprise"), loaders: [() => import("../pages/EnterpriseConsole")] },
+  { matches: (path) => pathMatches(path, "/wallet/recharge"), loaders: [() => import("../pages/WalletRecharge")] },
+  { matches: (path) => pathMatches(path, "/wallet/usage"), loaders: [() => import("../pages/CreditUsage")] },
+  { matches: (path) => pathMatches(path, "/admin/login"), loaders: [() => import("../pages/AdminLogin")] },
+  { matches: (path) => pathMatches(path, "/admin/orders"), loaders: [() => import("../pages/AdminOrders")] },
+  { matches: (path) => pathMatches(path, "/script-plaza"), loaders: [() => import("../pages/ScriptPlaza")] },
+  { matches: (path) => pathMatches(path, "/create/image"), loaders: [() => import("../pages/create/ImageCreate")] },
+  { matches: (path) => pathMatches(path, "/create/video"), loaders: [() => import("../pages/create/VideoCreate")] },
+  { matches: (path) => pathMatches(path, "/create/video-replace"), loaders: [() => import("../pages/create/VideoReplace")] },
+  { matches: (path) => pathMatches(path, "/create/script-breakdown"), loaders: [() => import("../pages/create/ScriptBreakdown")] },
+  { matches: (path) => pathMatches(path, "/create/video-reverse"), loaders: [() => import("../pages/create/VideoReverse")] },
+  { matches: (path) => pathMatches(path, "/create/storyboard-25"), loaders: [() => import("../pages/create/StoryboardGrid25")] },
+  { matches: (path) => pathMatches(path, "/create/canvas"), loaders: [() => import("../pages/create/CanvasCreate")] },
+  { matches: (path) => pathMatches(path, "/create/agent-canvas"), loaders: [() => import("../pages/create/AgentCanvasCreate")] },
+  { matches: (path) => pathMatches(path, "/create/agent-studio"), loaders: [() => import("../pages/create/JaazAgentCanvasEmbed")] },
+  {
+    matches: (path) => pathMatches(path, "/comic/global"),
+    loaders: [() => import("../pages/comic/ComicShell"), () => import("../pages/comic/GlobalSettings")],
+  },
+  {
+    matches: (path) => pathMatches(path, "/comic/script"),
+    loaders: [() => import("../pages/comic/ComicShell"), () => import("../pages/comic/StoryScript")],
+  },
+  {
+    matches: (path) => pathMatches(path, "/comic/entities"),
+    loaders: [() => import("../pages/comic/ComicShell"), () => import("../pages/comic/Entities")],
+  },
+  {
+    matches: (path) => pathMatches(path, "/comic/storyboard"),
+    loaders: [() => import("../pages/comic/ComicShell"), () => import("../pages/comic/Storyboard")],
+  },
+  {
+    matches: (path) => pathMatches(path, "/comic/video"),
+    loaders: [() => import("../pages/comic/ComicShell"), () => import("../pages/comic/Video")],
+  },
+  {
+    matches: (path) => pathMatches(path, "/comic/dubbing"),
+    loaders: [() => import("../pages/comic/ComicShell"), () => import("../pages/comic/Dubbing")],
+  },
+  {
+    matches: (path) => pathMatches(path, "/comic/preview"),
+    loaders: [() => import("../pages/comic/ComicShell"), () => import("../pages/comic/Preview")],
+  },
+  { matches: (path) => pathMatches(path, "/assets"), loaders: [() => import("../pages/Assets")] },
+];
+
+const prefetchedRouteModules = new Set<string>();
+
+function prefetchRouteModule(path: string) {
+  if (typeof window === "undefined") return;
+
+  const pathname = path.split(/[?#]/, 1)[0] || "/";
+  const entry = routePrefetchEntries.find((candidate) => candidate.matches(pathname));
+  if (!entry || prefetchedRouteModules.has(pathname)) return;
+
+  prefetchedRouteModules.add(pathname);
+  void Promise.all(entry.loaders.map((load) => load())).catch(() => {
+    prefetchedRouteModules.delete(pathname);
+  });
+}
+
 type NavItem = {
   name: string;
   path?: string;
@@ -659,7 +730,7 @@ export default function Layout() {
           >
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-transparent">
               <img
-                src="/chuangjing-logo.png"
+                src="/chuangjing-logo-shell.png"
                 alt="创境AI Logo"
                 className="h-8 w-8 object-contain"
               />
@@ -745,6 +816,8 @@ export default function Layout() {
                             key={child.path}
                             to={child.path}
                             end
+                            onMouseEnter={() => prefetchRouteModule(child.path)}
+                            onFocus={() => prefetchRouteModule(child.path)}
                             onClick={(event) => {
                               void handleGuardedNavigate(child.path, event);
                             }}
@@ -770,6 +843,8 @@ export default function Layout() {
               ) : (
                 <NavLink
                   to={item.path || "/home"}
+                  onMouseEnter={() => item.path && prefetchRouteModule(item.path)}
+                  onFocus={() => item.path && prefetchRouteModule(item.path)}
                   onClick={(event) => item.path && void handleGuardedNavigate(item.path, event)}
                   className={({ isActive }) =>
                     cn(
@@ -1698,6 +1773,8 @@ export default function Layout() {
                   key={child.path}
                   to={child.path}
                   end
+                  onMouseEnter={() => prefetchRouteModule(child.path)}
+                  onFocus={() => prefetchRouteModule(child.path)}
                   onClick={(event) => {
                     setCollapsedNavFlyout(null);
                     void handleGuardedNavigate(child.path, event);

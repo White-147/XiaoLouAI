@@ -178,6 +178,15 @@ if (Test-Path -LiteralPath $caddyPath) {
   } else {
     Add-Item $blockers "caddy-public-surface" "failed" "Caddy must proxy only explicit Control API public paths and respond 404 for /api/internal/*, /metrics, plus unlisted /api/*."
   }
+
+  $hasHashedAssetCache = $caddyText -match 'handle\s+/assets/\*\s*\{\s*header\s+Cache-Control\s+"public,\s*max-age=31536000,\s*immutable"\s*file_server'
+  $hasSpaShellNoCache = $caddyText -match 'handle\s*\{\s*header\s+Cache-Control\s+"no-cache"\s*try_files\s+\{path\}\s+/index\.html'
+  $hasApiCacheHeader = $caddyText -match 'handle\s+/api[^{]*\{[^}]*header\s+Cache-Control'
+  if ($hasHashedAssetCache -and $hasSpaShellNoCache -and -not $hasApiCacheHeader) {
+    Add-Item $checks "caddy-static-cache-policy" "ok" "Caddy caches only Vite /assets/* hash files and keeps SPA shell/API routes out of static immutable caching."
+  } else {
+    Add-Item $blockers "caddy-static-cache-policy" "failed" "Caddy must cache only /assets/* with immutable static headers, keep the SPA shell revalidated, and avoid Cache-Control headers inside /api handlers."
+  }
 }
 
 if (Test-Path -LiteralPath $iisPath) {
@@ -191,6 +200,14 @@ if (Test-Path -LiteralPath $iisPath) {
     Add-Item $checks "iis-public-surface" "ok" "IIS routes only explicit Control API public paths and blocks unlisted legacy surfaces."
   } else {
     Add-Item $blockers "iis-public-surface" "failed" "IIS rewrite rules must proxy explicit Control API public paths and block unlisted legacy surfaces."
+  }
+
+  $hasHashedAssetCache = $iisText -match '<location\s+path="assets">[\s\S]*?<clientCache\s+cacheControlMode="UseMaxAge"\s+cacheControlMaxAge="365\.00:00:00"'
+  $hasSpaShellNoCache = $iisText -match '<staticContent>[\s\S]*?<clientCache\s+cacheControlMode="DisableCache"'
+  if ($hasHashedAssetCache -and $hasSpaShellNoCache) {
+    Add-Item $checks "iis-static-cache-policy" "ok" "IIS caches only the Vite assets directory and keeps SPA shell/non-hashed static files revalidated; API routes are rewritten before static content."
+  } else {
+    Add-Item $blockers "iis-static-cache-policy" "failed" "IIS must apply long cache only under assets and keep the SPA shell/non-hashed static files revalidated."
   }
 }
 

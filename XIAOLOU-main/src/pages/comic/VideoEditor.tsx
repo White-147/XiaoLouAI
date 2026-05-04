@@ -464,6 +464,8 @@ export default function VideoEditor({ shotId, onBack }: VideoEditorProps) {
                           src={url}
                           alt="reference"
                           className="aspect-square w-full rounded-md border border-border object-cover"
+                          loading="lazy"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                         />
                       ))}
@@ -710,6 +712,8 @@ export default function VideoEditor({ shotId, onBack }: VideoEditorProps) {
                             src={videoThumb(video) || undefined}
                             alt={video.id}
                             className="h-full w-full object-cover opacity-80"
+                            loading="lazy"
+                            decoding="async"
                             referrerPolicy="no-referrer"
                           />
                         ) : (
@@ -806,6 +810,8 @@ export default function VideoEditor({ shotId, onBack }: VideoEditorProps) {
                             src={imageSrc}
                             alt={asset.name}
                             className="h-full w-full object-cover"
+                            loading="lazy"
+                            decoding="async"
                             referrerPolicy="no-referrer"
                           />
                         ) : (

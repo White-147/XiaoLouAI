@@ -1,5 +1,7 @@
 param(
   [string]$RepoRoot = "",
+  [string]$CoreApiRoot = "",
+  [string]$ServicesApiRoot = "",
   [string]$ReportPath = ""
 )
 
@@ -9,6 +11,20 @@ if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
+
+if (-not $ServicesApiRoot) {
+  $ServicesApiRoot = Join-Path $RepoRoot "legacy\services-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($ServicesApiRoot)) {
+  $ServicesApiRoot = Join-Path $RepoRoot $ServicesApiRoot
+}
+$ServicesApiRoot = [System.IO.Path]::GetFullPath($ServicesApiRoot)
 
 if (-not $ReportPath) {
   $logDir = [Environment]::GetEnvironmentVariable("LOG_DIR", "Process")
@@ -163,14 +179,14 @@ $reviewItems = New-List
 $checkedFiles = New-List
 $checkedFileSet = New-Object System.Collections.Generic.HashSet[string]
 
-$serverPath = Join-Path $RepoRoot "core-api\src\server.js"
-$routesPath = Join-Path $RepoRoot "core-api\src\routes.js"
+$serverPath = Join-Path $CoreApiRoot "src\server.js"
+$routesPath = Join-Path $CoreApiRoot "src\routes.js"
 $envExamplePath = Join-Path $RepoRoot "scripts\windows\.env.windows.example"
 $publishPath = Join-Path $RepoRoot "scripts\windows\publish-runtime-to-d.ps1"
 $registerPath = Join-Path $RepoRoot "scripts\windows\register-services.ps1"
 $readmePath = Join-Path $RepoRoot "README.md"
 $readmeZhPath = Join-Path $RepoRoot "README.zh-CN.md"
-$servicesApiPath = Join-Path $RepoRoot "services\api"
+$servicesApiPath = $ServicesApiRoot
 
 $serverText = Read-TextFile $serverPath
 $routesText = Read-TextFile $routesPath
@@ -233,9 +249,9 @@ Add-TermCheck `
 
 $servicesApiFiles = @(Get-ServicesApiTextFiles $servicesApiPath)
 if ($servicesApiFiles.Count -eq 0) {
-  Add-Item $blockers "services-api-source-scan" "missing" "services/api contains no scannable text files."
+  Add-Item $blockers "services-api-source-scan" "missing" "legacy services API reference contains no scannable text files."
 } else {
-  Add-Item $checks "services-api-source-scan" "ok" "Scanned $($servicesApiFiles.Count) services/api text file(s) for production API wording."
+  Add-Item $checks "services-api-source-scan" "ok" "Scanned $($servicesApiFiles.Count) legacy services API text file(s) for production API wording."
 }
 
 $productionWordingHits = New-List
@@ -255,9 +271,9 @@ foreach ($file in $servicesApiFiles) {
 }
 
 if ($productionWordingHits.Count -eq 0) {
-  Add-Item $checks "services-api-production-api-wording" "ok" "services/api no longer self-identifies as a production API."
+  Add-Item $checks "services-api-production-api-wording" "ok" "legacy services API no longer self-identifies as a production API."
 } else {
-  Add-Item $blockers "services-api-production-api-wording" "failed" "services/api must not contain 'production API' or 'Python production API' wording." ([ordered]@{ hits = $productionWordingHits })
+  Add-Item $blockers "services-api-production-api-wording" "failed" "legacy services API must not contain 'production API' or 'Python production API' wording." ([ordered]@{ hits = $productionWordingHits })
 }
 
 Add-TermCheck `
@@ -269,12 +285,13 @@ Add-TermCheck `
     "Node compatibility layer and migration reference",
     "services/api/",
     "legacy Python API reference; not production control plane",
-    "final legacy-surface checks",
-    "legacy/",
-    "deleted"
+    "legacy/core-api",
+    "legacy/services-api",
+    "archived legacy references",
+    "deletion"
   ) `
-  -OkDetail "README.md clearly positions core-api and services/api for finalization." `
-  -FailedDetail "README.md must clearly position core-api and services/api final states."
+  -OkDetail "README.md clearly positions archived core-api and services API references for finalization." `
+  -FailedDetail "README.md must clearly position archived core-api and services API final states."
 
 Add-TermCheck `
   -Name "root-readme-final-positioning-zh" `
@@ -283,10 +300,12 @@ Add-TermCheck `
     "control-plane-dotnet/",
     "core-api/",
     "services/api/",
+    "legacy/core-api",
+    "legacy/services-api",
     "Node ",
     "Python API",
     "legacy-surface",
-    "legacy/",
+    "legacy reference",
     "Windows Service workers"
   ) `
   -OkDetail "README.zh-CN.md contains the synchronized final positioning anchors." `
@@ -332,6 +351,8 @@ $report = [ordered]@{
     forbidden_production_paths = @("docker", "linux", "kubernetes", "windows-celery", "redis-open-source-windows")
     allowed_runtime_services = $allowedServiceNames
     core_api_public_allowlist = $allowlistValue
+    core_api_root = $CoreApiRoot
+    services_api_root = $ServicesApiRoot
   }
   checked_files = $checkedFiles
   checks = $checks

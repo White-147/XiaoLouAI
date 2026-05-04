@@ -726,7 +726,13 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                                                 : isDark ? 'border-neutral-700 hover:border-neutral-500' : 'border-neutral-200 hover:border-neutral-400'
                                                         }`}
                                                     >
-                                                        <img src={node.url} alt="" className="w-full h-full object-cover" />
+                                                        <img
+                                                            src={node.url}
+                                                            alt=""
+                                                            className="w-full h-full object-cover"
+                                                            loading="lazy"
+                                                            decoding="async"
+                                                        />
                                                         {isSelected && (
                                                             <div className="absolute top-1 right-1 rounded-full bg-blue-500 p-0.5">
                                                                 <Check size={10} className="text-white" />
@@ -780,13 +786,25 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                     }`}>
                                         {node.type === NodeType.VIDEO ? (
                                             <>
-                                                <img src={node.url} alt="" className="w-full h-full object-cover" />
+                                                <img
+                                                    src={node.url}
+                                                    alt=""
+                                                    className="w-full h-full object-cover"
+                                                    loading="lazy"
+                                                    decoding="async"
+                                                />
                                                 <div className="absolute inset-0 flex items-center justify-center">
                                                     <div className="rounded-full bg-black/50 p-1"><Play size={12} fill="white" className="text-white" /></div>
                                                 </div>
                                             </>
                                         ) : (
-                                            <img src={node.url} alt="" className="w-full h-full object-cover" />
+                                            <img
+                                                src={node.url}
+                                                alt=""
+                                                className="w-full h-full object-cover"
+                                                loading="lazy"
+                                                decoding="async"
+                                            />
                                         )}
                                         <button
                                             onClick={(e) => { e.stopPropagation(); handleRemoveConnectedNode(node.id); }}
@@ -848,13 +866,25 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
                                                     >
                                                         {node.type === NodeType.VIDEO ? (
                                                             <>
-                                                                <img src={node.url} alt="" className="w-full h-full object-cover" />
+                                                                <img
+                                                                    src={node.url}
+                                                                    alt=""
+                                                                    className="w-full h-full object-cover"
+                                                                    loading="lazy"
+                                                                    decoding="async"
+                                                                />
                                                                 <div className="absolute inset-0 flex items-center justify-center">
                                                                     <div className="rounded-full bg-black/50 p-1"><Play size={12} fill="white" className="text-white" /></div>
                                                                 </div>
                                                             </>
                                                         ) : (
-                                                            <img src={node.url} alt="" className="w-full h-full object-cover" />
+                                                            <img
+                                                                src={node.url}
+                                                                alt=""
+                                                                className="w-full h-full object-cover"
+                                                                loading="lazy"
+                                                                decoding="async"
+                                                            />
                                                         )}
                                                         {isAdded && (
                                                             <div className="absolute top-1 right-1 rounded-full bg-blue-500 p-0.5">

@@ -3,6 +3,7 @@ param(
   [string]$DumpFile,
   [string]$RepoRoot = "",
   [string]$EnvFile = "$PSScriptRoot\.env.windows",
+  [string]$CoreApiRoot = "",
   [string]$PgBin = "",
   [string]$NodeExe = "",
   [string]$HostName = "127.0.0.1",
@@ -24,6 +25,14 @@ $ErrorActionPreference = "Stop"
 if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
+$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -221,6 +230,7 @@ try {
     & $projectScript `
       -RepoRoot $RepoRoot `
       -EnvFile $EnvFile `
+      -CoreApiRoot $CoreApiRoot `
       -NodeExe $NodeExe `
       -DatabaseUrl $stagingDatabaseUrl `
       -ReportPath $projectDryRunReport | Out-Null
@@ -232,6 +242,7 @@ try {
     & $projectScript `
       -RepoRoot $RepoRoot `
       -EnvFile $EnvFile `
+      -CoreApiRoot $CoreApiRoot `
       -NodeExe $NodeExe `
       -DatabaseUrl $stagingDatabaseUrl `
       -ReportPath $projectExecuteReport `
@@ -244,6 +255,7 @@ try {
   & $verifyScript `
     -RepoRoot $RepoRoot `
     -EnvFile $EnvFile `
+    -CoreApiRoot $CoreApiRoot `
     -NodeExe $NodeExe `
     -DatabaseUrl $stagingDatabaseUrl `
     -ReportPath $verifyReport `

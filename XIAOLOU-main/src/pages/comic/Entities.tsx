@@ -123,6 +123,8 @@ function AssetPreview({
         src={imageUrl}
         alt={asset.name}
         className={className}
+        loading="lazy"
+        decoding="async"
         referrerPolicy="no-referrer"
       />
     );
@@ -951,6 +953,8 @@ export default function Entities() {
                               src={url}
                               alt="reference"
                               className="aspect-square w-full object-cover"
+                              loading="lazy"
+                              decoding="async"
                               referrerPolicy="no-referrer"
                             />
                             <button
@@ -1212,6 +1216,8 @@ export default function Entities() {
                           src={url}
                           alt="reference"
                           className="aspect-square w-full object-cover"
+                          loading="lazy"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                         />
                         <button

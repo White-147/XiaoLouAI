@@ -519,6 +519,8 @@ export default function StoryboardEditor({ shotId, onBack }: StoryboardEditorPro
                         src={imageSrc}
                         alt={asset.name}
                         className="h-full w-full object-cover"
+                        loading="lazy"
+                        decoding="async"
                         referrerPolicy="no-referrer"
                       />
                     ) : (

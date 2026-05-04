@@ -1048,6 +1048,8 @@ export default function Preview() {
                                     src={previewImage}
                                     alt={clip.title}
                                     className="absolute inset-0 h-full w-full object-cover opacity-20"
+                                    loading="lazy"
+                                    decoding="async"
                                     referrerPolicy="no-referrer"
                                   />
                                 ) : null}

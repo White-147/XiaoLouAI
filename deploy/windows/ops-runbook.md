@@ -1,4 +1,4 @@
-# XiaoLouAI Windows Native Ops Runbook
+﻿# XiaoLouAI Windows Native Ops Runbook
 
 ## Services
 
@@ -98,6 +98,16 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 - `INTERNAL_API_TOKEN` should be set in production. Workers send it as `X-XiaoLou-Internal-Token`.
 - If the token is absent, the Control API only allows internal endpoints from loopback requests with no external forwarding headers. This is for local verification only, not production.
 
+## Static Frontend Cache Boundary
+
+- Production serves the static frontend from `XIAOLOU-main/dist`.
+- Only Vite hash assets under `/assets/*` should receive long-lived static cache headers.
+- The SPA shell, `index.html`, and non-hashed root files must stay revalidated so route and deployment changes appear without waiting for a long browser cache TTL.
+- `/api/*`, `/healthz`, `/livez`, `/readyz`, `/metrics`, `/api/auth*`, payment callback routes, and `/api/providers/health*` must be handled before static file serving and must not inherit immutable frontend cache headers.
+- The Caddy example uses `Cache-Control: public, max-age=31536000, immutable` only for `/assets/*` and `Cache-Control: no-cache` for the SPA fallback.
+- The IIS example sets a one-year max-age only for the `assets` location and disables cache for the SPA shell/non-hashed static files.
+- Do not add a Service Worker for production caching until API/auth/payment/provider-health cache boundaries have a separate smoke test.
+
 ## Public Client API Boundary
 
 - Production public client routes must use either a static `CLIENT_API_TOKEN` or provider-signed assertions.
@@ -147,6 +157,13 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 - Read-only mode must not seed or project legacy snapshots into the Windows-native canonical test database. Use `scripts/windows/verify-core-api-compat-readonly.ps1` to start the full process and verify `/healthz`, `/api/windows-native/status`, closed legacy reads, and blocked writes. The default closed-read smoke covers wallet, jobs, projects/assets, chat model discovery, auth providers, legacy payment checkout, canvas/agent-canvas project reads, canvas library reads, and `/uploads/*`.
 - Use `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=*` only for local debugging, not production cutover.
 - Keep `docs/core-api-cutover.md` current whenever a legacy alias is added or retired.
+
+### Legacy Physical Archive Contract (G2b)
+
+- G2b-2 moved the former root legacy reference directories `core-api/` and `services/api/` to `legacy/core-api` and `legacy/services-api`.
+- `legacy/core-api` and `legacy/services-api` are archive reference paths only. Do not create production service registrations, reverse-proxy targets, scheduled tasks, or Windows Service working directories that depend on those paths.
+- The G2b-2 record requires synchronized README/deploy/docs updates, path-aware verifier gates, and a rollback point.
+- Rollback for a failed G2b-2 move is path-only: move `legacy/core-api` back to `core-api`, move `legacy/services-api` back to `services/api`, restore the root-path docs contract, and rerun the same gates. Do not clean `legacy_quarantine` as part of this archive workflow.
 
 ## Legacy to Canonical Projection Gate
 
@@ -300,7 +317,7 @@ Keep payment and wallet backups through at least one full reconciliation cycle.
 - Windows + Celery as the async foundation.
 - Redis Open Source on Windows as a critical dependency.
 - RabbitMQ on Windows as the default queue.
-- Legacy or upstream README files under `jaaz/`, `services/api/`, or other
+- Legacy or upstream README files under `legacy/jaaz/`, `legacy/services-api/`, or other
   reference directories are not deployment guides. Do not copy Docker, Linux,
   Celery, Redis, RabbitMQ, or container startup steps from those references into
   production operations.

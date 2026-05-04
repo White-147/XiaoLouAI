@@ -2745,6 +2745,8 @@ export default function VideoCreate() {
                           src={coverUrl}
                           alt={item.prompt}
                           className="h-full w-full object-cover opacity-85"
+                          loading="lazy"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                         />
                       ) : videoUrl ? (
@@ -2801,6 +2803,8 @@ export default function VideoCreate() {
                                         src={u}
                                         alt={MULTI_REF_LABELS[key]}
                                         className="h-10 w-10 rounded object-cover"
+                                        loading="lazy"
+                                        decoding="async"
                                         referrerPolicy="no-referrer"
                                       />
                                       <span className="max-w-[3.5rem] truncate text-center text-[9px] text-muted-foreground">
@@ -2819,6 +2823,8 @@ export default function VideoCreate() {
                                   src={resultReferenceUrl(item.resolvedReferenceImageUrl) || undefined}
                                   alt="主参考图"
                                   className="h-10 w-10 rounded object-cover"
+                                  loading="lazy"
+                                  decoding="async"
                                   referrerPolicy="no-referrer"
                                 />
                               </div>
@@ -2831,6 +2837,8 @@ export default function VideoCreate() {
                                 src={resultReferenceUrl(item.firstFrameUrl) || undefined}
                                 alt="首帧"
                                 className="h-10 w-10 rounded object-cover"
+                                loading="lazy"
+                                decoding="async"
                                 referrerPolicy="no-referrer"
                               />
                             ) : null}
@@ -2839,16 +2847,20 @@ export default function VideoCreate() {
                                 src={resultReferenceUrl(item.lastFrameUrl) || undefined}
                                 alt="尾帧"
                                 className="h-10 w-10 rounded object-cover"
+                                loading="lazy"
+                                decoding="async"
                                 referrerPolicy="no-referrer"
                               />
                             ) : null}
                             {item.referenceImageUrl && !item.firstFrameUrl ? (
                               <img
                                 src={resultReferenceUrl(item.referenceImageUrl) || undefined}
-                            alt="reference"
-                            className="h-10 w-10 rounded object-cover"
-                            referrerPolicy="no-referrer"
-                          />
+                                alt="reference"
+                                className="h-10 w-10 rounded object-cover"
+                                loading="lazy"
+                                decoding="async"
+                                referrerPolicy="no-referrer"
+                              />
                             ) : null}
                             <span className="text-xs text-muted-foreground">
                               {item.videoMode === "start_end_frame"
@@ -3024,6 +3036,8 @@ export default function VideoCreate() {
                           src={taskReference(task) || undefined}
                           alt="reference"
                           className="h-8 w-8 rounded object-cover"
+                          loading="lazy"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                         />
                         {taskLastFrame(task) ? (
@@ -3031,6 +3045,8 @@ export default function VideoCreate() {
                             src={taskLastFrame(task) || undefined}
                             alt="尾帧"
                             className="h-8 w-8 rounded object-cover"
+                            loading="lazy"
+                            decoding="async"
                             referrerPolicy="no-referrer"
                           />
                         ) : null}

@@ -2,22 +2,8 @@ import { Suspense, lazy, type ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import Home from "./pages/Home";
-import ScriptPlaza from "./pages/ScriptPlaza";
-import ApiCenter from "./pages/ApiCenter";
-import ComicShell from "./pages/comic/ComicShell";
-import GlobalSettings from "./pages/comic/GlobalSettings";
-import StoryScript from "./pages/comic/StoryScript";
-import Entities from "./pages/comic/Entities";
-import Storyboard from "./pages/comic/Storyboard";
-import Video from "./pages/comic/Video";
-import Dubbing from "./pages/comic/Dubbing";
-import Preview from "./pages/comic/Preview";
-import Assets from "./pages/Assets";
-import WalletRecharge from "./pages/WalletRecharge";
-import EnterpriseConsole from "./pages/EnterpriseConsole";
-import AdminOrders from "./pages/AdminOrders";
-import AdminLogin from "./pages/AdminLogin";
 
+const ScriptPlaza = lazy(() => import("./pages/ScriptPlaza"));
 const ImageCreate = lazy(() => import("./pages/create/ImageCreate"));
 const VideoCreate = lazy(() => import("./pages/create/VideoCreate"));
 const VideoReplace = lazy(() => import("./pages/create/VideoReplace"));
@@ -26,6 +12,20 @@ const VideoReverse = lazy(() => import("./pages/create/VideoReverse"));
 const StoryboardGrid25 = lazy(() => import("./pages/create/StoryboardGrid25"));
 const Playground = lazy(() => import("./pages/Playground"));
 const CreditUsage = lazy(() => import("./pages/CreditUsage"));
+const ComicShell = lazy(() => import("./pages/comic/ComicShell"));
+const GlobalSettings = lazy(() => import("./pages/comic/GlobalSettings"));
+const StoryScript = lazy(() => import("./pages/comic/StoryScript"));
+const Entities = lazy(() => import("./pages/comic/Entities"));
+const Storyboard = lazy(() => import("./pages/comic/Storyboard"));
+const Video = lazy(() => import("./pages/comic/Video"));
+const Dubbing = lazy(() => import("./pages/comic/Dubbing"));
+const Preview = lazy(() => import("./pages/comic/Preview"));
+const Assets = lazy(() => import("./pages/Assets"));
+const WalletRecharge = lazy(() => import("./pages/WalletRecharge"));
+const ApiCenter = lazy(() => import("./pages/ApiCenter"));
+const EnterpriseConsole = lazy(() => import("./pages/EnterpriseConsole"));
+const AdminOrders = lazy(() => import("./pages/AdminOrders"));
+const AdminLogin = lazy(() => import("./pages/AdminLogin"));
 // Placeholder components for other routes
 const Placeholder = ({ title }: { title: string }) => (
   <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -66,8 +66,22 @@ export default function App() {
               </DeferredRoute>
             }
           />
-          <Route path="enterprise" element={<EnterpriseConsole />} />
-          <Route path="wallet/recharge" element={<WalletRecharge />} />
+          <Route
+            path="enterprise"
+            element={
+              <DeferredRoute>
+                <EnterpriseConsole />
+              </DeferredRoute>
+            }
+          />
+          <Route
+            path="wallet/recharge"
+            element={
+              <DeferredRoute>
+                <WalletRecharge />
+              </DeferredRoute>
+            }
+          />
           <Route
             path="wallet/usage"
             element={
@@ -76,9 +90,30 @@ export default function App() {
               </DeferredRoute>
             }
           />
-          <Route path="admin/login" element={<AdminLogin />} />
-          <Route path="admin/orders" element={<AdminOrders />} />
-          <Route path="script-plaza" element={<ScriptPlaza />} />
+          <Route
+            path="admin/login"
+            element={
+              <DeferredRoute>
+                <AdminLogin />
+              </DeferredRoute>
+            }
+          />
+          <Route
+            path="admin/orders"
+            element={
+              <DeferredRoute>
+                <AdminOrders />
+              </DeferredRoute>
+            }
+          />
+          <Route
+            path="script-plaza"
+            element={
+              <DeferredRoute>
+                <ScriptPlaza />
+              </DeferredRoute>
+            }
+          />
           
           <Route path="create">
             <Route
@@ -134,7 +169,14 @@ export default function App() {
             <Route path="agent-studio" element={<AgentStudioRoutePlaceholder />} />
           </Route>
 
-          <Route path="comic" element={<ComicShell />}>
+          <Route
+            path="comic"
+            element={
+              <DeferredRoute>
+                <ComicShell />
+              </DeferredRoute>
+            }
+          >
             <Route path="global" element={<GlobalSettings />} />
             <Route path="script" element={<StoryScript />} />
             <Route path="entities" element={<Entities />} />
@@ -144,9 +186,23 @@ export default function App() {
             <Route path="preview" element={<Preview />} />
           </Route>
 
-          <Route path="assets" element={<Assets />} />
+          <Route
+            path="assets"
+            element={
+              <DeferredRoute>
+                <Assets />
+              </DeferredRoute>
+            }
+          />
           <Route path="tutorial" element={<Placeholder title="教程" />} />
-          <Route path="api-center" element={<ApiCenter />} />
+          <Route
+            path="api-center"
+            element={
+              <DeferredRoute>
+                <ApiCenter />
+              </DeferredRoute>
+            }
+          />
         </Route>
       </Routes>
     </BrowserRouter>

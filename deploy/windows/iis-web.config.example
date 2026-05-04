@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+  <location path="assets">
+    <system.webServer>
+      <!-- Vite asset filenames are content-hashed; cache this directory only. -->
+      <staticContent>
+        <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="365.00:00:00" />
+      </staticContent>
+    </system.webServer>
+  </location>
   <system.webServer>
     <rewrite>
       <rules>
@@ -33,7 +41,10 @@
         </rule>
       </rules>
     </rewrite>
+    <urlCompression doStaticCompression="true" doDynamicCompression="false" />
     <staticContent>
+      <!-- Keep the SPA shell and non-hashed root files revalidated. API routes are rewritten above. -->
+      <clientCache cacheControlMode="DisableCache" />
       <remove fileExtension=".json" />
       <mimeMap fileExtension=".json" mimeType="application/json" />
     </staticContent>

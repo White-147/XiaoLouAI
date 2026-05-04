@@ -434,7 +434,7 @@ export const ImageNodeFloatingToolbar: React.FC<ImageNodeFloatingToolbarProps> =
             aria-hidden
           >
             <img
-              src="/chuangjing-logo.png"
+              src="/chuangjing-logo-shell.png"
               alt=""
               className="h-full w-full object-contain p-1.5"
               draggable={false}

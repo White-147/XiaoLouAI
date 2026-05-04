@@ -2,7 +2,7 @@
  * Advanced-setting presets for the Video Replace feature.
  *
  * Frontend UI shows human-readable tier names; every tier maps 1:1 to a real
- * backend parameter (see video-replace-service/app/schemas.py:GenerateRequest).
+ * backend parameter (see tools/video/video-replace-service/app/schemas.py:GenerateRequest).
  * The wire protocol sends numeric / enum values, not tier labels.
  */
 

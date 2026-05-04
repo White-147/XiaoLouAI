@@ -1,6 +1,7 @@
 param(
   [string]$RepoRoot = "",
   [string]$EnvFile = "$PSScriptRoot\.env.windows",
+  [string]$CoreApiRoot = "",
   [string]$NodeExe = "",
   [string]$DatabaseUrl = "",
   [string]$LegacyDumpFile = "",
@@ -24,6 +25,14 @@ $ErrorActionPreference = "Stop"
 if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
+$RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -299,6 +308,7 @@ if ($LegacyDumpFile) {
       DumpFile = $LegacyDumpFile
       RepoRoot = $RepoRoot
       EnvFile = $EnvFile
+      CoreApiRoot = $CoreApiRoot
       NodeExe = $NodeExe
       ReportPath = $dumpReport
       Username = $LegacyDumpUsername
@@ -327,6 +337,7 @@ Invoke-AuditStep "legacy-runtime-dependency-isolation" {
   $legacyRuntimeReport = Join-Path $logDir "p2-cutover-audit-legacy-runtime-dependencies-$stamp.json"
   & "$PSScriptRoot\verify-legacy-runtime-dependencies.ps1" `
     -RepoRoot $RepoRoot `
+    -CoreApiRoot $CoreApiRoot `
     -ReportPath $legacyRuntimeReport | Out-Null
   return [ordered]@{
     report = $legacyRuntimeReport
@@ -350,6 +361,7 @@ if (-not $SkipProjectionFixture) {
     $fixtureText = (& "$PSScriptRoot\verify-legacy-canonical-projection-gate.ps1" `
       -RepoRoot $RepoRoot `
       -EnvFile $EnvFile `
+      -CoreApiRoot $CoreApiRoot `
       -NodeExe $NodeExe `
       -ReportDir $logDir | Out-String).Trim()
     return [ordered]@{
@@ -363,6 +375,7 @@ Invoke-AuditStep "projection-verifier" {
   $args = @{
     RepoRoot = $RepoRoot
     EnvFile = $EnvFile
+    CoreApiRoot = $CoreApiRoot
     NodeExe = $NodeExe
     ReportPath = $verifyReport
   }
@@ -407,6 +420,7 @@ if (-not $SkipCoreApiReadonly) {
     & "$PSScriptRoot\verify-core-api-compat-readonly.ps1" `
       -RepoRoot $RepoRoot `
       -EnvFile $EnvFile `
+      -CoreApiRoot $CoreApiRoot `
       -NodeExe $NodeExe `
       -Port $CoreApiPort | Out-File -LiteralPath $coreApiReport -Encoding UTF8
     $json = Get-Content -LiteralPath $coreApiReport -Raw | ConvertFrom-Json
@@ -508,6 +522,7 @@ $report = [ordered]@{
   generated_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
   status = $status
   source_root = $RepoRoot
+  core_api_root = $CoreApiRoot
   env_file = $EnvFile
   database_url_supplied = $databaseUrlSupplied
   legacy_dump_file = $LegacyDumpFile

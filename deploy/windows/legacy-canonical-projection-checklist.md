@@ -5,6 +5,13 @@ This checklist is for the P1/P2 cutover window where old `core-api/` and
 native control plane. It is intentionally non-Docker, non-Linux, and
 PostgreSQL-first.
 
+G2b-1 keeps `core-api/` and `services/api/` at repository root as legacy
+reference directories. `legacy/core-api` and `legacy/services-api` are reserved
+future archive targets only; do not use them until a separately confirmed G2b-2
+physical move has completed and the path-aware gates have been rerun with the
+new roots. See `docs/xiaolouai-legacy-physical-archive-contract.md` for the
+G2b-2 validation and rollback plan.
+
 ## Scope
 
 Canonical source of truth after cutover:

@@ -164,6 +164,7 @@ foreach ($migration in $migrations) {
 
 Set-UserEnv "TMP" $tempRoot
 Set-UserEnv "TEMP" $tempRoot
+Set-UserEnv "XDG_CACHE_HOME" "$cacheRoot\tooling-cache"
 Set-UserEnv "DOTNET_CLI_HOME" "$cacheRoot\dotnet-cli-home"
 Set-UserEnv "DOTNET_BUNDLE_EXTRACT_BASE_DIR" "$cacheRoot\dotnet-bundle"
 Set-UserEnv "NUGET_PACKAGES" "$cacheRoot\nuget\packages"
@@ -193,6 +194,7 @@ if ($Execute) {
     "$cacheRoot\nuget\packages",
     "$cacheRoot\nuget\v3-cache",
     "$cacheRoot\nuget\plugins-cache",
+    "$cacheRoot\tooling-cache",
     "$tempRoot\NuGetScratch",
     "$cacheRoot\pip",
     "$cacheRoot\python-pycache",

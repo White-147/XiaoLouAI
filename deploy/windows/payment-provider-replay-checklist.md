@@ -62,6 +62,11 @@ provider-specific adapter/normalizer before direct `.NET` replay. Already
 normalized canonical captures can use the staging HMAC secret and the replay
 scripts below.
 
+G2b-1 leaves those adapter references at the current `core-api/` root. If a
+future G2b-2 physical archive is explicitly approved, the same references move
+under `legacy/core-api`; they remain migration references only and must not be
+used as the production payment callback runtime.
+
 The Windows-native script boundary now includes
 `scripts/windows/normalize-payment-provider-capture.ps1` for converting
 provider-shaped synthetic or reviewed captures into canonical replay JSONL, and

@@ -156,6 +156,8 @@ export default function ScriptPlaza() {
                     src={`https://picsum.photos/seed/${item.id}/640/480`}
                     alt={item.title}
                     className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
                     referrerPolicy="no-referrer"
                   />
                 </div>

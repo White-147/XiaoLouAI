@@ -26,10 +26,12 @@ locks, `FOR UPDATE SKIP LOCKED`, and `LISTEN/NOTIFY`.
 ```text
 XIAOLOU-main/          React + Vite SPA; production output is dist/
 control-plane-dotnet/  .NET control plane and Windows worker projects
-core-api/              Node compatibility layer and migration reference
-services/api/          legacy Python API reference; not production control plane
-video-replace-service/ local model / video replacement reference code
-caddy/                 Windows Caddy static site + API proxy config
+legacy/core-api/       Node compatibility layer and migration reference
+legacy/services-api/   legacy Python API reference; not production control plane
+legacy/jaaz/           upstream Jaaz / Agent Studio reference; not production runtime
+legacy/                archived legacy references; not production runtime
+tools/video/video-replace-service/ local model / video replacement reference code
+deploy/caddy/          Windows Caddy static site + API proxy config
 scripts/windows/       Windows install, service, backup, and runtime scripts
 docs/                  local handoff and Windows-native operations notes
 ```
@@ -38,10 +40,13 @@ Some legacy or upstream subdirectories keep their own README files for
 migration/reference work. Those files are not production deployment guides when
 they mention Docker, Linux, Celery, Redis, RabbitMQ, or container startup.
 Production operations are defined by this README and `deploy/windows/ops-runbook.md`.
-`services/api/` is retained only while old route mapping or historical
-FastAPI/SQLAlchemy/payment/upload/video-replace code is still useful for
-comparison; after final legacy-surface checks no longer need it, the directory
-can move under `legacy/` or be deleted.
+G2b-2 has moved the former root legacy reference paths `core-api/` and
+`services/api/` to `legacy/core-api` and `legacy/services-api`; G7d-3 has moved
+the former root upstream Jaaz reference to `legacy/jaaz`. The archive paths
+remain migration references only: do not register them as production services,
+reverse-proxy backends, scheduled tasks, or control-plane working directories.
+Any future deletion remains outside this contract and would require final
+legacy-surface checks to no longer need the references.
 
 ## Development Setup
 
@@ -53,10 +58,12 @@ npm install
 npm run dev
 ```
 
-Node compatibility API, only while routes are being migrated:
+Legacy Node compatibility API, only for local read-only comparison while routes
+are being migrated. The default archive path is `legacy/core-api`; set
+`LEGACY_CORE_API_ROOT` only when testing a nonstandard local copy.
 
 ```powershell
-cd core-api
+cd legacy\core-api
 npm install
 npm run dev
 ```
@@ -264,6 +271,13 @@ material.
 
 Final acceptance evidence should include, when available:
 
+- 2026-05-04 admin Release Candidate evidence:
+  `D:\code\XiaoLouAI\.runtime\xiaolou-logs\release-candidate-s5-20260504-093456.json`.
+  The RC ran `verify-release-candidate.ps1 -PublishFrontend` from an
+  Administrator PowerShell, published to `.runtime\app`, restarted the three
+  XiaoLou Windows services, and finished with `blockers=0`. The top-level
+  status is `warning` because real legacy snapshot and real provider-health
+  evidence remain operator-supplied final acceptance items.
 - Strict P0 and 4100 runtime smoke reports from the real Windows services.
 - `verify-p2-cutover-audit.ps1` output with no blockers.
 - A real legacy dump restore/projection verification report from
@@ -290,7 +304,8 @@ signed with the configured HMAC secret
 (`Payments:{provider}:WebhookSecret` / `X-XiaoLou-Signature`). Native Alipay
 RSA2 and WeChat Pay v3 inputs are handled by the Windows adapter/normalizer
 tooling under `scripts/windows/`; the legacy
-`core-api/src/payments/alipay.js` and `core-api/src/payments/wechat.js` files
+`legacy/core-api/src/payments/alipay.js` and
+`legacy/core-api/src/payments/wechat.js` files
 are migration references only, not the long-term production control plane.
 
 To connect a real provider account:
@@ -341,11 +356,14 @@ refactor toward P2.
   keep canonical task state in memory.
 - Media primary storage is object storage. Windows local folders are cache/temp
   only.
-- `core-api/` exists for compatibility during cutover. New control-plane work
-  belongs in `control-plane-dotnet/`. Set `CORE_API_COMPAT_READ_ONLY=1` for
-  any production compatibility process so old Node routes cannot continue
-  accepting writes; in that mode, legacy public GET routes are closed by
-  default except `GET /healthz` and `GET /api/windows-native/status`.
+- The legacy reference directories now live at `legacy/core-api` and
+  `legacy/services-api` after the G2b-2 archive move. The former root paths
+  `core-api/` and `services/api/` are not production control-plane locations.
+  New control-plane work belongs in `control-plane-dotnet/`. Set
+  `CORE_API_COMPAT_READ_ONLY=1` for any temporary compatibility process so old
+  Node routes cannot continue accepting writes; in that mode, legacy public GET
+  routes are closed by default except `GET /healthz` and
+  `GET /api/windows-native/status`.
 
 ## Handoff
 
@@ -354,6 +372,8 @@ Read these first before continuing the refactor:
 - `XIAOLOU_REFACTOR_HANDOFF.md`
 - `docs/xiaolouai-finalization-handoff.md`
 - `docs/xiaolouai-deep-research-structured.md`
+- `docs/xiaolouai-legacy-physical-archive-contract.md`, for the completed
+  G2b-2 archive record and rollback path
 
 After every code, script, config, reverse-proxy, runtime, or README change,
 update both handoff files before closing the work. Use the structured deep

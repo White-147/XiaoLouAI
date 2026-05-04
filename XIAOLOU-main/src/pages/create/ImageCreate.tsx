@@ -1301,6 +1301,8 @@ export default function ImageCreate() {
                           src={imageUrl}
                           alt={item.prompt}
                           className="h-full w-full object-cover"
+                          loading="lazy"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                         />
                       ) : (
@@ -1330,6 +1332,8 @@ export default function ImageCreate() {
                                   src={url}
                                   alt={`reference-${index + 1}`}
                                   className="h-10 w-10 rounded-md border border-background object-cover"
+                                  loading="lazy"
+                                  decoding="async"
                                   referrerPolicy="no-referrer"
                                 />
                               ))}
@@ -1508,6 +1512,8 @@ export default function ImageCreate() {
                           src={taskReference(task) || undefined}
                           alt="reference"
                           className="h-8 w-8 rounded object-cover"
+                          loading="lazy"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                         />
                         <span className="text-[11px] text-muted-foreground">已关联参考图</span>

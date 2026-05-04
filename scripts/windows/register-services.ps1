@@ -267,6 +267,7 @@ $machineEnv = [ordered]@{
   LOCAL_TEMP_DIR = $tempRoot
   LOG_DIR = (Join-Path $runtimeStateRoot "xiaolou-logs")
   BACKUP_DIR = (Join-Path $runtimeStateRoot "xiaolou-backups")
+  XDG_CACHE_HOME = (Join-Path $cacheRoot "tooling-cache")
   TMP = $tempRoot
   TEMP = $tempRoot
   DOTNET_CLI_HOME = (Join-Path $cacheRoot "dotnet-cli-home")

@@ -4,18 +4,22 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI"
 
-set "SERVICE_DIR=%ROOT%\video-replace-service"
-if not exist "%SERVICE_DIR%\pyproject.toml" if exist "%ROOT%\core-api\video-replace-service\pyproject.toml" set "SERVICE_DIR=%ROOT%\core-api\video-replace-service"
+if not defined LEGACY_CORE_API_ROOT set "LEGACY_CORE_API_ROOT=%ROOT%\legacy\core-api"
+if not defined XIAOLOU_RUNTIME_ROOT set "XIAOLOU_RUNTIME_ROOT=%ROOT%\.runtime"
+
+set "SERVICE_DIR=%ROOT%\tools\video\video-replace-service"
+if not exist "%SERVICE_DIR%\pyproject.toml" if exist "%LEGACY_CORE_API_ROOT%\video-replace-service\pyproject.toml" set "SERVICE_DIR=%LEGACY_CORE_API_ROOT%\video-replace-service"
 set "VENV_DIR=%SERVICE_DIR%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "ENV_FILE=%SERVICE_DIR%\.env.local"
 if not defined SKIP_MODEL_DOWNLOAD set "SKIP_MODEL_DOWNLOAD=1"
-set "XDG_CACHE_HOME=%ROOT%\.cache"
-set "PIP_CACHE_DIR=%ROOT%\.cache\pip"
-set "HF_HOME=%ROOT%\.cache\huggingface"
-set "HUGGINGFACE_HUB_CACHE=%ROOT%\.cache\huggingface\hub"
-set "TRANSFORMERS_CACHE=%ROOT%\.cache\huggingface\transformers"
-set "TORCH_HOME=%ROOT%\.cache\torch"
+set "CACHE_ROOT=%XIAOLOU_RUNTIME_ROOT%\xiaolou-cache\legacy-cache"
+set "XDG_CACHE_HOME=%CACHE_ROOT%"
+set "PIP_CACHE_DIR=%CACHE_ROOT%\pip"
+set "HF_HOME=%CACHE_ROOT%\huggingface"
+set "HUGGINGFACE_HUB_CACHE=%CACHE_ROOT%\huggingface\hub"
+set "TRANSFORMERS_CACHE=%CACHE_ROOT%\huggingface\transformers"
+set "TORCH_HOME=%CACHE_ROOT%\torch"
 
 set "SMALL_LOG=%SERVICE_DIR%\.install-small.log"
 set "TORCH_LOG=%SERVICE_DIR%\.install-torch.log"
@@ -50,10 +54,13 @@ if not exist "%SERVICE_DIR%\pyproject.toml" (
     exit /b 1
 )
 
+if not exist "%CACHE_ROOT%" mkdir "%CACHE_ROOT%" >nul 2>&1
+
 echo.
 echo ============================================================
 echo Video Replace setup
 echo Root:    %ROOT%
+echo Cache:   %CACHE_ROOT%
 echo Service: %SERVICE_DIR%
 echo ============================================================
 
@@ -487,11 +494,11 @@ exit /b 0
 if defined ASCII_VENV_PYTHON if exist "%ASCII_VENV_PYTHON%" exit /b 0
 for %%L in (X Y Z W V U T S R Q P O) do (
     if not defined ASCII_ROOT (
-        if exist "%%L:\video-replace-service\.venv\Scripts\python.exe" (
+        if exist "%%L:\tools\video\video-replace-service\.venv\Scripts\python.exe" (
             set "ASCII_ROOT=%%L:\"
         ) else (
             subst %%L: "%ROOT%" >nul 2>&1
-            if exist "%%L:\video-replace-service\.venv\Scripts\python.exe" set "ASCII_ROOT=%%L:\"
+            if exist "%%L:\tools\video\video-replace-service\.venv\Scripts\python.exe" set "ASCII_ROOT=%%L:\"
         )
     )
 )
@@ -499,7 +506,7 @@ if not defined ASCII_ROOT (
     echo [error] Could not create an ASCII alias for %ROOT%
     exit /b 1
 )
-set "ASCII_SERVICE_DIR=%ASCII_ROOT%video-replace-service"
+set "ASCII_SERVICE_DIR=%ASCII_ROOT%tools\video\video-replace-service"
 set "ASCII_VENV_PYTHON=%ASCII_SERVICE_DIR%\.venv\Scripts\python.exe"
 set "ASCII_SITE_PACKAGES=%ASCII_SERVICE_DIR%\.venv\Lib\site-packages"
 if not exist "%ASCII_VENV_PYTHON%" (

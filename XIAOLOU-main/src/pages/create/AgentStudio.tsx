@@ -22,7 +22,10 @@ function canPreflight(url: string) {
 }
 
 function isMainAppFallback(html: string) {
-  return html.includes("/src/main.tsx") || html.includes("chuangjing-logo.png");
+  return (
+    html.includes("/src/main.tsx") ||
+    html.includes("chuangjing-favicon-32.png")
+  );
 }
 
 export default function AgentStudio() {
