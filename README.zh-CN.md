@@ -37,8 +37,8 @@ scripts/windows/       Windows 安装、服务、备份和运行脚本
 docs/                  本地交接与 Windows 原生运维说明
 ```
 
-部分 legacy 或上游子目录会保留自己的 README，供迁移/参考使用。即使其中提到
-Docker、Linux、Celery、Redis、RabbitMQ 或容器启动，也不能视为生产部署指南。
+部分 retained evidence/material 目录或上游相邻目录会保留自己的 README，供迁移/参考使用。
+即使其中提到 Docker、Linux、Celery、Redis、RabbitMQ 或容器启动，也不能视为生产部署指南。
 生产运维以本 README 和 `deploy/windows/ops-runbook.md` 为准。
 G2b-2 已把原根目录 legacy reference `core-api/` 和 `services/api/` 移动到
 `legacy/core-api` 与 `legacy/services-api`；G7d-3 已把原根目录上游 Jaaz
@@ -276,6 +276,9 @@ source 不是生产控制面依赖。
 - `docs/xiaolouai-deep-research-structured.md`
 - G2b-2 归档记录和回滚路径见
   `docs/xiaolouai-legacy-physical-archive-contract.md`
+
+根 handoff 是便于 PowerShell 阅读的短棒文件。它现在只保留 G9、G10、G11 的阶段级
+完成状态；G9/G10/G11 的详细执行记录归档在上面的 docs handoff 文件中。
 
 每次代码、脚本、配置、反代、运行态或 README 发生变更后，收尾前都要同步更新根
 handoff 和相关 docs handoff。使用 deep research 结构化阅读版把剩余工作保持为有限任务卡。如果旧的“下一轮执行顺序”已被新状态取代，必须在

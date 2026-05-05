@@ -38,10 +38,11 @@ scripts/windows/       Windows install, service, backup, and runtime scripts
 docs/                  local handoff and Windows-native operations notes
 ```
 
-Some legacy or upstream subdirectories keep their own README files for
-migration/reference work. Those files are not production deployment guides when
-they mention Docker, Linux, Celery, Redis, RabbitMQ, or container startup.
-Production operations are defined by this README and `deploy/windows/ops-runbook.md`.
+Some retained evidence/material directories and upstream-adjacent directories
+keep their own README files for migration/reference work. Those files are not
+production deployment guides when they mention Docker, Linux, Celery, Redis,
+RabbitMQ, or container startup. Production operations are defined by this README
+and `deploy/windows/ops-runbook.md`.
 G2b-2 has moved the former root legacy reference paths `core-api/` and
 `services/api/` to `legacy/core-api` and `legacy/services-api`; G7d-3 has moved
 the former root upstream Jaaz reference to `legacy/jaaz`. The archive paths
@@ -389,6 +390,10 @@ Read these first before continuing the refactor:
 - `docs/xiaolouai-deep-research-structured.md`
 - `docs/xiaolouai-legacy-physical-archive-contract.md`, for the completed
   G2b-2 archive record and rollback path
+
+The root handoff is a short PowerShell-readable baton. It now keeps G9, G10,
+and G11 as stage-level completed entries; detailed G9/G10/G11 execution records
+belong in the docs handoff files above.
 
 After every code, script, config, reverse-proxy, runtime, or README change,
 update the root handoff plus the related docs handoff files before closing the

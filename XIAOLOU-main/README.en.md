@@ -12,7 +12,12 @@ Required services:
 
 - `3000`, or the current Vite port: `XIAOLOU-main` frontend
 - `4100`: `.NET` Control API, the primary entry for production canonical public routes
-- `legacy/core-api`: archived reference for migration-only read-only compatibility, login/assertion transition, or local comparison; do not reopen old write routes or use it as the production control plane.
+
+Optional local comparison:
+
+- `legacy/core-api`: source/root has been removed; restore it from an earlier
+  commit only into a separate local copy for deliberate historical read-only
+  comparison. It is not a default service.
 - `5174` / `57988`: Jaaz UI / Jaaz API only for local agent-canvas comparison or embed debugging, not the production control plane
 
 One-command startup:
@@ -20,6 +25,10 @@ One-command startup:
 ```text
 scripts\start_xiaolou_stack.cmd
 ```
+
+The script skips missing legacy-only source roots or generated dependencies.
+Normal frontend development depends only on `XIAOLOU-main` and the `4100`
+Control API.
 
 Manual startup:
 

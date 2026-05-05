@@ -12,7 +12,10 @@
 
 - `3000` 或当前 Vite 端口：`XIAOLOU-main` 前端。
 - `4100`：`.NET` Control API，生产 canonical public routes 的主入口。
-- `legacy/core-api`：已归档的迁移期只读兼容、登录/签发过渡或本地对照参考；不要恢复旧写入口，也不要把它作为生产控制面。
+
+可选本地对照：
+
+- `legacy/core-api`：source/root 已删除；只允许从较早 commit 显式恢复到单独本地副本做历史只读对照，不是默认服务。
 - `5174` / `57988`：Jaaz UI / Jaaz API 仅用于本地 agent-canvas 对照或 embed 调试，不是生产控制面。
 
 一键启动：
@@ -20,6 +23,9 @@
 ```text
 scripts\start_xiaolou_stack.cmd
 ```
+
+该脚本会跳过缺失的 legacy-only source root 或 generated dependency；正常前端开发只依赖
+`XIAOLOU-main` 与 `4100` Control API。
 
 手动启动：
 
