@@ -149,14 +149,14 @@ async function importApiWithMockServices() {
   };
 
   const factories = {
-    createAdminEnterpriseService: vi.fn(() => services.adminEnterprise),
-    createAuthAccountService: vi.fn(() => services.authAccount),
-    createJobsService: vi.fn(() => services.jobs),
-    createMediaService: vi.fn(() => services.media),
-    createPlaygroundService: vi.fn(() => services.playground),
-    createProjectsCanvasCreateService: vi.fn(() => services.projectsCanvasCreate),
-    createToolboxService: vi.fn(() => services.toolbox),
-    createWalletPaymentService: vi.fn(() => services.walletPayment),
+    createAdminEnterpriseService: vi.fn((_deps?: unknown) => services.adminEnterprise),
+    createAuthAccountService: vi.fn((_deps?: unknown) => services.authAccount),
+    createJobsService: vi.fn((_deps?: unknown) => services.jobs),
+    createMediaService: vi.fn((_deps?: unknown) => services.media),
+    createPlaygroundService: vi.fn((_deps?: unknown) => services.playground),
+    createProjectsCanvasCreateService: vi.fn((_deps?: unknown) => services.projectsCanvasCreate),
+    createToolboxService: vi.fn((_deps?: unknown) => services.toolbox),
+    createWalletPaymentService: vi.fn((_deps?: unknown) => services.walletPayment),
   };
 
   vi.doMock("../../api/admin-enterprise", () => ({
@@ -338,9 +338,13 @@ describe("api.ts compatibility wrappers", () => {
     });
     services.walletPayment.createWalletRechargeOrder.mockRejectedValueOnce(retiredError);
     const rechargeInput = {
-      amountCents: 100,
+      planId: "synthetic-plan",
+      planName: "Synthetic Plan",
+      billingCycle: "monthly",
       paymentMethod: "wechat_pay",
-    } as Parameters<ApiModule["createWalletRechargeOrder"]>[0];
+      amount: 100,
+      credits: 1000,
+    } satisfies Parameters<ApiModule["createWalletRechargeOrder"]>[0];
 
     await expect(api.createWalletRechargeOrder(rechargeInput)).rejects.toBe(retiredError);
     expect(retiredError.status).toBe(410);

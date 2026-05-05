@@ -1,6 +1,6 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-05 18:34 +08
+更新时间：2026-05-05 18:46 +08
 工作目录：`D:\code\XiaoLouAI`
 
 本文件是后续每一棒的第一读取文件。根短棒只保留总进度、固定边界、当前 owner/队列提示词和验证入口；历史细节见 docs handoff：
@@ -80,7 +80,7 @@ G13-post-2b npm-audit-vite-postcss-lockfile-update: done
 
 ```text
 Owner: G13 deferred CI/Test gate follow-up
-当前: G12a backend modules done; G12b frontend API service layer done through G12b-9; G12c DTO contract inventory/split/snapshot plan done; G12d cleanup done through G12d-2; G12e backend/frontend test-harness plans done; G12f backend harness done through AuthHelpers/Health/Metrics client-token tests; G12f frontend Vitest test:unit harness now covers Admin/Enterprise, Auth/Account, Jobs public facade, Playground non-stream plus polling/stream fake-timer boundaries, Media upload, Toolbox, Wallet/Payment, Projects/Canvas/Create service factory tests, api.ts compatibility wrapper runtime tests, and shared synthetic fixture/redaction helper tests. G13-post-4 through G13-post-4d frontend harness/advisory owners are complete, G13-post-5 completed synthetic E2E smoke harness precondition planning, G13-post-2 ran non-blocking security baseline execution, G13-post-2a completed npm audit remediation planning, and G13-post-2b updated the lockfile/install resolution to Vite 6.4.2 plus PostCSS 8.5.14. npm audit now reports 0 vulnerabilities; dotnet vulnerable scan found no vulnerable packages across solution/test projects, and CodeQL was not run because codeql CLI is not installed. No threshold, CI required gate, browser E2E, Playwright/Cypress dependency, workflow change, or real fixture/material dependency was introduced. No unconditional READY NEXT owner remains; branch protection enablement, real browser E2E, and required-gate ratchets remain conditional/parked until prerequisites and owner signoff exist.
+当前: G12a backend modules done; G12b frontend API service layer done through G12b-9; G12c DTO contract inventory/split/snapshot plan done; G12d cleanup done through G12d-2; G12e backend/frontend test-harness plans done; G12f backend harness done through AuthHelpers/Health/Metrics client-token tests; G12f frontend Vitest test:unit harness now covers Admin/Enterprise, Auth/Account, Jobs public facade, Playground non-stream plus polling/stream fake-timer boundaries, Media upload, Toolbox, Wallet/Payment, Projects/Canvas/Create service factory tests, api.ts compatibility wrapper runtime tests, and shared synthetic fixture/redaction helper tests. G13-post-4 through G13-post-4d frontend harness/advisory owners are complete, G13-post-5 completed synthetic E2E smoke harness precondition planning, G13-post-2 ran non-blocking security baseline execution, G13-post-2a completed npm audit remediation planning, and G13-post-2b updated the lockfile/install resolution to Vite 6.4.2 plus PostCSS 8.5.14. G13-post-1 branch protection enablement was attempted as a read-only preflight and blocked/no-op: repository admin permission is available and remote main now has the CI workflow, but the first run failed in Typecheck frontend before the `CI / Build and static gates` check ever became green. npm audit now reports 0 vulnerabilities; dotnet vulnerable scan found no vulnerable packages across solution/test projects, and CodeQL was not run because codeql CLI is not installed. No threshold, CI required gate, browser E2E, Playwright/Cypress dependency, branch protection change, or real fixture/material dependency was introduced. No unconditional READY NEXT owner remains; branch protection enablement, real browser E2E, and required-gate ratchets remain conditional/parked until prerequisites and owner signoff exist.
 规则: inventory first; 每轮只处理一个 owner；保留现有 route path、exported API names、response shapes、auth/permission/account-scope 行为；不在同轮引入 backend/frontend behavior、polling/transport/DB/DTO owner 变更。
 详细记录: docs\xiaolouai-finalization-handoff.md 和 docs\xiaolouai-deep-research-structured.md
 ```
@@ -117,7 +117,7 @@ DONE G13-post-5 synthetic-e2e-smoke-harness-precondition-plan
 DONE G13-post-2 security-baseline-nonblocking-execution
 DONE G13-post-2a npm-audit-vite-postcss-remediation-plan
 DONE G13-post-2b npm-audit-vite-postcss-lockfile-update
-CONDITIONAL G13-post-1 branch-protection-enable (requires first green GitHub Actions run and repository settings access)
+BLOCKED G13-post-1 branch-protection-enable preflight (admin access ok; remote workflow exists; first run failed in Typecheck frontend; branch protection not changed)
 PARKED G13-post-5 real browser E2E implementation (requires test auth, synthetic DB seed, fake object storage, job polling mocks, runtime budget, and flake policy)
 PARKED G13-post-6 required-gate-ratchet (requires consecutive green advisory runs and owner signoff; no global one-shot enforcement)
 ```
@@ -125,7 +125,7 @@ PARKED G13-post-6 required-gate-ratchet (requires consecutive green advisory run
 ### 下一棒提示词
 
 ```text
-当前没有无条件 READY NEXT owner。G13-post-2b npm-audit-vite-postcss-lockfile-update 已完成，XIAOLOU-main package-lock 和本地 install tree 现在解析到 vite 6.4.2 + postcss 8.5.14，package.json 的 vite ^6.2.0 范围保持不变，npm audit 报告 0 vulnerabilities；该结果仍是 advisory/non-required，不新增 CI required security gate。若用户提供 GitHub 首次绿灯和 repository settings 权限，可执行 G13-post-1 branch-protection-enable。真实 browser E2E implementation 仍 parked，需先落地 test auth、synthetic fixture/seed、fake object storage、job polling mocks、runtime budget 和 flake policy；G13-post-6 required-gate-ratchet 仍需连续绿灯和 owner signoff。
+当前没有无条件 READY NEXT owner。G13-post-1 branch-protection-enable 本轮只读 preflight 已确认 White-147/XiaoLouAI connector/gh 均有 admin/repo 权限，远端 main 上已有 .github/workflows/ci.yml，workflow `CI` active，check-run context 为 `Build and static gates`；但 run 25371739784 在 Typecheck frontend 失败，日志显示 XIAOLOU-main/src/lib/api/__tests__/api-compatibility-wrappers.test.ts 存在 TS2493 tuple index 和 TS2352 CreateWalletRechargeOrderInput cast 类型错误，branch protection 当前仍 404 not protected，因此未修改 repository settings。下一步应先执行一个小 owner 修复 CI typecheck，再等 `CI / Build and static gates` 首次 green 后重新执行 G13-post-1。真实 browser E2E implementation 仍 parked，需先落地 test auth、synthetic fixture/seed、fake object storage、job polling mocks、runtime budget 和 flake policy；G13-post-6 required-gate-ratchet 仍需连续绿灯和 owner signoff。
 
 执行任何下一棒前仍需先读取三份 handoff、README Deferred CI/Test Gate Follow-Up、当前 dirty worktree、相关 route/type/static scan record 和目标 owner 的前置条件。保持 DTO、route path、status code、response shape、auth/permission/account-scope 行为、frontend exported API names、polling/transport/DB owner 不变；不删除 api.ts compatibility wrappers 或 legacy verifier/deploy evidence；不读取或上传真实 auth/provider/payment/storage/operator material、production dump/snapshot、真实 DB fixture 或真实 object storage。
 ```
