@@ -85,7 +85,7 @@ internal static class PlaygroundEndpoints
             }
             catch (UnauthorizedAccessException ex)
             {
-                return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+                return ForbiddenError(ex);
             }
         });
 
@@ -222,11 +222,11 @@ internal static class PlaygroundEndpoints
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return BadRequestError(ex);
             }
             catch (UnauthorizedAccessException ex)
             {
-                return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+                return ForbiddenError(ex);
             }
         });
 
@@ -316,7 +316,7 @@ internal static class PlaygroundEndpoints
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return BadRequestError(ex);
             }
         });
 

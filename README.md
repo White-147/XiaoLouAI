@@ -358,6 +358,42 @@ adapter/normalizer smoke, provider boundary smoke, P0/canary, wallet ledger
 audit, and non-payment P1 cutover gates green; continue the Windows-native
 refactor toward P2.
 
+## Deferred CI/Test Gate Follow-Up
+
+G13 has finished the currently actionable CI/static-gate work: the minimal
+GitHub Actions workflow exists, frontend typecheck lint is in CI, conditional
+`.NET` test detection is hardened, security/coverage/E2E plans are documented,
+and the frontend service harness now has a non-required advisory coverage
+script. The remaining CI/test gates still need fixtures, baselines, repository
+settings access, owner signoff, or stable runtime budget before they can move
+forward. Treat them like operator-supplied payment/provider material: they are
+follow-up readiness items, not routine handoff blockers.
+
+```text
+Status: parked until user testing, harnesses, fixtures, baselines and runtime budget exist.
+Current PR gate: only the minimal `CI / Build and static gates` job after its first green GitHub run.
+Do not require yet: coverage thresholds, E2E, CodeQL, npm audit failure, dotnet vulnerability failure, standalone dotnet test when no *Tests*.csproj exists.
+Do not read or upload: .runtime, deploy/local-secrets, real env/provider/payment/object-storage/operator material, production dumps/snapshots, restore drills, or real payment replay captures.
+```
+
+Deferred queue:
+
+```text
+G13-post-1 branch-protection-enable: after the first green GitHub Actions run and with repository settings access, set the real `CI / Build and static gates` context as required; otherwise record that branch protection was not changed.
+G13-post-2 security-baseline-nonblocking-execution: completed a manual non-blocking baseline after allowlist/noise policy and secret boundary confirmation. The follow-up G13-post-2b package remediation updated the Vite/PostCSS lockfile/install resolution to Vite 6.4.2 and PostCSS 8.5.14; `npm audit --json` now reports 0 vulnerabilities. `dotnet list package --vulnerable --include-transitive` found no vulnerable packages across the solution/test projects, and CodeQL was not run because the local `codeql` CLI is unavailable. This remains advisory/non-required; no npm audit failure gate, workflow change, branch protection, or CI required security check has been added.
+G13-post-3 backend-test-harness-and-coverage-advisory: create a backend *Tests*.csproj, synthetic fixtures, auth/internal-token test boundary, DB/storage mocks or isolated test DB, then advisory coverage. Start with Health/Metrics/Auth helper.
+G13-post-4 frontend-test-harness-and-coverage-advisory: done for the first service-harness advisory baseline; `npm --prefix XIAOLOU-main run test:coverage:advisory` writes a non-required Vitest V8 json-summary/text report with no thresholds. Broader fetch/timer mocks and any required coverage gate remain deferred.
+G13-post-5 synthetic-e2e-smoke-harness: add test auth, synthetic DB seed, fake object storage, toolbox/job polling mocks and runtime/flake budget before browser E2E.
+G13-post-6 required-gate-ratchet: promote security, coverage or E2E from advisory to required only per stable owner after consecutive green runs and owner signoff.
+```
+
+PowerShell reading shortcut:
+
+```powershell
+Select-String -Path .\README.md -Pattern 'Deferred CI/Test Gate Follow-Up' -Context 0,40
+Select-String -Path .\docs\xiaolouai-finalization-handoff.md -Pattern 'Post-G13 deferred execution queue' -Context 0,12
+```
+
 ## Runtime Rules
 
 - PostgreSQL is canonical for accounts, organizations, identity/profile
@@ -391,9 +427,10 @@ Read these first before continuing the refactor:
 - `docs/xiaolouai-legacy-physical-archive-contract.md`, for the completed
   G2b-2 archive record and rollback path
 
-The root handoff is a short PowerShell-readable baton. It now keeps G9, G10,
-and G11 as stage-level completed entries; detailed G9/G10/G11 execution records
-belong in the docs handoff files above.
+The root handoff is a short PowerShell-readable baton. It keeps only the current
+short next-step context and verification entrypoints. Completed G9-G13 records
+belong in the docs handoff files above; long-wait G13 test/fixture/runtime
+follow-ups are tracked in `Deferred CI/Test Gate Follow-Up` in this README.
 
 After every code, script, config, reverse-proxy, runtime, or README change,
 update the root handoff plus the related docs handoff files before closing the

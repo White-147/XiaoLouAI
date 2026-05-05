@@ -126,7 +126,7 @@ internal static class ToolboxEndpoints
         }
         catch (ArgumentException ex)
         {
-            return Results.BadRequest(new { error = ex.Message });
+            return BadRequestError(ex);
         }
     }
 }

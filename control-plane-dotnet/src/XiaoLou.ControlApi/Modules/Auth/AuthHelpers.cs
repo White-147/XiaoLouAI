@@ -529,6 +529,16 @@ internal static class AuthHelpers
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
     }
 
+    internal static IResult BadRequestError(Exception exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+
+    internal static IResult ForbiddenError(Exception exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
     internal static bool ContainsCsvGrant(string? csv, string value)
     {
         if (string.IsNullOrWhiteSpace(csv))

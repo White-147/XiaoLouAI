@@ -1,12 +1,15 @@
 import { getControlApiClientAssertion, getCurrentActorId, getAuthToken } from "./actor-session";
 import { isLocalLoopbackAccess, SUPER_ADMIN_DEMO_ACTOR_ID } from "./local-loopback";
 import { isRetiredLegacyMediaPath } from "./media-url-policy";
-import { normalizeVideoMode } from "./create-capabilities";
+import { createAdminEnterpriseService } from "./api/admin-enterprise";
+import { createAuthAccountService } from "./api/auth-account";
+import { createJobsService } from "./api/jobs";
+import { createMediaService } from "./api/media";
+import { createPlaygroundService } from "./api/playground";
+import { createProjectsCanvasCreateService } from "./api/projects-canvas-create";
+import { createToolboxService } from "./api/toolbox";
+import { createWalletPaymentService } from "./api/wallet-payment";
 import type {
-  MediaCapabilitySet,
-  MediaCapabilitiesResponse,
-  MediaModelCapability,
-  MediaModelStatus,
   VideoInputMode,
   VideoGenerationMode,
 } from "./create-capabilities";
@@ -947,30 +950,12 @@ export type UploadedFile = {
   signedReadUrl?: string;
 };
 
-type ControlMediaBeginResponse = {
-  media_object_id?: string;
-  mediaObjectId?: string;
-  upload_session_id?: string;
-  uploadSessionId?: string;
-  object_key?: string;
-  objectKey?: string;
-  upload_url?: string;
-  uploadUrl?: string;
-};
-
-type ControlMediaReadResponse = {
-  signed_read_url?: string;
-  signedReadUrl?: string;
-};
-
 type ControlMediaRequestScope = {
   accountOwnerType: "user";
   accountOwnerId: string;
   regionCode: "CN";
   currency: "CNY";
 };
-
-type ControlJobRecord = Record<string, unknown>;
 
 export type ProjectOverview = {
   project: Project & {
@@ -1011,18 +996,6 @@ export class ApiRequestError extends Error {
     this.status = options?.status || 500;
   }
 }
-
-type TaskAccepted = {
-  taskId: string;
-  status: string;
-  task: Task;
-};
-
-type ToolboxRunResponse = Record<string, unknown> & {
-  taskId?: string;
-  status?: string;
-  job?: ControlJobRecord;
-};
 
 function isRouteNotFoundError(error: unknown) {
   return (
@@ -1218,23 +1191,6 @@ function normalizeWalletRecord(wallet: Wallet, actorId: string): Wallet {
   };
 }
 
-function walletOwnerTypeForControlApi(ownerType: WalletOwnerType) {
-  return ownerType === "platform" ? "system" : ownerType;
-}
-
-function buildWalletQuery(ownerType: WalletOwnerType, ownerId: string, extra?: Record<string, string | undefined>) {
-  const params = new URLSearchParams({
-    accountOwnerType: walletOwnerTypeForControlApi(ownerType),
-    accountOwnerId: ownerId || "guest",
-  });
-
-  for (const [key, value] of Object.entries(extra ?? {})) {
-    if (value) params.set(key, value);
-  }
-
-  return params.toString();
-}
-
 function createEmptyWallet(ownerType: WalletOwnerType, ownerId: string): Wallet {
   const now = new Date().toISOString();
   return {
@@ -1255,42 +1211,6 @@ function createEmptyWallet(ownerType: WalletOwnerType, ownerId: string): Wallet 
   };
 }
 
-function emptyCreditUsageStats(
-  subject: CreditUsageSubject,
-  mode: CreditUsageStats["mode"],
-  wallets: Wallet[] = [],
-): CreditUsageStats {
-  return {
-    subject,
-    mode,
-    windowDays: 30,
-    bucket: "day",
-    wallets,
-    summary: {
-      consumedCredits: 0,
-      todayConsumedCredits: 0,
-      refundedCredits: 0,
-      pendingFrozenCredits: 0,
-      availableCredits: wallets.reduce((sum, wallet) => sum + Number(wallet.availableCredits ?? wallet.creditsAvailable ?? 0), 0),
-      frozenCredits: wallets.reduce((sum, wallet) => sum + Number(wallet.frozenCredits ?? wallet.creditsFrozen ?? 0), 0),
-      recentTaskCount: 0,
-      lastActivityAt: null,
-    },
-    series: [],
-    recentEntries: [],
-  };
-}
-
-function currentUserSubject(): CreditUsageSubject {
-  const actorId = getCurrentActorId();
-  return {
-    type: "user",
-    id: actorId,
-    label: `User ${actorId}`,
-    detail: "canonical wallet read surface",
-  };
-}
-
 function retiredRechargeError(flow: string): never {
   throw new ApiRequestError(
     `${flow} is retired during the Windows-native cutover; use canonical payment callback evidence for production payment validation.`,
@@ -1299,38 +1219,6 @@ function retiredRechargeError(flow: string): never {
       status: 410,
     },
   );
-}
-
-function retiredWalletRechargeCapabilities(): WalletRechargeCapabilities {
-  const unavailable = "Retired during Windows-native cutover; real provider evidence is required before reopening recharge writes.";
-  return {
-    requestHost: typeof window === "undefined" ? null : window.location.host,
-    demoMockEnabled: false,
-    demoMockAllowedHosts: [],
-    methods: [
-      {
-        paymentMethod: "wechat_pay",
-        label: "WeChat Pay",
-        detail: "Provider recharge writes are closed.",
-        live: { available: false, reason: unavailable, scenes: [] },
-        demoMock: { available: false, reason: unavailable, scenes: [] },
-      },
-      {
-        paymentMethod: "alipay",
-        label: "Alipay",
-        detail: "Provider recharge writes are closed.",
-        live: { available: false, reason: unavailable, scenes: [] },
-        demoMock: { available: false, reason: unavailable, scenes: [] },
-      },
-      {
-        paymentMethod: "bank_transfer",
-        label: "Bank transfer",
-        detail: "Manual recharge review is closed.",
-        live: { available: false, reason: unavailable, scenes: [] },
-        demoMock: { available: false, reason: unavailable, scenes: [] },
-      },
-    ],
-  };
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -1458,6 +1346,74 @@ function buildControlScopeQuery(actorId = getCurrentActorId()) {
   return `accountOwnerType=user&accountOwnerId=${encodeURIComponent(actorId)}`;
 }
 
+const walletPaymentService = createWalletPaymentService({
+  controlApiJsonRequest,
+  getCurrentActorId,
+  isRouteNotFoundError,
+  isLocalLoopbackAccess,
+  superAdminDemoActorId: SUPER_ADMIN_DEMO_ACTOR_ID,
+  createEmptyWallet,
+  normalizeWalletRecord,
+  retiredRechargeError,
+});
+
+const authAccountService = createAuthAccountService({
+  controlApiJsonRequest,
+  buildControlScopeQuery,
+  getWallet,
+  createEmptyWallet,
+  isRouteNotFoundError,
+});
+
+const mediaService = createMediaService({
+  controlApiJsonRequest,
+  getCurrentActorId,
+  buildControlMediaScope,
+  createClientId,
+  createApiRequestError: (message, options) => new ApiRequestError(message, options),
+});
+
+const playgroundService = createPlaygroundService({
+  controlApiJsonRequest,
+  getCurrentActorId,
+  buildControlScopeQuery,
+  buildControlMediaScope,
+  createApiRequestError: (message, options) => new ApiRequestError(message, options),
+});
+
+const jobsService = createJobsService({
+  controlApiJsonRequest,
+  getCurrentActorId,
+  buildControlMediaScope,
+  createClientId,
+  isNotFoundError: (error) => error instanceof ApiRequestError && error.status === 404,
+});
+
+const projectsCanvasCreateService = createProjectsCanvasCreateService({
+  controlApiJsonRequest,
+  getCurrentActorId,
+  buildControlScopeQuery,
+  buildControlMediaScope,
+  createCanonicalJob: jobsService.createCanonicalJob,
+});
+
+const toolboxService = createToolboxService({
+  controlApiJsonRequest,
+  getCurrentActorId,
+  buildControlMediaScope,
+  createClientId,
+  createApiRequestError: (message, options) => new ApiRequestError(message, options),
+  readString,
+  readRecord,
+  mapControlJobToTask: jobsService.mapControlJobToTask,
+  getFallbackToolboxCapabilities: () => WINDOWS_NATIVE_TOOLBOX_CAPABILITIES,
+});
+
+const adminEnterpriseService = createAdminEnterpriseService({
+  controlApiJsonRequest,
+  retiredRechargeError,
+});
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -1483,130 +1439,9 @@ function readString(record: Record<string, unknown>, ...keys: string[]) {
   return null;
 }
 
-function readNumber(record: Record<string, unknown>, ...keys: string[]) {
-  const value = readField(record, ...keys);
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
 function readRecord(record: Record<string, unknown>, ...keys: string[]) {
   const value = readField(record, ...keys);
   return isRecord(value) ? value : null;
-}
-
-function progressForJobStatus(status: string) {
-  switch (status) {
-    case "succeeded":
-      return 100;
-    case "failed":
-    case "cancelled":
-    case "canceled":
-      return 100;
-    case "running":
-      return 60;
-    case "leased":
-    case "processing":
-      return 35;
-    case "retry_waiting":
-      return 20;
-    default:
-      return 0;
-  }
-}
-
-function isCancellableJobTask(task: Pick<Task, "status">) {
-  return new Set(["queued", "leased", "running", "retry_waiting", "pending", "processing"]).has(
-    String(task.status || "").toLowerCase(),
-  );
-}
-
-function mergeControlJobMetadata(
-  job: ControlJobRecord,
-  payload: Record<string, unknown>,
-  result: Record<string, unknown>,
-) {
-  const payloadMetadata = readRecord(payload, "metadata") ?? {};
-  const resultMetadata = readRecord(result, "metadata") ?? {};
-  return {
-    ...payload,
-    ...payloadMetadata,
-    ...resultMetadata,
-    controlJob: {
-      accountId: readString(job, "account_id", "accountId"),
-      lane: readString(job, "lane"),
-      providerRoute: readString(job, "provider_route", "providerRoute"),
-      idempotencyKey: readString(job, "idempotency_key", "idempotencyKey"),
-      attemptCount: readNumber(job, "attempt_count", "attemptCount"),
-      maxAttempts: readNumber(job, "max_attempts", "maxAttempts"),
-      leaseOwner: readString(job, "lease_owner", "leaseOwner"),
-      leaseUntil: readString(job, "lease_until", "leaseUntil"),
-      runAfter: readString(job, "run_after", "runAfter"),
-      completedAt: readString(job, "completed_at", "completedAt"),
-      cancelledAt: readString(job, "cancelled_at", "cancelledAt"),
-      result,
-    },
-  };
-}
-
-function mapControlJobToTask(job: ControlJobRecord): Task {
-  const payload = readRecord(job, "payload") ?? {};
-  const result = readRecord(job, "result") ?? {};
-  const metadata = mergeControlJobMetadata(job, payload, result);
-  const status = (readString(job, "status") ?? "queued").toLowerCase();
-  const taskType =
-    readString(job, "job_type", "jobType") ??
-    readString(payload, "type", "jobType", "job_type") ??
-    "generic";
-  const projectId =
-    readString(payload, "projectId", "project_id") ??
-    readString(result, "projectId", "project_id");
-  const storyboardId =
-    readString(payload, "storyboardId", "storyboard_id") ??
-    readString(result, "storyboardId", "storyboard_id");
-  const lastError = readString(job, "last_error", "lastError");
-  const outputSummary =
-    readString(result, "outputSummary", "output_summary", "summary", "message") ??
-    (status === "failed" || status === "cancelled" ? lastError : null);
-
-  return {
-    id: readString(job, "id") ?? "",
-    type: taskType,
-    domain: readString(payload, "domain") ?? readString(job, "lane") ?? "jobs",
-    projectId,
-    storyboardId,
-    actorId: readString(job, "created_by_user_id", "createdByUserId") ?? undefined,
-    actionCode: readString(payload, "actionCode", "action_code") ?? taskType,
-    walletId: readString(payload, "walletId", "wallet_id"),
-    status,
-    progressPercent: readNumber(payload, "progressPercent", "progress_percent") ?? progressForJobStatus(status),
-    currentStage: readString(payload, "currentStage", "current_stage") ?? lastError ?? status,
-    etaSeconds: readNumber(payload, "etaSeconds", "eta_seconds") ?? 0,
-    inputSummary:
-      readString(payload, "inputSummary", "input_summary", "prompt", "text") ??
-      readString(job, "idempotency_key", "idempotencyKey"),
-    outputSummary,
-    quotedCredits: readNumber(payload, "quotedCredits", "quoted_credits") ?? undefined,
-    frozenCredits: readNumber(payload, "frozenCredits", "frozen_credits") ?? undefined,
-    settledCredits: readNumber(payload, "settledCredits", "settled_credits") ?? undefined,
-    billingStatus: readString(payload, "billingStatus", "billing_status") ?? undefined,
-    metadata,
-    createdAt: readString(job, "created_at", "createdAt") ?? new Date().toISOString(),
-    updatedAt: readString(job, "updated_at", "updatedAt") ?? new Date().toISOString(),
-  };
-}
-
-function matchesTaskFilters(task: Task, projectId?: string, type?: string) {
-  if (projectId && task.projectId !== projectId && task.metadata?.projectId !== projectId) {
-    return false;
-  }
-  if (type && task.type !== type && task.metadata?.type !== type && task.metadata?.jobType !== type) {
-    return false;
-  }
-  return true;
 }
 
 function createClientId(prefix: string) {
@@ -1615,43 +1450,6 @@ function createClientId(prefix: string) {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `${prefix}-${randomId}`;
-}
-
-function toObjectKeySegment(value: string, fallback: string) {
-  const normalized = String(value || "")
-    .trim()
-    .replace(/\\/g, "/")
-    .split("/")
-    .filter(Boolean)
-    .pop();
-  return (normalized || fallback)
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 96) || fallback;
-}
-
-function inferMediaType(kind: string, file: File) {
-  const normalizedKind = String(kind || "").trim();
-  if (normalizedKind) return normalizedKind;
-  if (file.type.startsWith("image/")) return "image";
-  if (file.type.startsWith("video/")) return "video";
-  if (file.type.startsWith("audio/")) return "audio";
-  return "file";
-}
-
-function fileNameForDataUrl(kind: string, nameHint: string, contentType: string) {
-  const extByType: Record<string, string> = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-    "image/gif": "gif",
-    "video/mp4": "mp4",
-    "video/webm": "webm",
-    "audio/mpeg": "mp3",
-    "audio/wav": "wav",
-  };
-  const ext = extByType[contentType] || "bin";
-  return `${toObjectKeySegment(nameHint || kind, "upload")}.${ext}`;
 }
 
 // Produces a short random id usable as an Idempotency-Key for POST-based task
@@ -1683,29 +1481,9 @@ export function mapStepToComicPath(step: ProjectStep | string) {
   return `/comic/${normalized}`;
 }
 
-type CanonicalJobInput = {
-  jobType: string;
-  domain: string;
-  payload?: Record<string, unknown>;
-  lane?: "account-control" | "account-media" | "account-finance";
-  providerRoute?: string | null;
-  idempotencyKey?: string | null;
-  inputSummary?: string | null;
-  actionCode?: string | null;
-};
-
-type StoredProject = Project;
-
-const LOCAL_PROJECTS_STORAGE_PREFIX = "xiaolou.windows-native.projects.v1";
 const LOCAL_PROFILE_STORAGE_PREFIX = "xiaolou.windows-native.profile.v1";
 const LOCAL_ORGANIZATION_MEMBERS_STORAGE_PREFIX = "xiaolou.windows-native.organization-members.v1";
 const LOCAL_API_CENTER_CONFIG_STORAGE_PREFIX = "xiaolou.windows-native.api-center-config.v1";
-const LOCAL_CANVAS_PROJECTS_STORAGE_PREFIX = "xiaolou.windows-native.canvas-projects.v1";
-const LOCAL_AGENT_CANVAS_PROJECTS_STORAGE_PREFIX = "xiaolou.windows-native.agent-canvas-projects.v1";
-const LOCAL_PLAYGROUND_CONVERSATIONS_STORAGE_PREFIX = "xiaolou.windows-native.playground.conversations.v1";
-const LOCAL_PLAYGROUND_MESSAGES_STORAGE_PREFIX = "xiaolou.windows-native.playground.messages.v1";
-const LOCAL_PLAYGROUND_MEMORIES_STORAGE_PREFIX = "xiaolou.windows-native.playground.memories.v1";
-const LOCAL_PLAYGROUND_MEMORY_PREF_STORAGE_PREFIX = "xiaolou.windows-native.playground.memory-pref.v1";
 
 function localStorageGetJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -1731,241 +1509,6 @@ function localStorageRemove(key: string) {
 function actorScopedStorageKey(prefix: string, actorId = getCurrentActorId()) {
   return `${prefix}:${actorId || "guest"}`;
 }
-
-function createProjectPlaceholder(input: Partial<Project> = {}): Project {
-  const now = new Date().toISOString();
-  const actorId = getCurrentActorId();
-  const ownerType = input.ownerType ?? (input.organizationId ? "organization" : "personal");
-  return {
-    id: input.id || "proj_demo_001",
-    title: input.title || "Windows-native project",
-    summary: input.summary || "Local project placeholder while canonical project persistence is being cut over.",
-    status: input.status || "active",
-    coverUrl: input.coverUrl ?? null,
-    organizationId: input.organizationId ?? null,
-    ownerType,
-    ownerId: input.ownerId || (ownerType === "organization" ? input.organizationId || actorId : actorId),
-    currentStep: input.currentStep || "global",
-    progressPercent: input.progressPercent ?? 0,
-    budgetCredits: input.budgetCredits ?? 0,
-    budgetLimitCredits: input.budgetLimitCredits ?? 0,
-    budgetUsedCredits: input.budgetUsedCredits ?? 0,
-    billingWalletType: input.billingWalletType ?? (ownerType === "organization" ? "organization" : "personal"),
-    billingPolicy: input.billingPolicy ?? (ownerType === "organization" ? "organization_first_fallback_personal" : "personal_only"),
-    createdBy: input.createdBy || actorId,
-    directorAgentName: input.directorAgentName || "XiaoLou",
-    createdAt: input.createdAt || now,
-    updatedAt: input.updatedAt || now,
-  };
-}
-
-function readLocalProjects(actorId = getCurrentActorId()) {
-  const items = localStorageGetJson<StoredProject[]>(
-    actorScopedStorageKey(LOCAL_PROJECTS_STORAGE_PREFIX, actorId),
-    [],
-  );
-  return Array.isArray(items) ? items.map((item) => createProjectPlaceholder(item)) : [];
-}
-
-function writeLocalProject(project: Project, actorId = getCurrentActorId()) {
-  const key = actorScopedStorageKey(LOCAL_PROJECTS_STORAGE_PREFIX, actorId);
-  const current = readLocalProjects(actorId).filter((item) => item.id !== project.id);
-  const next = [{ ...project, updatedAt: new Date().toISOString() }, ...current].slice(0, 50);
-  localStorageSetJson(key, next);
-  return next[0];
-}
-
-async function createCanonicalJob(input: CanonicalJobInput): Promise<TaskAccepted> {
-  const actorId = getCurrentActorId();
-  const payload = {
-    ...(input.payload ?? {}),
-    type: input.jobType,
-    jobType: input.jobType,
-    domain: input.domain,
-    actionCode: input.actionCode || input.jobType,
-    inputSummary:
-      input.inputSummary ||
-      readString(input.payload ?? {}, "prompt", "text", "title", "target", "note") ||
-      input.jobType,
-  };
-  const job = await controlApiJsonRequest<ControlJobRecord>("/api/jobs", {
-    method: "POST",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      lane: input.lane || "account-control",
-      jobType: input.jobType,
-      providerRoute: input.providerRoute || "closed-api",
-      idempotencyKey: input.idempotencyKey || `frontend:${actorId}:${input.jobType}:${createClientId("job")}`,
-      createdByUserId: actorId,
-      payload,
-    }),
-  });
-  const task = mapControlJobToTask(job);
-  return { taskId: task.id, status: task.status, task };
-}
-
-async function createToolboxRun(
-  path: string,
-  input: Record<string, unknown>,
-): Promise<ToolboxRunResponse> {
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<ToolboxRunResponse>(path, {
-    method: "POST",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      ...input,
-    }),
-  });
-}
-
-function taskAcceptedFromToolboxRun(response: ToolboxRunResponse): TaskAccepted {
-  const job = readRecord(response, "job") as ControlJobRecord | null;
-  if (!job) {
-    throw new ApiRequestError("Toolbox Control API did not return a canonical job", {
-      code: "TOOLBOX_JOB_MISSING",
-      status: 502,
-    });
-  }
-
-  const task = mapControlJobToTask(job);
-  return {
-    taskId: readString(response, "taskId") || task.id,
-    status: readString(response, "status") || task.status,
-    task,
-  };
-}
-
-function taskResultRecord(task: Task) {
-  const result = task.metadata?.controlJob;
-  if (isRecord(result)) {
-    const nested = result.result;
-    if (isRecord(nested)) return nested;
-  }
-  return {};
-}
-
-function createImageResultFromTask(task: Task): CreateImageResult | null {
-  const result = taskResultRecord(task);
-  const imageUrl = readString(result, "imageUrl", "image_url", "resultUrl", "url");
-  if (!imageUrl) return null;
-  return {
-    id: task.id,
-    taskId: task.id,
-    prompt: readString(task.metadata ?? {}, "prompt") || task.inputSummary || "",
-    model: readString(task.metadata ?? {}, "model") || readString(result, "model") || "canonical-job",
-    style: readString(task.metadata ?? {}, "style") || "",
-    aspectRatio: readString(task.metadata ?? {}, "aspectRatio", "aspect_ratio") || "1:1",
-    resolution: readString(task.metadata ?? {}, "resolution") || "",
-    referenceImageUrl: readString(task.metadata ?? {}, "referenceImageUrl", "reference_image_url"),
-    referenceImageUrls: Array.isArray(task.metadata?.referenceImageUrls)
-      ? task.metadata.referenceImageUrls.map(String)
-      : undefined,
-    imageUrl,
-    createdAt: task.createdAt,
-  };
-}
-
-function createVideoResultFromTask(task: Task): CreateVideoResult | null {
-  const result = taskResultRecord(task);
-  const videoUrl = readString(result, "videoUrl", "video_url", "resultUrl", "url");
-  if (!videoUrl) return null;
-  return {
-    id: task.id,
-    taskId: task.id,
-    prompt: readString(task.metadata ?? {}, "prompt") || task.inputSummary || "",
-    model: readString(task.metadata ?? {}, "model") || readString(result, "model") || "canonical-job",
-    duration: readString(task.metadata ?? {}, "duration") || "",
-    aspectRatio: readString(task.metadata ?? {}, "aspectRatio", "aspect_ratio") || "16:9",
-    resolution: readString(task.metadata ?? {}, "resolution") || "",
-    referenceImageUrl: readString(task.metadata ?? {}, "referenceImageUrl", "reference_image_url"),
-    firstFrameUrl: readString(task.metadata ?? {}, "firstFrameUrl", "first_frame_url"),
-    lastFrameUrl: readString(task.metadata ?? {}, "lastFrameUrl", "last_frame_url"),
-    videoMode: readString(task.metadata ?? {}, "videoMode", "video_mode"),
-    inputMode: readString(task.metadata ?? {}, "inputMode", "input_mode") as VideoInputMode | null,
-    multiReferenceImages: readRecord(task.metadata ?? {}, "multiReferenceImages", "multi_reference_images"),
-    referenceVideoUrls: Array.isArray(task.metadata?.referenceVideoUrls)
-      ? task.metadata.referenceVideoUrls.map(String)
-      : null,
-    referenceAudioUrls: Array.isArray(task.metadata?.referenceAudioUrls)
-      ? task.metadata.referenceAudioUrls.map(String)
-      : null,
-    thumbnailUrl: readString(result, "thumbnailUrl", "thumbnail_url", "posterUrl", "poster_url") || videoUrl,
-    videoUrl,
-    createdAt: task.createdAt,
-  };
-}
-
-function mediaCapabilitySet(
-  status: MediaModelStatus = "stable",
-  overrides: Partial<MediaCapabilitySet> = {},
-) {
-  return {
-    supported: true,
-    status,
-    supportedAspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
-    supportedResolutions: ["720p", "1080p", "1K", "2K", "4K"],
-    supportedDurations: ["4s", "5s", "8s", "10s", "15s"],
-    durationControl: "selectable" as const,
-    aspectRatioControl: "selectable" as const,
-    resolutionControl: "selectable" as const,
-    defaultAspectRatio: "16:9",
-    defaultResolution: "720p",
-    defaultDuration: "5s",
-    maxReferenceImages: 7,
-    maxReferenceVideos: 1,
-    maxReferenceAudios: 1,
-    note: "Queued through canonical Control API jobs during the Windows-native cutover.",
-    ...overrides,
-  };
-}
-
-const WINDOWS_NATIVE_IMAGE_CAPABILITIES: MediaModelCapability[] = [
-  {
-    id: "doubao-seedream-5-0-260128",
-    label: "Seedream 5.0",
-    provider: "bytedance",
-    kind: "image",
-    status: "stable",
-    recommended: true,
-    inputModes: {
-      text_to_image: mediaCapabilitySet("stable", { defaultResolution: "1K" }),
-      image_to_image: mediaCapabilitySet("stable", { maxReferenceImages: 1 }),
-      multi_image: mediaCapabilitySet("stable", { maxReferenceImages: 4 }),
-    },
-  },
-];
-
-const WINDOWS_NATIVE_VIDEO_CAPABILITIES: MediaModelCapability[] = [
-  {
-    id: "doubao-seedance-2-0-260128",
-    label: "Seedance 2.0",
-    provider: "bytedance",
-    kind: "video",
-    status: "stable",
-    recommended: true,
-    inputModes: {
-      text_to_video: mediaCapabilitySet("stable"),
-      single_reference: mediaCapabilitySet("stable", { defaultAspectRatio: "adaptive" }),
-      start_end_frame: mediaCapabilitySet("stable", { defaultAspectRatio: "adaptive" }),
-      multi_param: mediaCapabilitySet("stable", { defaultResolution: "1080p" }),
-      video_edit: mediaCapabilitySet("experimental", { maxReferenceVideos: 1 }),
-      motion_control: mediaCapabilitySet("experimental", { maxReferenceVideos: 1 }),
-      video_extend: mediaCapabilitySet("experimental", { maxReferenceVideos: 1 }),
-    },
-  },
-  {
-    id: "kling-video",
-    label: "kling-video",
-    provider: "kling",
-    kind: "video",
-    status: "stable",
-    inputModes: {
-      text_to_video: mediaCapabilitySet("stable", { supportedDurations: ["5s", "10s"] }),
-      single_reference: mediaCapabilitySet("stable", { supportedDurations: ["5s", "10s"] }),
-      start_end_frame: mediaCapabilitySet("stable", { supportedDurations: ["5s", "10s"] }),
-    },
-  },
-];
 
 const WINDOWS_NATIVE_TOOLBOX_CAPABILITIES: ToolboxCapability[] = [
   {
@@ -2310,21 +1853,15 @@ function buildLocalNetworkAccessInfo(): NetworkAccessInfo {
 }
 
 export async function getMe() {
-  return controlApiJsonRequest<PermissionContext>("/api/me");
+  return authAccountService.getMe();
 }
 
 export async function updateMe(data: { displayName?: string; avatar?: string | null }) {
-  return controlApiJsonRequest<PermissionContext>("/api/me", {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
+  return authAccountService.updateMe(data);
 }
 
 export async function listProjects() {
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<{ items: Project[]; total: number; page?: number; pageSize?: number }>(
-    `/api/projects?${buildControlScopeQuery(actorId)}`,
-  );
+  return projectsCanvasCreateService.listProjects();
 }
 
 export async function getNetworkAccessInfo() {
@@ -2343,9 +1880,7 @@ export async function ensureJaazServices() {
 }
 
 export async function listCreateImages() {
-  return controlApiJsonRequest<{ items: CreateImageResult[] }>(
-    `/api/create/images?${buildControlScopeQuery()}`,
-  );
+  return projectsCanvasCreateService.listCreateImages();
 }
 
 export async function generateCreateImages(input: {
@@ -2364,41 +1899,21 @@ export async function generateCreateImages(input: {
   // concurrent double-submits, returning the same task id for the same key.
   idempotencyKey?: string;
 }) {
-  const { idempotencyKey, ...body } = input;
-  return createCanonicalJob({
-    jobType: "create_image_generate",
-    domain: "create",
-    idempotencyKey,
-    actionCode: "create_image_generate",
-    inputSummary: body.prompt,
-    payload: body,
-  });
+  return projectsCanvasCreateService.generateCreateImages(input);
 }
 
 export async function listCreateVideos() {
-  return controlApiJsonRequest<{ items: CreateVideoResult[] }>(
-    `/api/create/videos?${buildControlScopeQuery()}`,
-  );
+  return projectsCanvasCreateService.listCreateVideos();
 }
 
 export async function getCreateImageCapabilities(mode?: string | null) {
-  return {
-    kind: "image",
-    mode: mode || "text_to_image",
-    defaultModel: "doubao-seedream-5-0-260128",
-    items: WINDOWS_NATIVE_IMAGE_CAPABILITIES,
-  } satisfies MediaCapabilitiesResponse;
+  return projectsCanvasCreateService.getCreateImageCapabilities(mode);
 }
 
 export async function getCreateVideoCapabilities(
   mode: string,
 ) {
-  return {
-    kind: "video",
-    mode: normalizeVideoMode(mode) || "image_to_video",
-    defaultModel: "doubao-seedance-2-0-260128",
-    items: WINDOWS_NATIVE_VIDEO_CAPABILITIES,
-  } satisfies MediaCapabilitiesResponse;
+  return projectsCanvasCreateService.getCreateVideoCapabilities(mode);
 }
 
 export async function generateCreateVideos(input: {
@@ -2427,29 +1942,15 @@ export async function generateCreateVideos(input: {
   networkSearch?: boolean;
   idempotencyKey?: string;
 }) {
-  const { idempotencyKey, ...body } = input;
-  return createCanonicalJob({
-    jobType: "create_video_generate",
-    domain: "create",
-    idempotencyKey,
-    actionCode: "create_video_generate",
-    inputSummary: body.prompt,
-    payload: body,
-  });
+  return projectsCanvasCreateService.generateCreateVideos(input);
 }
 
 export async function deleteCreateImage(imageId: string) {
-  return controlApiJsonRequest<{ deleted: boolean; id: string }>(
-    `/api/create/images/${encodeURIComponent(imageId)}?${buildControlScopeQuery()}`,
-    { method: "DELETE" },
-  );
+  return projectsCanvasCreateService.deleteCreateImage(imageId);
 }
 
 export async function deleteCreateVideo(videoId: string) {
-  return controlApiJsonRequest<{ deleted: boolean; id: string }>(
-    `/api/create/videos/${encodeURIComponent(videoId)}?${buildControlScopeQuery()}`,
-    { method: "DELETE" },
-  );
+  return projectsCanvasCreateService.deleteCreateVideo(videoId);
 }
 
 export async function createProject(input: {
@@ -2458,150 +1959,80 @@ export async function createProject(input: {
   ownerType?: "personal" | "organization";
   organizationId?: string;
 }) {
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<Project>("/api/projects", {
-    method: "POST",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      ...input,
-    }),
-  });
+  return projectsCanvasCreateService.createProject(input);
 }
 
 export async function updateProject(projectId: string, input: Partial<Project>) {
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
-    method: "PUT",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      ...input,
-      id: projectId,
-    }),
-  });
+  return projectsCanvasCreateService.updateProject(projectId, input);
 }
 
 export async function getProject(projectId: string) {
-  return controlApiJsonRequest<Project>(`/api/projects/${encodeURIComponent(projectId)}`);
+  return projectsCanvasCreateService.getProject(projectId);
 }
 
 export async function getProjectOverview(projectId: string) {
-  return controlApiJsonRequest<ProjectOverview>(`/api/projects/${encodeURIComponent(projectId)}/overview`);
+  return projectsCanvasCreateService.getProjectOverview(projectId);
 }
 
 export async function getSettings(projectId: string) {
-  return controlApiJsonRequest<Settings>(`/api/projects/${encodeURIComponent(projectId)}/settings`);
+  return projectsCanvasCreateService.getSettings(projectId);
 }
 
 export async function updateSettings(projectId: string, input: Partial<Settings>) {
-  return controlApiJsonRequest<Settings>(`/api/projects/${encodeURIComponent(projectId)}/settings`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
+  return projectsCanvasCreateService.updateSettings(projectId, input);
 }
 
 export async function getScript(projectId: string) {
-  return controlApiJsonRequest<Script>(`/api/projects/${encodeURIComponent(projectId)}/script`);
+  return projectsCanvasCreateService.getScript(projectId);
 }
 
 export async function updateScript(projectId: string, content: string) {
-  return controlApiJsonRequest<Script>(`/api/projects/${encodeURIComponent(projectId)}/script`, {
-    method: "PUT",
-    body: JSON.stringify({ content }),
-  });
+  return projectsCanvasCreateService.updateScript(projectId, content);
 }
 
 export async function rewriteScript(projectId: string, instruction: string) {
-  return createCanonicalJob({
-    jobType: "script_rewrite_requested",
-    domain: "project",
-    actionCode: "script_rewrite",
-    inputSummary: instruction,
-    payload: { projectId, instruction },
-  });
+  return projectsCanvasCreateService.rewriteScript(projectId, instruction);
 }
 
 export async function listAssets(projectId: string, assetType?: string) {
-  const params = new URLSearchParams();
-  if (assetType) params.set("assetType", assetType);
-  const query = params.toString();
-  return controlApiJsonRequest<{ items: Asset[] }>(
-    `/api/projects/${encodeURIComponent(projectId)}/assets${query ? `?${query}` : ""}`,
-  );
+  return projectsCanvasCreateService.listAssets(projectId, assetType);
 }
 
 export async function getAsset(projectId: string, assetId: string): Promise<Asset> {
-  return controlApiJsonRequest<Asset>(
-    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
-  );
+  return projectsCanvasCreateService.getAsset(projectId, assetId);
 }
 
 export async function createAsset(
   projectId: string,
   input: CreateAssetInput,
 ): Promise<Asset> {
-  return controlApiJsonRequest<Asset>(`/api/projects/${encodeURIComponent(projectId)}/assets`, {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return projectsCanvasCreateService.createAsset(projectId, input);
 }
 
 export async function syncAgentStudioAsset(
   projectId: string,
   input: AgentStudioAssetSyncInput,
 ) {
-  return createAsset(projectId, {
-    assetType: input.mediaKind === "video" ? "video_ref" : "image_ref",
-    name: input.name || input.fileName || "Agent Studio asset",
-    description: input.description || input.prompt || "",
-    previewUrl: input.fileUrl,
-    mediaKind: input.mediaKind || "image",
-    mediaUrl: input.fileUrl,
-    sourceModule: "agent_studio",
-    sourceMetadata: input as Record<string, unknown>,
-  });
+  return projectsCanvasCreateService.syncAgentStudioAsset(projectId, input);
 }
 
 export async function syncAgentStudioCanvasProject(
   projectId: string,
   input: AgentStudioCanvasProjectSyncInput,
 ) {
-  return createAsset(projectId, {
-    assetType: "canvas_project",
-    name: input.title || "Agent Studio canvas",
-    description: input.description || "",
-    previewUrl: input.thumbnailUrl || input.canvasUrl || null,
-    mediaKind: "image",
-    mediaUrl: input.canvasUrl || input.thumbnailUrl || null,
-    sourceModule: "agent_studio",
-    sourceMetadata: input as Record<string, unknown>,
-  });
+  return projectsCanvasCreateService.syncAgentStudioCanvasProject(projectId, input);
 }
 
 export async function updateAsset(projectId: string, assetId: string, input: Partial<Asset>): Promise<Asset> {
-  return controlApiJsonRequest<Asset>(
-    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input),
-    },
-  );
+  return projectsCanvasCreateService.updateAsset(projectId, assetId, input);
 }
 
 export async function deleteAsset(projectId: string, assetId: string) {
-  return controlApiJsonRequest<{ deleted: boolean; assetId: string }>(
-    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
-    { method: "DELETE" },
-  );
+  return projectsCanvasCreateService.deleteAsset(projectId, assetId);
 }
 
 export async function extractAssets(projectId: string, sourceText: string) {
-  return createCanonicalJob({
-    jobType: "project_assets_extract_requested",
-    domain: "project",
-    actionCode: "assets_extract",
-    inputSummary: sourceText,
-    payload: { projectId, sourceText },
-  });
+  return projectsCanvasCreateService.extractAssets(projectId, sourceText);
 }
 
 export async function generateAssetImage(
@@ -2609,28 +2040,15 @@ export async function generateAssetImage(
   assetId: string,
   input: AssetImageGenerateInput,
 ) {
-  return createCanonicalJob({
-    jobType: "asset_image_generate",
-    domain: "project",
-    actionCode: "asset_image_generate",
-    inputSummary: input.generationPrompt,
-    payload: { projectId, assetId, ...input },
-  });
+  return projectsCanvasCreateService.generateAssetImage(projectId, assetId, input);
 }
 
 export async function listStoryboards(projectId: string, episodeNo?: number) {
-  const params = new URLSearchParams();
-  if (episodeNo != null) params.set("episodeNo", String(episodeNo));
-  const query = params.toString();
-  return controlApiJsonRequest<{ items: Storyboard[] }>(
-    `/api/projects/${encodeURIComponent(projectId)}/storyboards${query ? `?${query}` : ""}`,
-  );
+  return projectsCanvasCreateService.listStoryboards(projectId, episodeNo);
 }
 
 export async function getStoryboard(projectId: string, storyboardId: string): Promise<Storyboard> {
-  return controlApiJsonRequest<Storyboard>(
-    `/api/projects/${encodeURIComponent(projectId)}/storyboards/${encodeURIComponent(storyboardId)}`,
-  );
+  return projectsCanvasCreateService.getStoryboard(projectId, storyboardId);
 }
 
 export async function updateStoryboard(
@@ -2638,20 +2056,11 @@ export async function updateStoryboard(
   storyboardId: string,
   input: Partial<Storyboard>,
 ): Promise<Storyboard> {
-  return controlApiJsonRequest<Storyboard>(
-    `/api/projects/${encodeURIComponent(projectId)}/storyboards/${encodeURIComponent(storyboardId)}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input),
-    },
-  );
+  return projectsCanvasCreateService.updateStoryboard(projectId, storyboardId, input);
 }
 
 export async function deleteStoryboard(projectId: string, storyboardId: string) {
-  return controlApiJsonRequest<{ deleted: boolean; storyboardId: string }>(
-    `/api/projects/${encodeURIComponent(projectId)}/storyboards/${encodeURIComponent(storyboardId)}`,
-    { method: "DELETE" },
-  );
+  return projectsCanvasCreateService.deleteStoryboard(projectId, storyboardId);
 }
 
 export async function autoGenerateStoryboards(
@@ -2659,59 +2068,11 @@ export async function autoGenerateStoryboards(
   sourceText?: string,
   options?: { systemPrompt?: string; maxShots?: number; episodeNo?: number },
 ) {
-  return createCanonicalJob({
-    jobType: "storyboards_auto_generate",
-    domain: "project",
-    actionCode: "storyboards_auto_generate",
-    inputSummary: sourceText,
-    payload: {
-      projectId,
-      ...(sourceText ? { sourceText } : {}),
-      ...(options?.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-      ...(options?.maxShots ? { maxShots: options.maxShots } : {}),
-      ...(options?.episodeNo != null ? { episodeNo: options.episodeNo } : {}),
-    },
-  });
-}
-
-function appendCreditQuoteInput(search: URLSearchParams, input?: CreditQuoteRequestInput) {
-  if (input?.projectId) search.set("projectId", input.projectId);
-  if (input?.sourceText) search.set("sourceText", input.sourceText);
-  if (input?.text) search.set("text", input.text);
-  if (input?.count) search.set("count", String(input.count));
-  if (input?.shotCount) search.set("shotCount", String(input.shotCount));
-  if (input?.storyboardId) search.set("storyboardId", input.storyboardId);
-  if (input?.model) search.set("model", input.model);
-  if (input?.aspectRatio) search.set("aspectRatio", input.aspectRatio);
-  if (input?.resolution) search.set("resolution", input.resolution);
+  return projectsCanvasCreateService.autoGenerateStoryboards(projectId, sourceText, options);
 }
 
 export async function getCreateCreditQuote(actionCode: string, input?: CreditQuoteRequestInput) {
-  if (input?.projectId) {
-    return getProjectCreditQuote(input.projectId, actionCode, input);
-  }
-
-  return {
-    actionCode,
-    label: actionCode,
-    description: "Read-only estimate while project billing writes are cut over to canonical jobs.",
-    credits: 0,
-    quantity: input?.count ?? input?.shotCount ?? 1,
-    currency: "CNY",
-    walletId: null,
-    walletName: null,
-    walletOwnerType: "user",
-    availableCredits: 0,
-    frozenCredits: 0,
-    billingPolicy: "personal_only",
-    projectId: null,
-    projectOwnerType: null,
-    budgetLimitCredits: null,
-    budgetUsedCredits: 0,
-    budgetRemainingCredits: null,
-    canAfford: true,
-    reason: null,
-  } satisfies CreditQuote;
+  return projectsCanvasCreateService.getCreateCreditQuote(actionCode, input);
 }
 
 export async function getProjectCreditQuote(
@@ -2719,12 +2080,7 @@ export async function getProjectCreditQuote(
   actionCode: string,
   input?: CreditQuoteRequestInput,
 ) {
-  const quote = await getCreateCreditQuote(actionCode, input);
-  return {
-    ...quote,
-    projectId,
-    projectOwnerType: "personal",
-  };
+  return projectsCanvasCreateService.getProjectCreditQuote(projectId, actionCode, input);
 }
 
 export async function generateStoryboardImage(
@@ -2733,43 +2089,22 @@ export async function generateStoryboardImage(
   referenceImageUrls?: string[],
   imageModel?: string,
 ) {
-  return createCanonicalJob({
-    jobType: "storyboard_image_generate",
-    domain: "project",
-    actionCode: "storyboard_image_generate",
-    inputSummary: prompt,
-    payload: {
-      storyboardId,
-      prompt,
-      ...(referenceImageUrls?.length ? { referenceImageUrls } : {}),
-      ...(imageModel ? { imageModel } : {}),
-    },
-  });
+  return projectsCanvasCreateService.generateStoryboardImage(storyboardId, prompt, referenceImageUrls, imageModel);
 }
 
 export async function listVideos(projectId: string) {
-  return controlApiJsonRequest<{ items: VideoItem[] }>(
-    `/api/projects/${encodeURIComponent(projectId)}/videos`,
-  );
+  return projectsCanvasCreateService.listVideos(projectId);
 }
 
 export async function generateVideo(
   storyboardId: string,
   input?: { motionPreset?: string; mode?: string },
 ) {
-  return createCanonicalJob({
-    jobType: "storyboard_video_generate",
-    domain: "project",
-    actionCode: "storyboard_video_generate",
-    inputSummary: input?.motionPreset || input?.mode || storyboardId,
-    payload: { storyboardId, ...(input ?? {}) },
-  });
+  return projectsCanvasCreateService.generateVideo(storyboardId, input);
 }
 
 export async function listDubbings(projectId: string) {
-  return controlApiJsonRequest<{ items: Dubbing[] }>(
-    `/api/projects/${encodeURIComponent(projectId)}/dubbings`,
-  );
+  return projectsCanvasCreateService.listDubbings(projectId);
 }
 
 export async function updateDubbing(
@@ -2777,218 +2112,94 @@ export async function updateDubbing(
   dubbingId: string,
   input: Partial<Dubbing>,
 ) {
-  return controlApiJsonRequest<Dubbing>(
-    `/api/projects/${encodeURIComponent(projectId)}/dubbings/${encodeURIComponent(dubbingId)}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input),
-    },
-  );
+  return projectsCanvasCreateService.updateDubbing(projectId, dubbingId, input);
 }
 
 export async function generateDubbing(
   storyboardId: string,
   input?: { text?: string; speakerName?: string; voicePreset?: string },
 ) {
-  return createCanonicalJob({
-    jobType: "storyboard_dubbing_generate",
-    domain: "project",
-    actionCode: "storyboard_dubbing_generate",
-    inputSummary: input?.text || storyboardId,
-    payload: { storyboardId, ...(input ?? {}) },
-  });
+  return projectsCanvasCreateService.generateDubbing(storyboardId, input);
 }
 
 export async function generateLipSync(storyboardId: string) {
-  return createCanonicalJob({
-    jobType: "storyboard_lipsync_generate",
-    domain: "project",
-    actionCode: "storyboard_lipsync_generate",
-    inputSummary: storyboardId,
-    payload: { storyboardId },
-  });
+  return projectsCanvasCreateService.generateLipSync(storyboardId);
 }
 
 export async function getTimeline(projectId: string) {
-  return controlApiJsonRequest<Timeline>(`/api/projects/${encodeURIComponent(projectId)}/timeline`);
+  return projectsCanvasCreateService.getTimeline(projectId);
 }
 
 export async function updateTimeline(
   projectId: string,
   input: Pick<Timeline, "tracks" | "totalDurationSeconds">,
 ) {
-  return controlApiJsonRequest<Timeline>(`/api/projects/${encodeURIComponent(projectId)}/timeline`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
+  return projectsCanvasCreateService.updateTimeline(projectId, input);
 }
 
 export async function createExport(projectId: string, format = "mp4") {
-  return controlApiJsonRequest<{ id: string; projectId: string; format: string; status: string; jobId?: string | null }>(
-    `/api/projects/${encodeURIComponent(projectId)}/exports`,
-    {
-      method: "POST",
-      body: JSON.stringify({ format }),
-    },
-  );
+  return projectsCanvasCreateService.createExport(projectId, format);
 }
 
 export async function listTasks(projectId?: string, type?: string) {
-  const params = new URLSearchParams();
-  const actorId = getCurrentActorId();
-  params.set("accountOwnerType", "user");
-  params.set("accountOwnerId", actorId);
-  params.set("limit", "200");
-  const jobs = await controlApiJsonRequest<ControlJobRecord[]>(`/api/jobs?${params.toString()}`);
-  return {
-    items: jobs.map(mapControlJobToTask).filter((task) => matchesTaskFilters(task, projectId, type)),
-  };
+  return jobsService.listTasks(projectId, type);
 }
 
 export async function getTask(taskId: string) {
-  const job = await controlApiJsonRequest<ControlJobRecord>(`/api/jobs/${encodeURIComponent(taskId)}`);
-  return mapControlJobToTask(job);
+  return jobsService.getTask(taskId);
 }
 
 export async function deleteTask(taskId: string) {
-  let task: Task;
-  try {
-    task = await getTask(taskId);
-  } catch (error) {
-    if (error instanceof ApiRequestError && error.status === 404) {
-      return { deleted: false, taskId };
-    }
-    throw error;
-  }
-
-  if (isCancellableJobTask(task)) {
-    await controlApiJsonRequest<ControlJobRecord>(`/api/jobs/${encodeURIComponent(taskId)}/cancel`, {
-      method: "POST",
-      body: JSON.stringify({ reason: "frontend task dismissed" }),
-    });
-  }
-
-  return { deleted: false, taskId };
+  return jobsService.deleteTask(taskId);
 }
 
 export async function clearTasks(projectId?: string, type?: string) {
-  const response = await listTasks(projectId, type);
-  const cancellable = response.items.filter(isCancellableJobTask);
-  await Promise.all(
-    cancellable.map((task) =>
-      controlApiJsonRequest<ControlJobRecord>(`/api/jobs/${encodeURIComponent(task.id)}/cancel`, {
-        method: "POST",
-        body: JSON.stringify({ reason: "frontend clear active tasks" }),
-      }),
-    ),
-  );
-  return { removedCount: response.items.length };
+  return jobsService.clearTasks(projectId, type);
 }
 
 export async function getWallet(ownerType: WalletOwnerType = "user", ownerId = getCurrentActorId()) {
-  const query = buildWalletQuery(ownerType, ownerId);
-  const wallet = await controlApiJsonRequest<Wallet>(`/api/wallet?${query}`);
-  return normalizeWalletRecord(wallet, ownerId);
+  return walletPaymentService.getWallet(ownerType, ownerId);
 }
 
 export async function listWallets(ownerType: WalletOwnerType = "user", ownerId = getCurrentActorId()) {
-  try {
-    const query = buildWalletQuery(ownerType, ownerId);
-    const response = await controlApiJsonRequest<{ items: Wallet[] }>(`/api/wallets?${query}`);
-    return {
-      items: response.items.map((wallet) => normalizeWalletRecord(wallet, ownerId)),
-    };
-  } catch (error) {
-    if (!isRouteNotFoundError(error)) throw error;
-
-    const effectiveActorId =
-      ownerId === SUPER_ADMIN_DEMO_ACTOR_ID && !isLocalLoopbackAccess() ? "guest" : ownerId;
-    if (effectiveActorId === "guest" || effectiveActorId === "ops_demo_001" || effectiveActorId === SUPER_ADMIN_DEMO_ACTOR_ID) {
-      return { items: [] };
-    }
-
-    return { items: [createEmptyWallet(ownerType, effectiveActorId)] };
-  }
+  return walletPaymentService.listWallets(ownerType, ownerId);
 }
 
 export async function listWalletLedger(walletId: string) {
-  try {
-    return await controlApiJsonRequest<{ items: WalletLedgerEntry[] }>(
-      `/api/wallets/${encodeURIComponent(walletId)}/ledger`,
-    );
-  } catch (error) {
-    if (isRouteNotFoundError(error)) {
-      return { items: [] };
-    }
-    throw error;
-  }
+  return walletPaymentService.listWalletLedger(walletId);
 }
 
 export async function getWalletUsageStats(mode: CreditUsageMode = "personal") {
-  const actorId = getCurrentActorId();
-  const ownerType: WalletOwnerType = mode === "organization" ? "organization" : "user";
-  const query = buildWalletQuery(ownerType, actorId, { mode });
-  try {
-    return await controlApiJsonRequest<CreditUsageStats>(`/api/wallet/usage-stats?${query}`);
-  } catch (error) {
-    if (!isRouteNotFoundError(error)) throw error;
-    const wallet = createEmptyWallet(ownerType, actorId);
-    return emptyCreditUsageStats(
-      {
-        type: ownerType,
-        id: actorId,
-        label: ownerType === "organization" ? `Organization ${actorId}` : `User ${actorId}`,
-        detail: "canonical wallet read surface",
-      },
-      mode,
-      [wallet],
-    );
-  }
+  return walletPaymentService.getWalletUsageStats(mode);
 }
 
 export async function searchCreditUsageSubjects(search?: string) {
-  const normalizedSearch = search?.trim();
-  const subject = currentUserSubject();
-  if (normalizedSearch && !subject.label.toLowerCase().includes(normalizedSearch.toLowerCase())) {
-    return { items: [] };
-  }
-  return { items: [subject] };
+  return walletPaymentService.searchCreditUsageSubjects(search);
 }
 
 export async function getAdminCreditUsageStats(input: {
   subjectType: CreditUsageSubject["type"];
   subjectId?: string | null;
 }) {
-  return emptyCreditUsageStats(
-    {
-      type: input.subjectType,
-      id: input.subjectId ?? null,
-      label: input.subjectId ? `${input.subjectType} ${input.subjectId}` : "Platform",
-      detail: "legacy admin billing read flow retired",
-    },
-    "admin",
-  );
+  return walletPaymentService.getAdminCreditUsageStats(input);
 }
 
 export async function createWalletRechargeOrder(
   input: CreateWalletRechargeOrderInput,
 ): Promise<WalletRechargeOrder> {
-  void input;
-  return retiredRechargeError("Wallet recharge order creation");
+  return walletPaymentService.createWalletRechargeOrder(input);
 }
 
 export async function getWalletRechargeCapabilities() {
-  return retiredWalletRechargeCapabilities();
+  return walletPaymentService.getWalletRechargeCapabilities();
 }
 
 export async function getWalletRechargeOrder(orderId: string): Promise<WalletRechargeOrder> {
-  void orderId;
-  return retiredRechargeError("Wallet recharge order lookup");
+  return walletPaymentService.getWalletRechargeOrder(orderId);
 }
 
 export async function refreshWalletRechargeOrderStatus(orderId: string): Promise<WalletRechargeOrder> {
-  void orderId;
-  return retiredRechargeError("Wallet recharge order refresh");
+  return walletPaymentService.refreshWalletRechargeOrderStatus(orderId);
 }
 
 export async function submitWalletRechargeTransferProof(
@@ -2999,65 +2210,35 @@ export async function submitWalletRechargeTransferProof(
     transferReference?: string;
   },
 ): Promise<WalletRechargeOrder> {
-  void orderId;
-  void input;
-  return retiredRechargeError("Wallet recharge transfer proof submission");
+  return walletPaymentService.submitWalletRechargeTransferProof(orderId, input);
 }
 
 export async function confirmWalletRechargeOrder(orderId: string): Promise<WalletRechargeOrder> {
-  void orderId;
-  return retiredRechargeError("Wallet recharge confirmation");
+  return walletPaymentService.confirmWalletRechargeOrder(orderId);
 }
 
 export async function getToolboxCapabilities() {
-  const response = await controlApiJsonRequest<{
-    items?: ToolboxCapability[];
-    stagingArea?: string[];
-  }>("/api/toolbox/capabilities");
-  return {
-    items: Array.isArray(response.items) ? response.items : WINDOWS_NATIVE_TOOLBOX_CAPABILITIES,
-    stagingArea: Array.isArray(response.stagingArea) ? response.stagingArea : [],
-  };
+  return toolboxService.getToolboxCapabilities();
 }
 
 export async function getCapabilities() {
-  return controlApiJsonRequest<{
-    service: string;
-    mode: string;
-    implementedDomains: string[];
-    toolbox: ToolboxCapability[];
-  }>("/api/capabilities");
+  return toolboxService.getCapabilities();
 }
 
 export async function getApiCenterConfig() {
-  return controlApiJsonRequest<ApiCenterConfig>(`/api/api-center?${buildControlScopeQuery()}`);
+  return authAccountService.getApiCenterConfig();
 }
 
 export async function updateApiCenterDefaults(input: Partial<ApiCenterConfig["defaults"]>) {
-  return controlApiJsonRequest<ApiCenterConfig["defaults"]>(
-    `/api/api-center/defaults?${buildControlScopeQuery()}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input),
-    },
-  );
+  return authAccountService.updateApiCenterDefaults(input);
 }
 
 export async function saveApiCenterVendorApiKey(vendorId: string, apiKey: string) {
-  return controlApiJsonRequest<ApiVendor>(
-    `/api/api-center/vendors/${encodeURIComponent(vendorId)}/api-key?${buildControlScopeQuery()}`,
-    {
-      method: "PUT",
-      body: JSON.stringify({ apiKey }),
-    },
-  );
+  return authAccountService.saveApiCenterVendorApiKey(vendorId, apiKey);
 }
 
 export async function testApiCenterVendorConnection(vendorId: string) {
-  return controlApiJsonRequest<ApiVendorConnectionTestResult>(
-    `/api/api-center/vendors/${encodeURIComponent(vendorId)}/test?${buildControlScopeQuery()}`,
-    { method: "POST" },
-  );
+  return authAccountService.testApiCenterVendorConnection(vendorId);
 }
 
 export async function updateApiVendorModel(
@@ -3065,27 +2246,12 @@ export async function updateApiVendorModel(
   modelId: string,
   input: Partial<Pick<ApiVendorModel, "enabled">>,
 ) {
-  return controlApiJsonRequest<ApiVendorModel>(
-    `/api/api-center/vendors/${encodeURIComponent(vendorId)}/models/${encodeURIComponent(modelId)}?${buildControlScopeQuery()}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input),
-    },
-  );
+  return authAccountService.updateApiVendorModel(vendorId, modelId, input);
 }
 
 /** Bidirectional text translation via Qwen-Plus. targetLang: 'en' | 'zh' */
 export async function translateText(text: string, targetLang: "en" | "zh") {
-  const response = await createToolboxRun("/api/toolbox/translate-text", {
-    text,
-    targetLang,
-    idempotencyKey: `frontend:${getCurrentActorId()}:translate-text:${createClientId("toolbox")}`,
-  });
-  return {
-    text: readString(response, "text") || text,
-    targetLang: (readString(response, "targetLang", "target_lang") as "en" | "zh" | null) || targetLang,
-    taskId: readString(response, "taskId"),
-  };
+  return toolboxService.translateText(text, targetLang);
 }
 
 /** Whitelisted Qwen-Omni model IDs (must match core-api ALLOWED_QWEN_OMNI_MODELS). */
@@ -3107,17 +2273,7 @@ export async function generateStoryboardGrid25(
     model?: string;
   },
 ) {
-  const response = await createToolboxRun("/api/toolbox/storyboard-grid25", {
-    plotText,
-    references: options?.references,
-    model: options?.model,
-    idempotencyKey: `frontend:${getCurrentActorId()}:storyboard-grid25:${createClientId("toolbox")}`,
-  });
-  return {
-    imageUrl: readString(response, "imageUrl", "image_url") || "",
-    model: readString(response, "model") || options?.model || "canonical-job",
-    taskId: readString(response, "taskId") || "",
-  };
+  return toolboxService.generateStoryboardGrid25(plotText, options);
 }
 
 /** Qwen3.5-Omni video-to-prompt reverse analysis. */
@@ -3125,202 +2281,61 @@ export async function reverseVideoPrompt(
   videoUrl: string,
   options?: { prompt?: string; model?: QwenOmniModel },
 ) {
-  const response = await createToolboxRun("/api/toolbox/video-reverse-prompt", {
-    videoUrl,
-    ...(options ?? {}),
-    idempotencyKey: `frontend:${getCurrentActorId()}:video-reverse-prompt:${createClientId("toolbox")}`,
-  });
-  return {
-    prompt:
-      readString(response, "prompt") ||
-      options?.prompt ||
-      `Reverse prompt job queued: ${readString(response, "taskId") || ""}`,
-    model: readString(response, "model") || options?.model || "canonical-job",
-    taskId: readString(response, "taskId"),
-  };
+  return toolboxService.reverseVideoPrompt(videoUrl, options);
 }
 
 export async function uploadFile(file: File, kind = "file") {
-  const actorId = getCurrentActorId();
-  const uploadId = createClientId("media");
-  const mediaType = inferMediaType(kind, file);
-  const contentType = file.type || "application/octet-stream";
-  const objectKey = [
-    "media",
-    "frontend",
-    toObjectKeySegment(actorId, "guest"),
-    `${uploadId}-${toObjectKeySegment(file.name, "upload.bin")}`,
-  ].join("/");
-  const scope = buildControlMediaScope(actorId);
-
-  const begin = await controlApiJsonRequest<ControlMediaBeginResponse>("/api/media/upload-begin", {
-    method: "POST",
-    body: JSON.stringify({
-      ...scope,
-      idempotencyKey: `frontend:${actorId}:${uploadId}`,
-      objectKey,
-      mediaType,
-      contentType,
-      byteSize: file.size,
-      data: {
-        originalName: file.name,
-        frontendKind: kind,
-      },
-    }),
-  });
-
-  const mediaObjectId = String(begin.media_object_id || begin.mediaObjectId || "");
-  const uploadSessionId = String(begin.upload_session_id || begin.uploadSessionId || "");
-  const uploadUrl = String(begin.upload_url || begin.uploadUrl || "");
-  if (!mediaObjectId || !uploadSessionId || !uploadUrl) {
-    throw new ApiRequestError("Control API did not return a usable media upload session", {
-      code: "MEDIA_UPLOAD_SESSION_INVALID",
-      status: 502,
-    });
-  }
-
-  const uploadResponse = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: {
-      "Content-Type": contentType,
-    },
-    body: file,
-  });
-  if (!uploadResponse.ok) {
-    throw new ApiRequestError("Object storage upload failed", {
-      code: "MEDIA_OBJECT_UPLOAD_FAILED",
-      status: uploadResponse.status,
-    });
-  }
-
-  await controlApiJsonRequest<unknown>("/api/media/upload-complete", {
-    method: "POST",
-    body: JSON.stringify({
-      ...scope,
-      uploadSessionId,
-      mediaObjectId,
-      byteSize: file.size,
-    }),
-  });
-
-  await controlApiJsonRequest<unknown>("/api/media/move-temp-to-permanent", {
-    method: "POST",
-    body: JSON.stringify({
-      ...scope,
-      mediaObjectId,
-      permanentObjectKey: objectKey,
-      reason: `frontend-${mediaType}`,
-    }),
-  });
-
-  const read = await controlApiJsonRequest<ControlMediaReadResponse>("/api/media/signed-read-url", {
-    method: "POST",
-    body: JSON.stringify({
-      ...scope,
-      mediaObjectId,
-      expiresInSeconds: 3600,
-    }),
-  });
-  const signedReadUrl = String(read.signed_read_url || read.signedReadUrl || uploadUrl);
-
-  return {
-    id: mediaObjectId,
-    kind,
-    originalName: file.name,
-    storedName: objectKey.split("/").pop() || objectKey,
-    sizeBytes: file.size,
-    contentType,
-    url: signedReadUrl,
-    urlPath: signedReadUrl,
-    mediaObjectId,
-    objectKey,
-    signedReadUrl,
-  } satisfies UploadedFile;
+  return mediaService.uploadFile(file, kind);
 }
 
 export async function uploadDataUrlAsFile(dataUrl: string, kind = "file", nameHint = "upload") {
-  if (!dataUrl.startsWith("data:")) {
-    throw new ApiRequestError("Expected a data URL for media upload", {
-      code: "MEDIA_UPLOAD_INVALID_DATA_URL",
-      status: 400,
-    });
-  }
-
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
-  const contentType = blob.type || dataUrl.match(/^data:([^;,]+)/)?.[1] || "application/octet-stream";
-  const file = new File([blob], fileNameForDataUrl(kind, nameHint, contentType), { type: contentType });
-  return uploadFile(file, kind);
+  return mediaService.uploadDataUrlAsFile(dataUrl, kind, nameHint);
 }
 
 export async function listPricingRules() {
-  return controlApiJsonRequest<{ items: PricingRule[] }>("/api/admin/pricing-rules");
+  return adminEnterpriseService.listPricingRules();
 }
 
 export async function listAdminOrders() {
-  return controlApiJsonRequest<{ items: AdminRechargeOrder[] }>("/api/admin/orders");
+  return adminEnterpriseService.listAdminOrders();
 }
 
 export async function reviewAdminOrder(
   orderId: string,
   input: { decision: "approve" | "reject"; note?: string },
 ): Promise<WalletRechargeOrder> {
-  void orderId;
-  void input;
-  return retiredRechargeError("Manual recharge review");
+  return adminEnterpriseService.reviewAdminOrder(orderId, input);
 }
 
 export async function listOrganizationMembers(organizationId: string) {
-  return controlApiJsonRequest<{ items: OrganizationMember[] }>(
-    `/api/organizations/${encodeURIComponent(organizationId)}/members`,
-  );
+  return authAccountService.listOrganizationMembers(organizationId);
 }
 
 export async function createOrganizationMember(
   organizationId: string,
   input: CreateOrganizationMemberInput,
 ) {
-  return controlApiJsonRequest<RegistrationResult>(
-    `/api/organizations/${encodeURIComponent(organizationId)}/members`,
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
+  return authAccountService.createOrganizationMember(organizationId, input);
 }
 
 export async function getOrganizationWallet(organizationId: string) {
-  try {
-    return await getWallet("organization", organizationId);
-  } catch (error) {
-    if (!isRouteNotFoundError(error)) throw error;
-    return createEmptyWallet("organization", organizationId);
-  }
+  return authAccountService.getOrganizationWallet(organizationId);
 }
 
 export async function loginWithEmail(input: LoginInput) {
-  return controlApiJsonRequest<LoginResult>("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return authAccountService.loginWithEmail(input);
 }
 
 export async function loginAdminWithEmail(input: LoginInput) {
-  return controlApiJsonRequest<LoginResult>("/api/auth/admin/login", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return authAccountService.loginAdminWithEmail(input);
 }
 
 export async function getAuthProviders() {
-  return controlApiJsonRequest<AuthProvidersResponse>("/api/auth/providers");
+  return authAccountService.getAuthProviders();
 }
 
 export async function exchangeGoogleLogin(code: string): Promise<LoginResult> {
-  return controlApiJsonRequest<LoginResult>("/api/auth/google/exchange", {
-    method: "POST",
-    body: JSON.stringify({ code }),
-  });
+  return authAccountService.exchangeGoogleLogin(code);
 }
 
 export type PlaygroundModel = {
@@ -3412,275 +2427,39 @@ export type PlaygroundChatEvent =
   | { type: "done"; conversation: PlaygroundConversation; message: PlaygroundMessage | null; memories: PlaygroundMemory[]; job?: PlaygroundChatJob }
   | { type: "error"; code: string; message: string; job?: PlaygroundChatJob };
 
-const WINDOWS_NATIVE_PLAYGROUND_MODELS: PlaygroundModel[] = [
-  {
-    id: "qwen-plus",
-    name: "Qwen Plus",
-    provider: "canonical-control-api",
-    configured: true,
-    default: true,
-  },
-  {
-    id: "doubao-pro",
-    name: "Doubao Pro",
-    provider: "canonical-control-api",
-    configured: true,
-  },
-];
-
-function playgroundDefaultModel() {
-  return WINDOWS_NATIVE_PLAYGROUND_MODELS.find((item) => item.default)?.id || WINDOWS_NATIVE_PLAYGROUND_MODELS[0]?.id || "qwen-plus";
-}
-
-function playgroundTime(value: string | null | undefined) {
-  if (!value) return Number.NEGATIVE_INFINITY;
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
-}
-
-function normalizePlaygroundConversation(input: Partial<PlaygroundConversation> = {}): PlaygroundConversation {
-  const now = new Date().toISOString();
-  const actorId = getCurrentActorId();
-  return {
-    id: input.id || createClientId("playground-conversation"),
-    actorId: input.actorId || actorId,
-    title: input.title?.trim() || "Untitled conversation",
-    model: input.model || playgroundDefaultModel(),
-    createdAt: input.createdAt || now,
-    updatedAt: input.updatedAt || now,
-    lastMessageAt: input.lastMessageAt ?? null,
-    messageCount: input.messageCount ?? 0,
-    archived: input.archived ?? false,
-  };
-}
-
-function readLocalPlaygroundConversations(actorId = getCurrentActorId()) {
-  const items = localStorageGetJson<PlaygroundConversation[]>(
-    actorScopedStorageKey(LOCAL_PLAYGROUND_CONVERSATIONS_STORAGE_PREFIX, actorId),
-    [],
-  );
-  return (Array.isArray(items) ? items : [])
-    .map(normalizePlaygroundConversation)
-    .sort(
-      (left, right) =>
-        playgroundTime(right.lastMessageAt || right.updatedAt) - playgroundTime(left.lastMessageAt || left.updatedAt),
-    );
-}
-
-function writeLocalPlaygroundConversations(items: PlaygroundConversation[], actorId = getCurrentActorId()) {
-  localStorageSetJson(
-    actorScopedStorageKey(LOCAL_PLAYGROUND_CONVERSATIONS_STORAGE_PREFIX, actorId),
-    items.map(normalizePlaygroundConversation).slice(0, 100),
-  );
-}
-
-function upsertLocalPlaygroundConversation(conversation: PlaygroundConversation) {
-  const actorId = getCurrentActorId();
-  const current = readLocalPlaygroundConversations(actorId);
-  writeLocalPlaygroundConversations(
-    [conversation, ...current.filter((item) => item.id !== conversation.id)],
-    actorId,
-  );
-  return conversation;
-}
-
-function playgroundMessagesStorageKey(conversationId: string, actorId = getCurrentActorId()) {
-  return `${actorScopedStorageKey(LOCAL_PLAYGROUND_MESSAGES_STORAGE_PREFIX, actorId)}:${conversationId}`;
-}
-
-function normalizePlaygroundMessage(
-  input: Partial<PlaygroundMessage> & Pick<PlaygroundMessage, "conversationId" | "role" | "content">,
-): PlaygroundMessage {
-  const now = new Date().toISOString();
-  return {
-    id: input.id || createClientId("playground-message"),
-    conversationId: input.conversationId,
-    actorId: input.actorId || getCurrentActorId(),
-    role: input.role,
-    content: input.content,
-    model: input.model ?? null,
-    status: input.status || "succeeded",
-    metadata: input.metadata,
-    createdAt: input.createdAt || now,
-    updatedAt: input.updatedAt || now,
-  };
-}
-
-function readLocalPlaygroundMessages(conversationId: string, actorId = getCurrentActorId()) {
-  const items = localStorageGetJson<PlaygroundMessage[]>(
-    playgroundMessagesStorageKey(conversationId, actorId),
-    [],
-  );
-  return (Array.isArray(items) ? items : [])
-    .map((item) =>
-      normalizePlaygroundMessage({
-        ...item,
-        conversationId,
-        role: item.role || "assistant",
-        content: item.content || "",
-      }),
-    )
-    .sort((left, right) => playgroundTime(left.createdAt) - playgroundTime(right.createdAt));
-}
-
-function writeLocalPlaygroundMessages(
-  conversationId: string,
-  items: PlaygroundMessage[],
-  actorId = getCurrentActorId(),
-) {
-  localStorageSetJson(
-    playgroundMessagesStorageKey(conversationId, actorId),
-    items.map((item) => normalizePlaygroundMessage(item)).slice(-500),
-  );
-}
-
-function upsertLocalPlaygroundMessages(conversationId: string, incoming: PlaygroundMessage[]) {
-  const actorId = getCurrentActorId();
-  const byId = new Map(readLocalPlaygroundMessages(conversationId, actorId).map((item) => [item.id, item]));
-  for (const message of incoming) {
-    byId.set(message.id, normalizePlaygroundMessage(message));
-  }
-  const next = Array.from(byId.values()).sort(
-    (left, right) => playgroundTime(left.createdAt) - playgroundTime(right.createdAt),
-  );
-  writeLocalPlaygroundMessages(conversationId, next, actorId);
-  return next;
-}
-
-function readLocalPlaygroundMemoryPreference(actorId = getCurrentActorId()): PlaygroundMemoryPreference {
-  return localStorageGetJson<PlaygroundMemoryPreference>(
-    actorScopedStorageKey(LOCAL_PLAYGROUND_MEMORY_PREF_STORAGE_PREFIX, actorId),
-    { enabled: true, updatedAt: null },
-  );
-}
-
-function writeLocalPlaygroundMemoryPreference(
-  preference: PlaygroundMemoryPreference,
-  actorId = getCurrentActorId(),
-) {
-  localStorageSetJson(actorScopedStorageKey(LOCAL_PLAYGROUND_MEMORY_PREF_STORAGE_PREFIX, actorId), preference);
-}
-
-function readLocalPlaygroundMemories(actorId = getCurrentActorId()) {
-  const items = localStorageGetJson<PlaygroundMemory[]>(
-    actorScopedStorageKey(LOCAL_PLAYGROUND_MEMORIES_STORAGE_PREFIX, actorId),
-    [],
-  );
-  return (Array.isArray(items) ? items : []).sort(
-    (left, right) => playgroundTime(right.updatedAt) - playgroundTime(left.updatedAt),
-  );
-}
-
-function writeLocalPlaygroundMemories(items: PlaygroundMemory[], actorId = getCurrentActorId()) {
-  localStorageSetJson(actorScopedStorageKey(LOCAL_PLAYGROUND_MEMORIES_STORAGE_PREFIX, actorId), items.slice(0, 200));
-}
-
-function normalizePlaygroundJobStatus(status: string): PlaygroundChatJob["status"] {
-  const normalized = status.toLowerCase();
-  if (normalized === "running" || normalized === "succeeded" || normalized === "failed" || normalized === "cancelled") {
-    return normalized;
-  }
-  return "queued";
-}
-
-function playgroundJobFromTask(task: Task): PlaygroundChatJob {
-  const metadata = task.metadata ?? {};
-  return {
-    id: task.id,
-    actorId: task.actorId || getCurrentActorId(),
-    conversationId: readString(metadata, "conversationId", "conversation_id") || task.projectId || "",
-    userMessageId: readString(metadata, "userMessageId", "user_message_id"),
-    assistantMessageId: readString(metadata, "assistantMessageId", "assistant_message_id"),
-    model: readString(metadata, "model"),
-    status: normalizePlaygroundJobStatus(task.status),
-    progress: task.progressPercent,
-    request: readRecord(metadata, "request") ?? metadata,
-    result: readRecord(metadata, "result"),
-    error: task.status === "failed" ? { message: task.outputSummary || task.currentStage } : null,
-    createdAt: task.createdAt,
-    startedAt: readString(metadata, "startedAt", "started_at"),
-    finishedAt: readString(metadata, "finishedAt", "finished_at"),
-    updatedAt: task.updatedAt,
-  };
-}
-
 export async function getPlaygroundConfig() {
-  const response = await controlApiJsonRequest<{
-    defaultModel: string;
-    models?: PlaygroundModel[];
-    memory?: PlaygroundMemoryPreference;
-  }>(`/api/playground/config?${buildControlScopeQuery()}`);
-  return {
-    defaultModel: response.defaultModel || playgroundDefaultModel(),
-    models: Array.isArray(response.models) ? response.models : WINDOWS_NATIVE_PLAYGROUND_MODELS,
-    memory: response.memory ?? { enabled: true, updatedAt: null },
-  };
+  return playgroundService.getPlaygroundConfig();
 }
 
 export async function listPlaygroundModels() {
-  const response = await controlApiJsonRequest<{ defaultModel: string; items: PlaygroundModel[] }>(
-    "/api/playground/models",
-  );
-  return {
-    defaultModel: response.defaultModel || playgroundDefaultModel(),
-    items: Array.isArray(response.items) ? response.items : WINDOWS_NATIVE_PLAYGROUND_MODELS,
-  };
+  return playgroundService.listPlaygroundModels();
 }
 
 export async function listPlaygroundConversations(search?: string) {
-  const params = new URLSearchParams(buildControlScopeQuery());
-  const normalizedSearch = search?.trim();
-  if (normalizedSearch) params.set("search", normalizedSearch);
-  return controlApiJsonRequest<{ items: PlaygroundConversation[] }>(
-    `/api/playground/conversations?${params.toString()}`,
-  );
+  return playgroundService.listPlaygroundConversations(search);
 }
 
 export async function createPlaygroundConversation(input: { title?: string; model?: string } = {}) {
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<PlaygroundConversation>("/api/playground/conversations", {
-    method: "POST",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      ...input,
-    }),
-  });
+  return playgroundService.createPlaygroundConversation(input);
 }
 
 export async function updatePlaygroundConversation(
   conversationId: string,
   input: Partial<Pick<PlaygroundConversation, "title" | "model">>,
 ) {
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<PlaygroundConversation>(
-    `/api/playground/conversations/${encodeURIComponent(conversationId)}`,
-    {
-      method: "PUT",
-      body: JSON.stringify({
-        ...buildControlMediaScope(actorId),
-        ...input,
-      }),
-    },
-  );
+  return playgroundService.updatePlaygroundConversation(conversationId, input);
 }
 
 export async function deletePlaygroundConversation(conversationId: string) {
-  return controlApiJsonRequest<{ deleted: boolean; conversationId: string }>(
-    `/api/playground/conversations/${encodeURIComponent(conversationId)}?${buildControlScopeQuery()}`,
-    { method: "DELETE" },
-  );
+  return playgroundService.deletePlaygroundConversation(conversationId);
 }
 
 export async function getPlaygroundConversation(conversationId: string) {
-  return controlApiJsonRequest<PlaygroundConversation>(
-    `/api/playground/conversations/${encodeURIComponent(conversationId)}?${buildControlScopeQuery()}`,
-  );
+  return playgroundService.getPlaygroundConversation(conversationId);
 }
 
 export async function listPlaygroundMessages(conversationId: string) {
-  return controlApiJsonRequest<{ items: PlaygroundMessage[] }>(
-    `/api/playground/conversations/${encodeURIComponent(conversationId)}/messages?${buildControlScopeQuery()}`,
-  );
+  return playgroundService.listPlaygroundMessages(conversationId);
 }
 
 export async function listPlaygroundChatJobs(options: {
@@ -3689,80 +2468,34 @@ export async function listPlaygroundChatJobs(options: {
   status?: string;
   limit?: number;
 } = {}) {
-  const params = new URLSearchParams(buildControlScopeQuery());
-  if (options.conversationId) params.set("conversationId", options.conversationId);
-  if (options.activeOnly) params.set("activeOnly", "true");
-  if (options.status) params.set("status", options.status);
-  if (options.limit) params.set("limit", String(options.limit));
-  return controlApiJsonRequest<{ items: PlaygroundChatJob[] }>(
-    `/api/playground/chat-jobs?${params.toString()}`,
-  );
+  return playgroundService.listPlaygroundChatJobs(options);
 }
 
 export async function getPlaygroundChatJob(jobId: string) {
-  return controlApiJsonRequest<{ job: PlaygroundChatJob }>(
-    `/api/playground/chat-jobs/${encodeURIComponent(jobId)}?${buildControlScopeQuery()}`,
-  );
+  return playgroundService.getPlaygroundChatJob(jobId);
 }
 
 export async function startPlaygroundChatJob(input: PlaygroundChatInput) {
-  const message = input.message.trim();
-  if (!message) {
-    throw new ApiRequestError("Playground message is required", {
-      code: "PLAYGROUND_MESSAGE_REQUIRED",
-      status: 400,
-    });
-  }
-
-  const model = input.model?.trim() || playgroundDefaultModel();
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<PlaygroundChatJobStartResult>("/api/playground/chat-jobs", {
-    method: "POST",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      conversationId: input.conversationId,
-      message,
-      model,
-    }),
-  });
+  return playgroundService.startPlaygroundChatJob(input);
 }
 
 export async function listPlaygroundMemories() {
-  return controlApiJsonRequest<{ preference: PlaygroundMemoryPreference; items: PlaygroundMemory[] }>(
-    `/api/playground/memories?${buildControlScopeQuery()}`,
-  );
+  return playgroundService.listPlaygroundMemories();
 }
 
 export async function updatePlaygroundMemoryPreference(input: Partial<PlaygroundMemoryPreference>) {
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<PlaygroundMemoryPreference>("/api/playground/memories/preference", {
-    method: "PUT",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      ...input,
-    }),
-  });
+  return playgroundService.updatePlaygroundMemoryPreference(input);
 }
 
 export async function updatePlaygroundMemory(
   key: string,
   input: Partial<Pick<PlaygroundMemory, "key" | "value" | "enabled">>,
 ) {
-  const actorId = getCurrentActorId();
-  return controlApiJsonRequest<PlaygroundMemory>(`/api/playground/memories/${encodeURIComponent(key)}`, {
-    method: "PUT",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      ...input,
-    }),
-  });
+  return playgroundService.updatePlaygroundMemory(key, input);
 }
 
 export async function deletePlaygroundMemory(key: string) {
-  return controlApiJsonRequest<{ deleted: boolean; key: string }>(
-    `/api/playground/memories/${encodeURIComponent(key)}?${buildControlScopeQuery()}`,
-    { method: "DELETE" },
-  );
+  return playgroundService.deletePlaygroundMemory(key);
 }
 
 export async function streamPlaygroundChat(
@@ -3770,39 +2503,15 @@ export async function streamPlaygroundChat(
   onEvent: (event: PlaygroundChatEvent) => void,
   signal?: AbortSignal,
 ) {
-  if (signal?.aborted) {
-    throw new ApiRequestError("Playground chat request was aborted", {
-      code: "PLAYGROUND_CHAT_ABORTED",
-      status: 499,
-    });
-  }
-  const result = await startPlaygroundChatJob(input);
-  onEvent({ type: "conversation", conversation: result.conversation });
-  onEvent({ type: "user_message", message: result.userMessage });
-  onEvent({ type: "assistant_message", message: result.assistantMessage });
-  onEvent({ type: "job", job: result.job });
-  const memories = (await listPlaygroundMemories()).items;
-  onEvent({
-    type: "done",
-    conversation: result.conversation,
-    message: result.assistantMessage,
-    memories,
-    job: result.job,
-  });
+  return playgroundService.streamPlaygroundChat(input, onEvent, signal);
 }
 
 export async function registerPersonalUser(input: RegisterPersonalInput) {
-  return controlApiJsonRequest<RegistrationResult>("/api/auth/register/personal", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return authAccountService.registerPersonalUser(input);
 }
 
 export async function registerEnterpriseAdmin(input: RegisterEnterpriseAdminInput) {
-  return controlApiJsonRequest<RegistrationResult>("/api/auth/register/enterprise-admin", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
+  return authAccountService.registerEnterpriseAdmin(input);
 }
 
 export type CanvasProject = {
@@ -3824,93 +2533,12 @@ export type AgentCanvasProject = CanvasProject & {
 
 export type AgentCanvasProjectSummary = Omit<AgentCanvasProject, "canvasData" | "agentContext">;
 
-function canvasProjectSummaryTime(value: string | null | undefined) {
-  if (!value) return Number.NEGATIVE_INFINITY;
-  const time = Date.parse(value);
-  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
-}
-
-function dedupeCanvasProjectSummaries(items: CanvasProjectSummary[]) {
-  const byId = new Map<string, CanvasProjectSummary>();
-  for (const item of items) {
-    const normalizedId = typeof item?.id === "string" ? item.id.trim() : "";
-    if (!normalizedId) continue;
-    const candidate = item.id === normalizedId ? item : { ...item, id: normalizedId };
-    const existing = byId.get(normalizedId);
-    if (
-      !existing ||
-      canvasProjectSummaryTime(candidate.updatedAt) > canvasProjectSummaryTime(existing.updatedAt) ||
-      (canvasProjectSummaryTime(candidate.updatedAt) === canvasProjectSummaryTime(existing.updatedAt) &&
-        canvasProjectSummaryTime(candidate.createdAt) > canvasProjectSummaryTime(existing.createdAt))
-    ) {
-      byId.set(normalizedId, candidate);
-    }
-  }
-  return Array.from(byId.values()).sort(
-    (left, right) =>
-      canvasProjectSummaryTime(right.updatedAt) - canvasProjectSummaryTime(left.updatedAt) ||
-      canvasProjectSummaryTime(right.createdAt) - canvasProjectSummaryTime(left.createdAt),
-  );
-}
-
-function readLocalCanvasProjects<T extends CanvasProject>(
-  prefix: string,
-  actorId = getCurrentActorId(),
-) {
-  const items = localStorageGetJson<T[]>(actorScopedStorageKey(prefix, actorId), []);
-  return Array.isArray(items) ? items : [];
-}
-
-function writeLocalCanvasProjects<T extends CanvasProject>(
-  prefix: string,
-  items: T[],
-  actorId = getCurrentActorId(),
-) {
-  localStorageSetJson(actorScopedStorageKey(prefix, actorId), items.slice(0, 40));
-}
-
-function saveLocalCanvasProject<T extends CanvasProject>(
-  prefix: string,
-  input: Partial<T> & {
-    id?: string;
-    title?: string;
-    thumbnailUrl?: string | null;
-    canvasData?: unknown;
-  },
-  defaults: Partial<T> = {},
-) {
-  const now = new Date().toISOString();
-  const actorId = getCurrentActorId();
-  const current = readLocalCanvasProjects<T>(prefix, actorId);
-  const id = input.id?.trim() || createClientId("canvas");
-  const existing = current.find((item) => item.id === id);
-  const next = {
-    ...(defaults as T),
-    ...(existing ?? {}),
-    id,
-    actorId,
-    title: input.title ?? existing?.title ?? "Untitled canvas",
-    thumbnailUrl: input.thumbnailUrl ?? existing?.thumbnailUrl ?? null,
-    canvasData: input.canvasData ?? existing?.canvasData ?? null,
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-  } as T;
-  writeLocalCanvasProjects(prefix, [next, ...current.filter((item) => item.id !== id)], actorId);
-  return next;
-}
-
 export async function listCanvasProjects() {
-  const response = await controlApiJsonRequest<{ items: CanvasProjectSummary[] }>(
-    `/api/canvas-projects?${buildControlScopeQuery()}`,
-  );
-  return {
-    ...response,
-    items: dedupeCanvasProjectSummaries(Array.isArray(response.items) ? response.items : []),
-  };
+  return projectsCanvasCreateService.listCanvasProjects();
 }
 
 export async function getCanvasProject(projectId: string) {
-  return controlApiJsonRequest<CanvasProject>(`/api/canvas-projects/${encodeURIComponent(projectId)}`);
+  return projectsCanvasCreateService.getCanvasProject(projectId);
 }
 
 export async function saveCanvasProject(input: {
@@ -3922,42 +2550,19 @@ export async function saveCanvasProject(input: {
   baseTitle?: string | null;
   baseCanvasData?: unknown;
 }) {
-  const actorId = getCurrentActorId();
-  const path = input.id
-    ? `/api/canvas-projects/${encodeURIComponent(input.id)}`
-    : "/api/canvas-projects";
-  return controlApiJsonRequest<CanvasProject>(path, {
-    method: input.id ? "PUT" : "POST",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      ...input,
-    }),
-  });
+  return projectsCanvasCreateService.saveCanvasProject(input);
 }
 
 export async function deleteCanvasProject(projectId: string) {
-  return controlApiJsonRequest<{ deleted: boolean; projectId: string }>(
-    `/api/canvas-projects/${encodeURIComponent(projectId)}?${buildControlScopeQuery()}`,
-    { method: "DELETE" },
-  );
+  return projectsCanvasCreateService.deleteCanvasProject(projectId);
 }
 
 export async function listAgentCanvasProjects() {
-  const response = await controlApiJsonRequest<{ items: AgentCanvasProjectSummary[] }>(
-    `/api/agent-canvas/projects?${buildControlScopeQuery()}`,
-  );
-  return {
-    ...response,
-    items: dedupeCanvasProjectSummaries(
-      Array.isArray(response.items) ? response.items : [],
-    ) as AgentCanvasProjectSummary[],
-  };
+  return projectsCanvasCreateService.listAgentCanvasProjects();
 }
 
 export async function getAgentCanvasProject(projectId: string) {
-  return controlApiJsonRequest<AgentCanvasProject>(
-    `/api/agent-canvas/projects/${encodeURIComponent(projectId)}`,
-  );
+  return projectsCanvasCreateService.getAgentCanvasProject(projectId);
 }
 
 export async function saveAgentCanvasProject(input: {
@@ -3970,42 +2575,18 @@ export async function saveAgentCanvasProject(input: {
   baseTitle?: string | null;
   baseCanvasData?: unknown;
 }) {
-  const actorId = getCurrentActorId();
-  const path = input.id
-    ? `/api/agent-canvas/projects/${encodeURIComponent(input.id)}`
-    : "/api/agent-canvas/projects";
-  return controlApiJsonRequest<AgentCanvasProject>(path, {
-    method: input.id ? "PUT" : "POST",
-    body: JSON.stringify({
-      ...buildControlMediaScope(actorId),
-      ...input,
-      kind: "agent_canvas",
-      agentContext: input.agentContext ?? null,
-    }),
-  });
+  return projectsCanvasCreateService.saveAgentCanvasProject(input);
 }
 
 export async function deleteAgentCanvasProject(projectId: string) {
-  return controlApiJsonRequest<{ deleted: boolean; projectId: string }>(
-    `/api/agent-canvas/projects/${encodeURIComponent(projectId)}?${buildControlScopeQuery()}`,
-    { method: "DELETE" },
-  );
+  return projectsCanvasCreateService.deleteAgentCanvasProject(projectId);
 }
 
 export async function runToolboxCapability(
   type: "character_replace" | "motion_transfer" | "upscale_restore",
   input: { projectId?: string; note?: string; target?: string; storyboardId?: string },
 ) {
-  const routes: Record<typeof type, string> = {
-    character_replace: "/api/toolbox/character-replace",
-    motion_transfer: "/api/toolbox/motion-transfer",
-    upscale_restore: "/api/toolbox/upscale-restore",
-  };
-  const response = await createToolboxRun(routes[type], {
-    ...input,
-    idempotencyKey: `frontend:${getCurrentActorId()}:${type}:${createClientId("toolbox")}`,
-  });
-  return taskAcceptedFromToolboxRun(response);
+  return toolboxService.runToolboxCapability(type, input);
 }
 
 // ═══════════════════════════════════════════════════════════════════════

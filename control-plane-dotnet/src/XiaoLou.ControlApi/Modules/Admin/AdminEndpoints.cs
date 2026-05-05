@@ -28,7 +28,7 @@ internal static class AdminEndpoints
 
         endpoints.MapPut("/api/admin/pricing-rules/{actionCode}", async (
             string actionCode,
-            PricingRuleRequest request,
+            AdminPricingRuleUpsertRequest request,
             HttpContext httpContext,
             PostgresIdentityConfigStore identity,
             PostgresAdminSystemStore adminSystem,
@@ -41,11 +41,11 @@ internal static class AdminEndpoints
 
             try
             {
-                return Results.Ok(await adminSystem.UpsertPricingRuleAsync(actionCode, request, ct));
+                return Results.Ok(await adminSystem.UpsertPricingRuleAsync(actionCode, ToPricingRuleRequest(request), ct));
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return BadRequestError(ex);
             }
         });
 
@@ -96,13 +96,13 @@ internal static class AdminEndpoints
             }
             catch (ArgumentException ex)
             {
-                return Results.BadRequest(new { error = ex.Message });
+                return BadRequestError(ex);
             }
         });
 
         endpoints.MapPatch("/api/enterprise-applications/{applicationId}", async (
             string applicationId,
-            EnterpriseApplicationReviewRequest request,
+            EnterpriseApplicationStatusUpdateRequest request,
             HttpContext httpContext,
             PostgresIdentityConfigStore identity,
             PostgresAdminSystemStore adminSystem,
@@ -113,13 +113,13 @@ internal static class AdminEndpoints
                 return denied;
             }
 
-            var application = await adminSystem.ReviewEnterpriseApplicationAsync(applicationId, request, ResolveActorId(httpContext), ct);
+            var application = await adminSystem.ReviewEnterpriseApplicationAsync(applicationId, ToEnterpriseApplicationReviewRequest(request), ResolveActorId(httpContext), ct);
             return application is null ? Results.NotFound(new { error = "enterprise application not found" }) : Results.Ok(application);
         });
 
         endpoints.MapPost("/api/enterprise-applications/{applicationId}/review", async (
             string applicationId,
-            EnterpriseApplicationReviewRequest request,
+            EnterpriseApplicationReviewDecisionRequest request,
             HttpContext httpContext,
             PostgresIdentityConfigStore identity,
             PostgresAdminSystemStore adminSystem,
@@ -130,10 +130,35 @@ internal static class AdminEndpoints
                 return denied;
             }
 
-            var application = await adminSystem.ReviewEnterpriseApplicationAsync(applicationId, request, ResolveActorId(httpContext), ct);
+            var application = await adminSystem.ReviewEnterpriseApplicationAsync(applicationId, ToEnterpriseApplicationReviewRequest(request), ResolveActorId(httpContext), ct);
             return application is null ? Results.NotFound(new { error = "enterprise application not found" }) : Results.Ok(application);
         });
 
         return endpoints;
     }
+
+    private static PricingRuleRequest ToPricingRuleRequest(AdminPricingRuleUpsertRequest request) => new()
+    {
+        ActionCode = request.ActionCode,
+        Label = request.Label,
+        BaseCredits = request.BaseCredits,
+        Credits = request.Credits,
+        UnitLabel = request.UnitLabel,
+        Description = request.Description,
+        Data = request.Data,
+    };
+
+    private static EnterpriseApplicationReviewRequest ToEnterpriseApplicationReviewRequest(EnterpriseApplicationStatusUpdateRequest request) => new()
+    {
+        Status = request.Status,
+        Decision = request.Decision,
+        Note = request.Note,
+    };
+
+    private static EnterpriseApplicationReviewRequest ToEnterpriseApplicationReviewRequest(EnterpriseApplicationReviewDecisionRequest request) => new()
+    {
+        Status = request.Status,
+        Decision = request.Decision,
+        Note = request.Note,
+    };
 }

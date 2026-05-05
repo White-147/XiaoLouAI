@@ -253,6 +253,40 @@ source 不是生产控制面依赖。
   -StopOnFailure
 ```
 
+## 延期 CI/测试门禁后续
+
+G13 当前能直接完成的 CI/static gate 工作已经完成：minimal GitHub Actions workflow
+已存在，frontend typecheck lint 已进入 CI，conditional `.NET` test 检测已经加固，
+security/coverage/E2E 方案已经记录，frontend service harness 现在已有非 required
+的 advisory coverage script。剩余 CI/test gate 仍需要 fixture、baseline、仓库设置
+权限、owner 签收或稳定运行时间预算后才能继续。处理方式与真实支付/provider 材料一致：
+这是后续 readiness 项，不是日常 handoff blocker。
+
+```text
+Status: parked until user testing, harnesses, fixtures, baselines and runtime budget exist.
+Current PR gate: 仅在 GitHub 首次绿灯后要求最小 `CI / Build and static gates` job。
+Do not require yet: coverage threshold、E2E、CodeQL、npm audit failure、dotnet vulnerability failure、无 *Tests*.csproj 时的 standalone dotnet test。
+Do not read or upload: .runtime、deploy/local-secrets、真实 env/provider/payment/object-storage/operator material、production dumps/snapshots、restore drills、真实 payment replay captures。
+```
+
+延期队列：
+
+```text
+G13-post-1 branch-protection-enable: GitHub Actions 首次绿灯且有 repository settings 权限后，把真实 `CI / Build and static gates` context 设为 required；否则只记录未修改 branch protection。
+G13-post-2 security-baseline-nonblocking-execution: 已在确认 allowlist/noise policy 和 secret boundary 后完成一次 manual non-blocking baseline。后续 G13-post-2b package remediation 已把 Vite/PostCSS lockfile/install resolution 更新为 Vite 6.4.2 和 PostCSS 8.5.14；`npm audit --json` 现在报告 0 vulnerabilities。`dotnet list package --vulnerable --include-transitive` 在 solution/test projects 中未发现 vulnerable package；本机没有 `codeql` CLI，因此未运行 CodeQL。该结果仍是 advisory/non-required；未新增 npm audit failure gate、workflow change、branch protection 或 CI required security check。
+G13-post-3 backend-test-harness-and-coverage-advisory: 先创建 backend *Tests*.csproj、synthetic fixtures、auth/internal-token test boundary、DB/storage mock 或隔离 test DB，再做 advisory coverage；第一批从 Health/Metrics/Auth helper 开始。
+G13-post-4 frontend-test-harness-and-coverage-advisory: 首批 service-harness advisory baseline 已完成；`npm --prefix XIAOLOU-main run test:coverage:advisory` 会输出非 required 的 Vitest V8 json-summary/text 报告且无阈值。更广的 fetch/timer mocks 和任何 required coverage gate 仍 deferred。
+G13-post-5 synthetic-e2e-smoke-harness: 先具备 test auth、synthetic DB seed、fake object storage、toolbox/job polling mocks 和 runtime/flake budget，再引入 browser E2E。
+G13-post-6 required-gate-ratchet: security、coverage 或 E2E 只能在连续绿灯和 owner 签收后，按稳定 owner 从 advisory 提升为 required；不得全仓一次性强制。
+```
+
+PowerShell 读取入口：
+
+```powershell
+Select-String -Path .\README.zh-CN.md -Pattern '延期 CI/测试门禁后续' -Context 0,40
+Select-String -Path .\docs\xiaolouai-finalization-handoff.md -Pattern 'Post-G13 deferred execution queue' -Context 0,12
+```
+
 ## 运行规则
 
 - PostgreSQL 是 accounts、organizations、identity/profile context、API-center config、
@@ -277,8 +311,9 @@ source 不是生产控制面依赖。
 - G2b-2 归档记录和回滚路径见
   `docs/xiaolouai-legacy-physical-archive-contract.md`
 
-根 handoff 是便于 PowerShell 阅读的短棒文件。它现在只保留 G9、G10、G11 的阶段级
-完成状态；G9/G10/G11 的详细执行记录归档在上面的 docs handoff 文件中。
+根 handoff 是便于 PowerShell 阅读的短棒文件。它只保留当前短棒下一步和验证入口。
+已完成的 G9-G13 记录归档在上面的 docs handoff 文件中；短时间等待测试 harness、
+fixture 或运行预算的 G13 后续项记录在本 README 的“延期 CI/测试门禁后续”中。
 
 每次代码、脚本、配置、反代、运行态或 README 发生变更后，收尾前都要同步更新根
 handoff 和相关 docs handoff。使用 deep research 结构化阅读版把剩余工作保持为有限任务卡。如果旧的“下一轮执行顺序”已被新状态取代，必须在

@@ -239,7 +239,32 @@ public sealed record EnterpriseApplicationReviewRequest
     public string? Note { get; init; }
 }
 
+public sealed record EnterpriseApplicationStatusUpdateRequest
+{
+    public string? Status { get; init; }
+    public string? Decision { get; init; }
+    public string? Note { get; init; }
+}
+
+public sealed record EnterpriseApplicationReviewDecisionRequest
+{
+    public string? Status { get; init; }
+    public string? Decision { get; init; }
+    public string? Note { get; init; }
+}
+
 public sealed record PricingRuleRequest
+{
+    public string? ActionCode { get; init; }
+    public string? Label { get; init; }
+    public decimal? BaseCredits { get; init; }
+    public decimal? Credits { get; init; }
+    public string? UnitLabel { get; init; }
+    public string? Description { get; init; }
+    public JsonElement Data { get; init; }
+}
+
+public sealed record AdminPricingRuleUpsertRequest
 {
     public string? ActionCode { get; init; }
     public string? Label { get; init; }

@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    name: Build and static gates
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix XIAOLOU-main
+
+      - name: Typecheck frontend
+        run: npm --prefix XIAOLOU-main run lint
+
+      - name: Build frontend
+        run: npm --prefix XIAOLOU-main run build
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore .NET solution
+        run: dotnet restore .\control-plane-dotnet\XiaoLou.ControlPlane.sln
+
+      - name: Build .NET solution
+        run: dotnet build .\control-plane-dotnet\XiaoLou.ControlPlane.sln --configuration Release --no-restore
+
+      - name: Run .NET tests when present
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $testProjects = @(
+            Get-ChildItem -Path .\control-plane-dotnet -Recurse -Filter "*Tests*.csproj" -File |
+              Sort-Object FullName
+          )
+
+          if ($testProjects.Count -eq 0) {
+            Write-Host "::notice title=dotnet test skipped::No *Tests*.csproj projects found under control-plane-dotnet."
+            exit 0
+          }
+
+          Write-Host "Found $($testProjects.Count) .NET test project(s)."
+          foreach ($project in $testProjects) {
+            Write-Host "Running dotnet test $($project.FullName)"
+            dotnet test $project.FullName --configuration Release --no-restore
+          }
+
+      - name: Verify final legacy surface
+        shell: pwsh
+        run: |
+          .\scripts\windows\verify-final-legacy-surface.ps1 `
+            -CoreApiRoot .\legacy\__missing-core-api `
+            -ServicesApiRoot .\legacy\__missing-services-api `
+            -LegacySurfaceManifestPath .\legacy-surface-evidence\final-legacy-surface-manifest-g11k.json
+
+      - name: Verify frontend legacy dependencies
+        shell: pwsh
+        run: .\scripts\windows\verify-frontend-legacy-dependencies.ps1
+
+      - name: Check whitespace
+        run: git diff --check

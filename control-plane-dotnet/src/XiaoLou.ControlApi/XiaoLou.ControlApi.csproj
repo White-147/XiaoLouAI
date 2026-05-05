@@ -12,6 +12,9 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="XiaoLou.ControlApi.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="..\..\db\migrations\*.sql" Link="db\migrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

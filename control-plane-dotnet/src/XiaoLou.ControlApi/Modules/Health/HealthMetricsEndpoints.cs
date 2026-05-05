@@ -10,19 +10,8 @@ internal static class HealthMetricsEndpoints
 {
     public static IEndpointRouteBuilder MapHealthMetricsEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/healthz", () => Results.Ok(new
-        {
-            service = "xiaolou-control-api",
-            status = "ok",
-            architecture = "windows-native-dotnet-postgresql",
-        }));
-
-        endpoints.MapGet("/livez", () => Results.Ok(new
-        {
-            service = "xiaolou-control-api",
-            status = "alive",
-        }));
-
+        MapHealthz(endpoints);
+        MapLivez(endpoints);
         endpoints.MapGet("/readyz", async (NpgsqlDataSource dataSource, CancellationToken ct) =>
         {
             try
@@ -49,7 +38,42 @@ internal static class HealthMetricsEndpoints
                 }, statusCode: StatusCodes.Status503ServiceUnavailable);
             }
         });
+        MapMetrics(endpoints);
+        MapWindowsNativeStatus(endpoints);
 
+        return endpoints;
+    }
+
+    internal static IEndpointRouteBuilder MapHealthMetricsNoDbEndpoints(this IEndpointRouteBuilder endpoints)
+    {
+        MapHealthz(endpoints);
+        MapLivez(endpoints);
+        MapMetrics(endpoints);
+        MapWindowsNativeStatus(endpoints);
+        return endpoints;
+    }
+
+    private static void MapHealthz(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGet("/healthz", () => Results.Ok(new
+        {
+            service = "xiaolou-control-api",
+            status = "ok",
+            architecture = "windows-native-dotnet-postgresql",
+        }));
+    }
+
+    private static void MapLivez(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGet("/livez", () => Results.Ok(new
+        {
+            service = "xiaolou-control-api",
+            status = "alive",
+        }));
+    }
+
+    private static void MapMetrics(IEndpointRouteBuilder endpoints)
+    {
         endpoints.MapGet("/metrics", () =>
         {
             using var process = Process.GetCurrentProcess();
@@ -72,7 +96,10 @@ internal static class HealthMetricsEndpoints
 
             return Results.Text(string.Join('\n', lines) + "\n", "text/plain; version=0.0.4; charset=utf-8");
         });
+    }
 
+    private static void MapWindowsNativeStatus(IEndpointRouteBuilder endpoints)
+    {
         endpoints.MapGet("/api/windows-native/status", () => Results.Ok(new
         {
             enabled = true,
@@ -81,7 +108,5 @@ internal static class HealthMetricsEndpoints
             asyncFoundation = "postgresql",
             coreApiRole = "compat-readonly",
         }));
-
-        return endpoints;
     }
 }
