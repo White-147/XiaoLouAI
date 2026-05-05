@@ -1,0 +1,51 @@
+name: Synthetic E2E Advisory
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/synthetic-e2e-advisory.yml"
+      - "XIAOLOU-main/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/synthetic-e2e-advisory.yml"
+      - "XIAOLOU-main/**"
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-e2e-advisory:
+    name: Synthetic browser E2E advisory
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix XIAOLOU-main
+
+      - name: Verify Chrome channel
+        shell: pwsh
+        run: |
+          $chrome = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
+          if (!(Test-Path $chrome)) {
+            throw "Google Chrome channel was not found at $chrome."
+          }
+          & $chrome --version
+
+      - name: Run synthetic browser E2E advisory
+        shell: pwsh
+        env:
+          CI: "true"
+          PLAYWRIGHT_BROWSER_CHANNEL: chrome
+        run: npm --prefix .\XIAOLOU-main run test:e2e:synthetic
