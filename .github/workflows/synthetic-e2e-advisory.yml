@@ -3,15 +3,9 @@ name: Synthetic E2E Advisory
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - ".github/workflows/synthetic-e2e-advisory.yml"
-      - "XIAOLOU-main/**"
   push:
     branches:
       - main
-    paths:
-      - ".github/workflows/synthetic-e2e-advisory.yml"
-      - "XIAOLOU-main/**"
 
 permissions:
   contents: read
