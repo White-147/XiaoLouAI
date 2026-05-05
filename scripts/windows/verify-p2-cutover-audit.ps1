@@ -8,6 +8,8 @@ param(
   [string]$LegacyDumpUsername = "postgres",
   [string]$LegacyDumpPassword = "",
   [string]$ReportPath = "",
+  [string]$LegacySurfaceManifestPath = "",
+  [string]$LegacyProjectionManifestPath = "",
   [int]$CoreApiPort = 4125,
   [switch]$StrictLegacySource,
   [switch]$LegacyWritesFrozen,
@@ -33,6 +35,24 @@ if (-not $CoreApiRoot) {
   $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
 }
 $CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
+
+if ($LegacyProjectionManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacyProjectionManifestPath)) {
+    $LegacyProjectionManifestPath = Join-Path $RepoRoot $LegacyProjectionManifestPath
+  }
+  $LegacyProjectionManifestPath = [System.IO.Path]::GetFullPath($LegacyProjectionManifestPath)
+}
+
+if ($LegacySurfaceManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacySurfaceManifestPath)) {
+    $LegacySurfaceManifestPath = Join-Path $RepoRoot $LegacySurfaceManifestPath
+  }
+  $LegacySurfaceManifestPath = [System.IO.Path]::GetFullPath($LegacySurfaceManifestPath)
+}
+
+if ($StrictLegacySource -and $LegacyProjectionManifestPath) {
+  throw "Use either -StrictLegacySource or -LegacyProjectionManifestPath, not both."
+}
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -338,6 +358,8 @@ Invoke-AuditStep "legacy-runtime-dependency-isolation" {
   & "$PSScriptRoot\verify-legacy-runtime-dependencies.ps1" `
     -RepoRoot $RepoRoot `
     -CoreApiRoot $CoreApiRoot `
+    -LegacySurfaceManifestPath $LegacySurfaceManifestPath `
+    -LegacyProjectionManifestPath $LegacyProjectionManifestPath `
     -ReportPath $legacyRuntimeReport | Out-Null
   return [ordered]@{
     report = $legacyRuntimeReport
@@ -358,14 +380,20 @@ Invoke-AuditStep "control-api-permission-matrix" {
 
 if (-not $SkipProjectionFixture) {
   Invoke-AuditStep "projection-fixture-gate" {
-    $fixtureText = (& "$PSScriptRoot\verify-legacy-canonical-projection-gate.ps1" `
-      -RepoRoot $RepoRoot `
-      -EnvFile $EnvFile `
-      -CoreApiRoot $CoreApiRoot `
-      -NodeExe $NodeExe `
-      -ReportDir $logDir | Out-String).Trim()
+    $fixtureArgs = @{
+      RepoRoot = $RepoRoot
+      EnvFile = $EnvFile
+      CoreApiRoot = $CoreApiRoot
+      NodeExe = $NodeExe
+      ReportDir = $logDir
+    }
+    if ($LegacyProjectionManifestPath) {
+      $fixtureArgs.LegacyProjectionManifestPath = $LegacyProjectionManifestPath
+    }
+    $fixtureText = (& "$PSScriptRoot\verify-legacy-canonical-projection-gate.ps1" @fixtureArgs | Out-String).Trim()
     return [ordered]@{
       output = $fixtureText
+      legacyProjectionManifestPath = $LegacyProjectionManifestPath
     }
   }
 }
@@ -386,6 +414,9 @@ Invoke-AuditStep "projection-verifier" {
   }
   if ($LegacyWritesFrozen) {
     $args.LegacyWritesFrozen = $true
+  }
+  if ($LegacyProjectionManifestPath) {
+    $args.LegacyProjectionManifestPath = $LegacyProjectionManifestPath
   }
   if (-not $StrictLegacySource -and -not $databaseUrlSupplied) {
     $args.AllowMissingLegacy = $true
@@ -525,6 +556,8 @@ $report = [ordered]@{
   core_api_root = $CoreApiRoot
   env_file = $EnvFile
   database_url_supplied = $databaseUrlSupplied
+  legacy_projection_manifest_path = $LegacyProjectionManifestPath
+  legacy_surface_manifest_path = $LegacySurfaceManifestPath
   legacy_dump_file = $LegacyDumpFile
   legacy_dump_username = $LegacyDumpUsername
   strict_legacy_source = [bool]$StrictLegacySource

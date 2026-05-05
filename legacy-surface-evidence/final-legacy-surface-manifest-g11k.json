@@ -1,0 +1,89 @@
+﻿{
+    "schema":  "xiaolou-final-legacy-surface-manifest-v1",
+    "generated_at_utc":  "2026-05-05T02:12:37.2481407+00:00",
+    "source_mode":  "live",
+    "core_api_root":  "legacy\\core-api",
+    "services_api_root":  "legacy\\services-api",
+    "core_api_default_public_allowlist":  {
+                                              "expected":  "GET /healthz;GET /api/windows-native/status",
+                                              "matched":  true
+                                          },
+    "core_api_final_route_defaults":  {
+                                          "required_terms":  [
+                                                                 "route(\"GET\", \"/api/tasks/stream\"",
+                                                                 "envFlag(\"CORE_API_COMPAT_DISABLE_TASKS_STREAM\", true)",
+                                                                 "compatRouteClosed(\"core-api legacy task stream is retired. Use the .NET control plane job APIs.\")",
+                                                                 "routeWithStatus(\"POST\", \"/api/payments/wechat/notify\"",
+                                                                 "routeWithStatus(\"POST\", \"/api/payments/alipay/notify\"",
+                                                                 "envFlag(\"CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY\", false)",
+                                                                 "CORE_API_COMPAT_ROUTE_CLOSED"
+                                                             ],
+                                          "missing_terms":  [
+
+                                                            ]
+                                      },
+    "services_api_source_scan":  {
+                                     "scanned_count":  47
+                                 },
+    "services_api_production_api_wording":  {
+                                                "hits":  [
+
+                                                         ]
+                                            },
+    "checked_files":  [
+                          "legacy\\core-api\\src\\server.js",
+                          "legacy\\core-api\\src\\routes.js",
+                          "scripts\\windows\\.env.windows.example",
+                          "scripts\\windows\\publish-runtime-to-d.ps1",
+                          "scripts\\windows\\register-services.ps1",
+                          "README.md",
+                          "README.zh-CN.md",
+                          "legacy\\services-api\\.env.example",
+                          "legacy\\services-api\\alembic.ini",
+                          "legacy\\services-api\\pyproject.toml",
+                          "legacy\\services-api\\README.md",
+                          "legacy\\services-api\\README.zh-CN.md",
+                          "legacy\\services-api\\alembic\\env.py",
+                          "legacy\\services-api\\alembic\\versions\\20260501_0001_initial_schema.py",
+                          "legacy\\services-api\\alembic\\versions\\20260501_0002_merge_public_uuid_schema.py",
+                          "legacy\\services-api\\alembic\\versions\\20260501_0003_public_runtime_defaults.py",
+                          "legacy\\services-api\\app\\config.py",
+                          "legacy\\services-api\\app\\db.py",
+                          "legacy\\services-api\\app\\logging.py",
+                          "legacy\\services-api\\app\\main.py",
+                          "legacy\\services-api\\app\\metrics.py",
+                          "legacy\\services-api\\app\\models.py",
+                          "legacy\\services-api\\app\\schemas.py",
+                          "legacy\\services-api\\app\\__init__.py",
+                          "legacy\\services-api\\app\\api\\__init__.py",
+                          "legacy\\services-api\\app\\api\\routes\\admin.py",
+                          "legacy\\services-api\\app\\api\\routes\\health.py",
+                          "legacy\\services-api\\app\\api\\routes\\payments.py",
+                          "legacy\\services-api\\app\\api\\routes\\projects.py",
+                          "legacy\\services-api\\app\\api\\routes\\tasks.py",
+                          "legacy\\services-api\\app\\api\\routes\\uploads.py",
+                          "legacy\\services-api\\app\\api\\routes\\video_replace.py",
+                          "legacy\\services-api\\app\\api\\routes\\wallets.py",
+                          "legacy\\services-api\\app\\api\\routes\\__init__.py",
+                          "legacy\\services-api\\app\\providers\\base.py",
+                          "legacy\\services-api\\app\\providers\\cloud_image.py",
+                          "legacy\\services-api\\app\\providers\\cloud_video.py",
+                          "legacy\\services-api\\app\\providers\\local_image.py",
+                          "legacy\\services-api\\app\\providers\\local_video.py",
+                          "legacy\\services-api\\app\\providers\\registry.py",
+                          "legacy\\services-api\\app\\providers\\__init__.py",
+                          "legacy\\services-api\\app\\services\\audit.py",
+                          "legacy\\services-api\\app\\services\\payments.py",
+                          "legacy\\services-api\\app\\services\\payment_signatures.py",
+                          "legacy\\services-api\\app\\services\\task_orchestration.py",
+                          "legacy\\services-api\\app\\services\\video_replace.py",
+                          "legacy\\services-api\\app\\services\\wallets.py",
+                          "legacy\\services-api\\app\\services\\__init__.py",
+                          "legacy\\services-api\\app\\workers\\__init__.py",
+                          "legacy\\services-api\\tests\\test_health.py",
+                          "legacy\\services-api\\tests\\test_models.py",
+                          "legacy\\services-api\\tests\\test_payments.py",
+                          "legacy\\services-api\\tests\\test_providers.py",
+                          "legacy\\services-api\\tests\\test_video_replace.py"
+                      ]
+}

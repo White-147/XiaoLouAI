@@ -1,9 +1,15 @@
-﻿# XiaoLouAI 短棒交接
+# XiaoLouAI 短棒交接
 
-更新时间：2026-05-04 13:03 +08
+更新时间：2026-05-05 11:08 +08
 工作目录：`D:\code\XiaoLouAI`
 
-本文件只保留下一棒必须执行和核对的内容。历史记录看 `docs/xiaolouai-finalization-handoff.md`；deep research 映射看 `docs/xiaolouai-deep-research-structured.md`；G7a 目录盘点看 `docs/xiaolouai-top-level-directory-organization-inventory.md`。
+本文件是后续每一棒的第一读取文件。根短棒只保留当前 owner、总进度、固定边界、下一棒提示词和验证入口；历史细节见三份 handoff：
+
+```text
+XIAOLOU_REFACTOR_HANDOFF.md
+docs\xiaolouai-finalization-handoff.md
+docs\xiaolouai-deep-research-structured.md
+```
 
 ## PowerShell 读取
 
@@ -11,141 +17,235 @@
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Get-Content .\XIAOLOU_REFACTOR_HANDOFF.md -Encoding UTF8
 Get-Content .\docs\xiaolouai-finalization-handoff.md -Encoding UTF8
+Get-Content .\docs\xiaolouai-deep-research-structured.md -Encoding UTF8
 ```
 
 ## 固定路线
 
-- 生产路线只走 `.NET 8 / ASP.NET Core Control API + PostgreSQL canonical + Windows Service workers + 前端静态构建`。
-- 不推进 Docker、Linux、Kubernetes、WSL、Windows + Celery 或 Redis Open Source on Windows 作为生产路径。
-- `legacy/core-api` 与 `legacy/services-api` 是 legacy reference，不作为生产控制面或生产写入口。
-- 不清理 `legacy_quarantine`，除非用户明确要求回滚或归档压缩。
-- 每一步开始前都先核对本文件和 `docs/xiaolouai-finalization-handoff.md`，再执行 owner。
+```text
+1. 后端主线：control-plane-dotnet
+2. 前端主线：XIAOLOU-main
+3. legacy 只作为参考、归档或受控验证对象
+4. 不恢复 legacy 为生产入口
+5. 不新增 Python FastAPI 主服务
+6. 不新增 Node/Express 主服务
+7. 不让前端重新直连 legacy 端口
+```
 
-## 本轮状态
-
-- 当前 shell：`IsAdministrator=True`，用户：`JYL\10045`。
-- P0-admin：已完成。2026-05-04 09:34-09:41 只运行 `.\scripts\windows\verify-release-candidate.ps1 -PublishFrontend`。
-- RC 报告：`D:\code\XiaoLouAI\.runtime\xiaolou-logs\release-candidate-s5-20260504-093456.json`。
-- RC 结果：`status=warning`，`administrator=true`，`publish_frontend=true`，`blockers=0`，`physical_cleanup_executed=false`，所有 required gates 均为 `ok`。
-- publish/restart/P0：`fixed-publish-restart-p0=ok`；报告 `D:\code\XiaoLouAI\.runtime\xiaolou-logs\release-candidate-publish-restart-p0-20260504-093456.json`；runtime 发布到 `D:\code\XiaoLouAI\.runtime\app`；rollback snapshot 为 `D:\code\XiaoLouAI\.runtime\xiaolou-backups\runtime-snapshots\runtime-20260504-093458`。
-- 服务停启：依次停止 `XiaoLou-ClosedApiWorker`、`XiaoLou-LocalModelWorker`、`XiaoLou-ControlApi`，随后启动 `XiaoLou-ControlApi`、`XiaoLou-LocalModelWorker`、`XiaoLou-ClosedApiWorker`；当前三项服务均为 Running/Automatic。
-- warning 说明：projection verifier 有 3 个运营 evidence warning（missing legacy snapshot、API-center provider health missing、staged-only），无 blocker；最终真实 provider health、真实 legacy dump/source、真实支付材料和真实 restore drill 仍作为最终验收 evidence pending。
-- cleanup 边界：未执行 `execute-legacy-cleanup.ps1`，未做 physical cleanup；RC 内只跑 `cleanup-dry-run=ok`。
-- G7a：已完成。新增 `docs/xiaolouai-top-level-directory-organization-inventory.md`，只做 inventory，没有移动、删除或重命名目录。
-- G7b-1 `xiaolou-backups`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-backups` 存在但为空；17 处有效引用均指向 `.runtime\xiaolou-backups` 或由 `.runtime` 派生的 `$runtimeRoot` / `$runtimeStateRoot`；未移动、未删除目录。
-- G7b-2 `xiaolou-cache`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-cache` 存在但为空；33 处有效引用均指向 `.runtime\xiaolou-cache` 或由 `.runtime` 派生的 `$runtimeRoot` / `$runtimeStateRoot` / `$cacheRoot`；未移动、未删除目录。
-- G7b-3 `xiaolou-temp`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-temp` 存在但为空；24 处有效引用均指向 `.runtime\xiaolou-temp` 或由 `.runtime` 派生的 `$runtimeRoot` / `$runtimeStateRoot` / `$tempRoot`；未移动、未删除目录。
-- G7b-4 `xiaolou-logs`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-logs` 存在但为空；44 处有效引用均指向 `.runtime\xiaolou-logs` 或由 `.runtime` 派生的 `$runtimeRoot` / `$runtimeStateRoot` / `$logRoot` / `XIAOLOU_ROOT -> .runtime\app`；未移动、未删除目录。
-- G7b-5 `xiaolou-inputs`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-inputs` 存在但为空；3 处有效引用均指向 `.runtime\xiaolou-inputs` 或由 `.runtime` 派生路径；未移动、未删除目录。
-- G7b-6 `xiaolou-replay`：no-op。根目录 `D:\code\XiaoLouAI\xiaolou-replay` 存在但为空；19 处有效引用均指向 `.runtime\xiaolou-replay` 或由 `.runtime` 派生路径；未移动、未删除目录。
-- G7b-7 `.cache`：moved。旧脚本 `scripts\setup_video_replace.cmd`、`scripts\start_background.ps1`、`scripts\start_core_api.cmd` 已改为 `XIAOLOU_RUNTIME_ROOT -> .runtime\xiaolou-cache\legacy-cache` 派生路径；顶层 `.cache` 内容已移动到 `D:\code\XiaoLouAI\.runtime\xiaolou-cache\legacy-cache`，源目录已删除；2 个 `gh` 同名/重现残余保存在 `_root-cache-conflicts\gh-20260504-101421` 与 `_root-cache-conflicts\gh-20260504-101807`。
-- G7c-1 `caddy`：moved。顶层 `D:\code\XiaoLouAI\caddy` 已迁入 `D:\code\XiaoLouAI\deploy\caddy`，源目录已删除；`README.md`、`README.zh-CN.md`、`scripts\start_caddy.cmd`、`deploy\caddy\DEPLOY.md`、legacy readiness/contract docs 的有效引用已更新；`deploy\caddy\Caddyfile` 对齐 Windows Control API allowlist、static asset cache 与 SPA fallback 边界。
-- 2026-05-04 10:34 G7 completion audit：G7 仍未完成，不能进入 G8。根目录仍有空 `xiaolou-backups`、`xiaolou-cache`、`xiaolou-inputs`、`xiaolou-logs`、`xiaolou-replay`、`xiaolou-temp`，而 `.runtime\xiaolou-*` 是真实 runtime owner；根目录 `.cache\gh` 已重新出现；根目录还有 `.codex-control-api.err.log` 与 `.codex-control-api.out.log`；`video-replace-service` 仍暴露在根目录且应按首页 AI 工具箱卡片 / `/create/video-replace` / `/api/toolbox*` 归入 `tools\video\video-replace-service`。
-- G7d-1 `runtime-root-residue`：moved/removed。空根目录 `xiaolou-backups`、`xiaolou-cache`、`xiaolou-inputs`、`xiaolou-logs`、`xiaolou-replay`、`xiaolou-temp` 已删除；根 `.cache\gh` 重现均已迁入 `.runtime\xiaolou-cache\legacy-cache\_root-cache-conflicts\root-cache-20260504-104208`、`root-cache-20260504-104336`、`root-cache-20260504-104727` 与 `root-cache-20260504-104857`；根 `.codex-control-api.err.log` 与 `.codex-control-api.out.log` 已迁入 `.runtime\xiaolou-logs\codex-control-api\20260504-104208`。
-- G7d-1b `root-cache-gh-recurrence`：env-fixed/moved。根 `.cache\gh` 反复生成的直接原因是 User/Process `XDG_CACHE_HOME=D:\code\XiaoLouAI\.cache`；User env 已改为 `D:\code\XiaoLouAI\.runtime\xiaolou-cache\tooling-cache`。`scripts\windows\load-env.ps1` 已能纠正继承到的 repo-root `.cache` 坏值；`scripts\windows\.env.windows.example`、`publish-runtime-to-d.ps1`、`register-services.ps1`、`migrate-user-tool-data-to-d.ps1` 已同步 `XDG_CACHE_HOME`。本轮根 `.cache\gh` 已迁入 `.runtime\xiaolou-cache\tooling-cache\_root-cache-conflicts\root-cache-gh-20260504-111137`；由于当前 Codex 桌面父进程仍继承旧 Process env，验证 shell 又重现一次，最终再迁入 `root-cache-gh-20260504-111500` 并删除根 `.cache`。验证：强制坏值后 dot-source `load-env.ps1` 会改回 tooling-cache；`git diff --check` 通过（仅 CRLF 提示）。新终端或 dot-source `load-env.ps1` 后不应再写根 `.cache`。
-- G7d-2 `video-replace-service`：moved。顶层 `D:\code\XiaoLouAI\video-replace-service` 已迁入 `D:\code\XiaoLouAI\tools\video\video-replace-service`，源目录不存在；`scripts\setup_video_replace.cmd` 与 `scripts\start_core_api.cmd` 默认路径已改到 tools/video，保留 `LEGACY_CORE_API_ROOT\video-replace-service` 作为 legacy-only fallback；前端 `/create/video-replace` 与 Control API `/api/toolbox*` 用户入口未改变。验证：423 个 scoped files 复扫后 ActiveRootVideoRefs=0；frontend legacy dependency gate `status=ok`、blockers/warnings 为空；`git diff --check` 无 whitespace error（仅 CRLF 提示）。
-- G7d-3 `jaaz`：moved。顶层 `D:\code\XiaoLouAI\jaaz` 已迁入 `D:\code\XiaoLouAI\legacy\jaaz`，源目录不存在；`scripts\start_background.ps1`、`scripts\status.ps1` 和 `scripts\start_xiaolou_stack.cmd` 已改为 `LEGACY_JAAZ_ROOT -> legacy\jaaz`；Caddy/IIS 对 `/jaaz*` 仍是阻断/legacy surface，不反代到生产 Jaaz；前端 `ensureJaazServices()` 仍 retired。验证：422 个 scoped files 复扫后 active physical root Jaaz refs=0（保留 `/jaaz*` route literal review）；frontend legacy dependency gate `status=ok`、blockers/warnings 为空。
-- README：本轮 README 中英文已同步；公开顶层目录契约已从 `caddy/` 改为 `deploy/caddy/`，从 `video-replace-service/` 改为 `tools/video/video-replace-service/`，从 `jaaz/` 改为 `legacy/jaaz/`。
-- G8a frontend high-risk optimization readiness：已完成。`npm --prefix XIAOLOU-main run build` 成功，Vite v6.4.1 transformed 3169 modules，built in 11.56s；输出 66 个 JS、1 个 CSS、3 个 PNG、1 个 HTML，无 `.gz`/`.br` 预压缩产物。最大 chunk：`useCreateCreditQuote` 890.67 kB raw / 241.06 kB gzip、`AgentCanvasCreate` 663.32 / 188.80、`index` 530.72 / 163.09、`CanvasCreate` 513.00 / 140.88、CSS 209.38 / 28.44。`vite.config.ts` 当前只有 React/Tailwind plugins 与 `chunkSizeWarningLimit=1000`，无 `manualChunks`、compression、SW、CDN、modulepreload/preload 配置；route lazy 边界仍在 `src\App.tsx` 和 `src\components\Layout.tsx`，不在 readiness 阶段批量改动。
-- G8b-1 `manualChunks-react-shell`：已完成。只改 `XIAOLOU-main\vite.config.ts`，新增单一 `manualChunks` 规则，范围限定 `react`、`react-dom`、`react-router-dom`，没有引入 compression、Service Worker、CDN、WebP 或自定义 preload/prefetch 策略。before build top chunks：`useCreateCreditQuote` 869.79 KiB、`AgentCanvasCreate` 647.77 KiB、`index` 518.28 KiB、`CanvasCreate` 500.98 KiB。after build：新增 `vendor-react-shell-DqgF9kLt.js` 226.53 KiB，`index-D9QfRRPB.js` 降为 290.88 KiB；`useCreateCreditQuote`、`AgentCanvasCreate`、`CanvasCreate` 基本不变。Vite 自动在 `dist\index.html` 加 `modulepreload` 指向 vendor chunk；这不是额外 preload owner。frontend legacy dependency gate `status=ok`，`git diff --check` 通过（仅 CRLF 提示）。
-- G8b-2 `canvas-heavy-chunks`：已完成。复扫确认 `CanvasCreate` 静态拥有 `src\canvas`，`AgentCanvasCreate` 静态拥有 `src\agent-canvas`；`useCreateCreditQuote` 被两套 canvas 的 `NodeControls` 与 agent `ChatPanel` 共用；`@react-three/fiber`、`@react-three/drei`、`three` 只由两套 `OrbitCameraControl` 引入。曾试验配置级 `vendor-canvas-3d` manualChunks，但 `dist\index.html` 会从首页 modulepreload 约 859 KiB 3D vendor，已回退。最终只改两个 `ChangeAnglePanel.tsx`，把 `OrbitCameraControl` 改为面板级 `React.lazy` + `Suspense`，没有引入 compression、Service Worker、CDN、WebP 或自定义 preload/prefetch。before build top chunks：`useCreateCreditQuote-BnG8VYYd.js` 869.83 KiB、`AgentCanvasCreate-Cf_hWX-Q.js` 647.81 KiB、`CanvasCreate-jriDaGTE.js` 501.02 KiB、`index-D9QfRRPB.js` 290.88 KiB、`vendor-react-shell-DqgF9kLt.js` 226.53 KiB。after build：`useCreateCreditQuote-BXJCvgbq.js` 降为 11.74 KiB；3D vendor 延后为 lazy chunk `RoundedBox-D92AitKx.js` 858.04 KiB；`AgentCanvasCreate-CPlYCPjw.js` 639.73 KiB、`CanvasCreate-BGV8jFo1.js` 492.93 KiB、`index-CJDM2e8c.js` 290.88 KiB、`vendor-react-shell-DqgF9kLt.js` 226.53 KiB；两套 `OrbitCameraControl` lazy wrapper 各 8.69 KiB。`dist\index.html` 仍只 modulepreload `vendor-react-shell`，未预加载 3D vendor。build、frontend legacy dependency gate、`git diff --check` 通过（仅 CRLF 提示）。
-- G8c `compression`：已完成。复扫确认 before 状态无 Vite compression 插件/脚本、`dist` 无 `.gz`/`.br`，Caddy/IIS 只有静态 cache policy。最终不新增 npm 依赖，只把 `npm run build` 改为 `vite build && node scripts/precompress-dist.mjs`，用 Node 内置 `zlib` 为 `dist` 里的 JS/CSS/HTML/JSON/SVG/TXT/WASM/XML 生成 `.br` 与 `.gz` sidecar；Caddy 生产配置和 Windows 示例均加 `file_server { precompressed br gzip }`，IIS 示例开启 `doStaticCompression=true`、`doDynamicCompression=false`。after build top raw chunks 不变：`RoundedBox` 858.04 KiB、`AgentCanvasCreate` 639.73 KiB、`CanvasCreate` 492.93 KiB、`index` 290.88 KiB、`vendor-react-shell` 226.53 KiB；新增 84 个压缩 sidecar（42 `.br` 777.04 KiB，42 `.gz` 953.28 KiB，总 1730.32 KiB）。`npm --prefix XIAOLOU-main run build`、frontend legacy dependency gate、IIS XML parse/static compression check、Caddy precompressed static scan、`git diff --check` 通过；本机未找到 `caddy.exe`，未做 Caddy runtime validate。未引入 Service Worker、CDN、WebP 或 preload/prefetch 策略。
-- G8d `preload-prefetch`：已完成。复扫确认 before `dist\index.html` 只有 Vite 自动 `modulepreload` 到 `vendor-react-shell-DqgF9kLt.js`，没有自定义 preload/prefetch；route lazy 边界在 `App.tsx` 和 `Layout.tsx`，已有 prefetch 仅是 `Assets.tsx` 的 sessionStorage 数据缓存。最终只改 `XIAOLOU-main\src\components\Layout.tsx`：新增侧栏导航 hover/focus 的 intent-based route module prefetch，复用现有 dynamic import 目标；不新增 HTML `<link rel=preload/prefetch>`，不引入 Service Worker、CDN、WebP 或新的 compression 策略。before top chunks：`RoundedBox` 858.04 KiB、`AgentCanvasCreate` 639.73 KiB、`CanvasCreate` 492.93 KiB、`index-CJDM2e8c.js` 290.88 KiB、`vendor-react-shell` 226.53 KiB。after `dist\index.html` 仍只 modulepreload `vendor-react-shell`，主 chunk 变为 `index-BdODh3KS.js` 295.05 KiB；top heavy chunks 保持同级，`.br/.gz` sidecar 仍为 84 个（42 `.br`、42 `.gz`，总 1731.63 KiB）。frontend legacy dependency gate `status=ok` 且 review items 保持 7 项；`git diff --check` 通过（仅 CRLF 提示）。
-- G8e `static-media-format`：已完成。复扫确认 `XIAOLOU-main\public` 与 `dist` 只有 3 个 PNG，`src` 无随包静态图片；实际 UI 使用 `chuangjing-logo-shell.png` 9.94 KiB 和 `chuangjing-favicon-32.png` 1.85 KiB，`chuangjing-logo.png` 673x673 / 210.44 KiB 只剩 Agent Studio fallback 字符串指纹，不是首屏或 UI 图片。当前环境无 `magick`/`cwebp`/`ffmpeg`，前端依赖无 `sharp`/`squoosh`，因此不引入转换工具；最终只删除未使用大 PNG，并把 `AgentStudio.tsx` fallback 改为 `/src/main.tsx` + `chuangjing-favicon-32.png`。after build：public/dist 媒体均为 2 个 PNG（合计 11.79 KiB），top chunks 和 84 个 `.br/.gz` sidecar 策略不变；deleted logo 引用扫描为 0，frontend legacy dependency gate `status=ok`，`git diff --check` 通过（仅 CRLF 提示）。
-- G8f `dependency-audit`：已完成。复扫 `package.json`、`package-lock.json`、`src` imports 与 build chunks：`face-api.js`、`@google/genai`、`dotenv`、`express` importCount 均为 0；`@react-three/fiber`、`@react-three/drei`、`three` 只由两套 `OrbitCameraControl` lazy chunk 使用；`motion` 只在 `Layout.tsx` 使用；`lucide-react` 为广泛 UI 图标依赖。按单 owner 最小改动只移除未引用 `face-api.js`，没有同时移除 `@google/genai`、`dotenv`、`express`，也没有引入 Service Worker、CDN、WebP/AVIF、新 compression 或 preload/prefetch 策略。`package-lock` 包数量从 487 降为 478，并移除 `face-api.js`、`@tensorflow/tfjs-core`、相关 `@types/*` 与 `seedrandom` transitive entries。before/after top chunks 保持：`RoundedBox` 858.04 KiB、`AgentCanvasCreate` 639.73 KiB、`CanvasCreate` 492.93 KiB、`index-BdODh3KS.js` 295.05 KiB、`vendor-react-shell` 226.53 KiB；`.br/.gz` sidecar 保持 84 个（42 `.br` 777.25 KiB，42 `.gz` 954.38 KiB）。`npm --prefix XIAOLOU-main run build`、frontend legacy dependency gate、`git diff --check` 通过（仅 CRLF 提示）。
-- G8g `service-worker-cdn`：已完成。复扫确认前端无 `registerSW`/workbox/SW 注册，`dist\index.html` 仍只有 Vite 对 `vendor-react-shell` 的自动 `modulepreload`；Caddy/IIS 只对 `/assets/*` 使用 immutable cache，SPA shell/root files revalidate，`/api/*`、auth/session/profile、payment notify/callback、provider health、SSE/WebSocket/`socket.io` 和 legacy route 均不进入静态缓存。最终只改 `XIAOLOU-main\src\main.tsx` 与新增 `src\lib\service-worker-retirement.ts`：启动时 unregister 当前同源/当前作用域内旧 Service Worker，并只清理 `xiaolou*`、`xiaolouai*`、`workbox*`、`vite-precache*` 命名的旧 cache；没有注册新 Service Worker，没有新增 CDN/public base path/static host，没有改 compression、WebP/AVIF 或 preload/prefetch 策略。after build：`index-DiGSEMVB.js` 295.54 KiB（约 +0.49 KiB），其他 top chunks 保持同级；`.br/.gz` sidecar 仍 84 个（42 `.br` 777.68 KiB，42 `.gz` 954.54 KiB）。build、frontend legacy gate、Caddy/IIS static cache scan、`git diff --check` 通过。
-
-## 下一步唯一提示词
-
-### G9a：API bandwidth / SSE-WebSocket ownership
-
-状态：下一步默认执行。
+## 禁止恢复
 
 ```text
-执行 G9a API bandwidth / SSE-WebSocket ownership。先读取并核对 XIAOLOU_REFACTOR_HANDOFF.md、docs/xiaolouai-finalization-handoff.md、docs/xiaolouai-deep-research-structured.md、docs/xiaolouai-top-level-directory-organization-inventory.md。只分析并处理 API bandwidth owner：复扫 `XIAOLOU-main\src` 的 fetch/stream/EventSource/WebSocket/轮询调用、`control-plane-dotnet` public API endpoints、`deploy\caddy`、`deploy\windows`、`scripts` 中 `/api/*`、`/healthz`、`/metrics`、provider health、payment callbacks、SSE/WebSocket 现状；输出高带宽/高频 API、payload 风险、缓存禁区和监控证据缺口。若能做最小可验证改动，只允许一个窄范围改动；不得恢复 legacy/core-api、legacy/services-api、legacy/jaaz，不得引入 Service Worker、CDN、新 compression、WebP/AVIF 或 preload/prefetch 策略。验证至少包括 frontend legacy dependency gate、必要的静态扫描、git diff --check；若触碰前端生产构建则跑 npm --prefix XIAOLOU-main run build。同步 handoff/docs。不要碰 legacy/core-api、legacy/services-api、legacy/jaaz、legacy_quarantine；不要执行 execute-legacy-cleanup.ps1。
+禁止恢复 legacy deploy_aliases 到生产路径。
+禁止让 tasks stream 默认开启。
+禁止让 legacy payment notify 默认开启。
+禁止在 legacy/services-api README 或脚本中重新出现 production API wording。
+禁止移动或删除 legacy，除非当前 owner 明确证明不会影响现有功能，并已经处理验证器、文档、数据和本地密钥边界。
 ```
 
-验收边界：
-
-- G7 corrective、G8a readiness、G8b-1 manualChunks react shell split、G8b-2 canvas-heavy-chunks、G8c compression、G8d preload-prefetch、G8e static-media-format、G8f dependency-audit、G8g service-worker-cdn 已完成；不要再移动目录，除非用户明确指定。
-- 若 `rg` 仍报 `Access is denied`，使用 `Select-String`。
-- 每轮只处理一个 G8 owner，不一次性混入 manualChunks、compression、preload、WebP、Service Worker 等多项高风险改动。
-- 若触碰前端生产构建，至少跑 `npm --prefix XIAOLOU-main run build` 或记录明确 blocker。
-- 不允许把 legacy reference 注册回 production runtime。
-
-## 队列索引
-
-G7b runtime-artifact 队列来自 `docs/xiaolouai-top-level-directory-organization-inventory.md`：
+## 总进度
 
 ```text
-1. xiaolou-backups -> no-op, root empty; effective refs point to .runtime\xiaolou-backups
-2. xiaolou-cache   -> no-op, root empty; effective refs point to .runtime\xiaolou-cache
-3. xiaolou-temp    -> no-op, root empty; effective refs point to .runtime\xiaolou-temp
-4. xiaolou-logs    -> no-op, root empty; effective refs point to .runtime\xiaolou-logs
-5. xiaolou-inputs  -> no-op, root empty; effective refs point to .runtime\xiaolou-inputs
-6. xiaolou-replay  -> no-op, root empty; effective refs point to .runtime\xiaolou-replay
-7. .cache          -> moved, content now under .runtime\xiaolou-cache\legacy-cache
+G0 inventory-and-baseline: done
+G1 deploy-alias-baseline: done
+G2 core-api-env-harden: done
+G3 payment-notify-gate: done
+G4 services-api-readme-deproduction: done
+G5 frontend-legacy-dependency-gate: done
+G6 legacy-physical-archive-contract: done
+G7 verify-scripts-alignment: done
+G8 handoff-sync: done
+G11a final-legacy-surface-regression: done
+G11b legacy-retention-and-delete-policy: done
+G11c legacy-deletion-impact-proof: done
+G11d legacy-delete-target-split: done
+G11e legacy-verifier-docs-decoupling: done
+G11f legacy-generated-cache-cleanup: done
+G11g legacy-tracked-source-removal-readiness: done
+G11h legacy-projection-p2-rc-launcher-decoupling: done
+G11i legacy-local-data-fixture-rollback-readiness: done
+G11j legacy-protected-material-preserve-and-evidence-root: done
+G11k legacy-tracked-source-deletion-execution: done
+G11l legacy-local-material-archive-and-physical-root-cleanup: done
+G12a backend-module-refactor: done
+G12b frontend-api-service-layer-plan: pending
+G12c domain-dto-contract-review: pending
+G13a ci-build-test-gate: done
+G13b lint-security-coverage-plan: pending
 ```
 
-G7c active/support 队列现在进入：
+## 当前 Owner
 
 ```text
-1. caddy                  -> moved, deploy\caddy
-2. video-replace-service  -> moved, tools\video\video-replace-service
-3. jaaz                   -> moved, legacy\jaaz
+Owner: G12 frontend API service layer
+状态: G11a-G11l done; G12a backend-module-refactor done; G12b-1 frontend-api-inventory next
+目标: 先盘点 XIAOLOU-main API callers、response shapes、polling loops、account scope propagation 和 legacy guard interactions；后续每轮只抽一个 frontend service，保持页面行为不变。
+当前结论: G11 final legacy surface 已完成到 physical legacy root cleanup。421 个经过 readiness report 复核的 git-tracked legacy source candidate 已删除；用户确认可随部署携带的非密钥 legacy local material 已迁到 deploy/retained/legacy-local-material；真实 env/service-account、命中 secret-like app-state 的 demo SQLite 和带非空 api_key 字段的 Jaaz config.toml 已迁到 ignored deploy/local-secrets/legacy；日志、缓存、空目录和剩余 tracked legacy .gitignore 已删除，legacy 物理 root 当前不存在。final legacy surface、projection、P2、cleanup dry-run、RC reduced/static 和 dev launcher missing-root 边界使用 retained manifests 或静态检查继续通过；RC 现在也把 manifest 传给 P2 与 cleanup dry-run 子 gate。G12a backend route modules 已全部完成并复核通过；逐项记录保留在 docs\xiaolouai-finalization-handoff.md。下一 owner 是 G12b-1 frontend-api-inventory。
 ```
 
-G7 corrective 队列必须先完成或 blocked，再进入 G8/G9：
+## G11 已完成摘要
 
 ```text
-1. runtime-root-residue   -> moved/removed, empty root dirs removed; root .cache/.codex logs moved under .runtime; root .cache\gh recurrence env-fixed
-2. video-replace-service  -> moved, tools\video\video-replace-service, aligned with homepage toolbox cards and /create/video-replace
-3. jaaz                   -> moved, legacy\jaaz
+G11a: final legacy surface gate passed。已确认 legacy/core-api public allowlist narrow、tasks stream 默认关闭、legacy payment notify 默认关闭、legacy/services-api 无 production API wording、README 中英文锚点一致。
+G11b: retention policy done。默认保留 verify scripts、deploy examples、legacy/core-api、legacy/services-api、legacy/jaaz、execute-legacy-cleanup.ps1；删除需要 owner 证明和回滚路径。
+G11c: deletion impact proof done。control-plane-dotnet 与 XIAOLOU-main/src 无 physical legacy 生产依赖；dotnet build、frontend build、frontend legacy dependency gate、final legacy surface gate 均通过。
+G11d: delete target split done。tracked source、generated cache、local data/secrets、dev launchers、verifier/docs fixtures 已分组；local data/secrets 需要用户确认，不与 generated cache 同 owner 删除。
+G11e: verifier/docs decoupling done。verify-final-legacy-surface.ps1 默认仍严格读取 live legacy source；显式 -WriteLegacySurfaceManifestPath 可写 retained manifest，显式 -LegacySurfaceManifestPath 可在 legacy roots 不存在时完成 final legacy surface source checks。
+G11f: generated/cache cleanup done。删除 31 个未跟踪 generated/cache/dependency 目标，包括 node_modules、.venv、dist、__pycache__、.pytest_cache、.ruff_cache、egg-info；复扫同类目标为 0；vertex-sa.json、.env.local、uploads、data、user_data 未触碰。
+G11g: tracked source removal readiness done。未删除 tracked source。结论为 blocked：projection/P2/RC 仍依赖 live CoreApiRoot/ServicesApiRoot 或 skip；dev launcher 仍指向 legacy/core-api 与 legacy/jaaz；local data/secrets 仍需 preserve/archive/approval；fixture/archive 与 rollback 边界未完成。
+G11h: projection/P2/RC/dev-launcher decoupling done。未删除 tracked source，未处理 local data/secrets。projection verifier/gate 支持显式 retained projection manifest；P2/RC 可显式传入 projection/final surface manifests；legacy-only launchers 对 missing source 或 missing generated dependencies 默认 skip。仍不能删除 tracked source，下一 owner 处理 local data/secrets、fixture/archive 和 rollback。
+G11i: local-data/fixture/rollback readiness done。未删除 tracked source，未移动或读取 local data/secrets 内容。verify-legacy-cleanup-dry-run.ps1 新增显式 -AssessPhysicalSourceRemovalReadiness；只做 metadata inventory，记录 protected local material、retained final/projection manifest schema、fixture/archive 留存要求和 git restore + dependency restore rollback path。source removal 仍 blocked。
+G11j: protected-material preserve/evidence root done。未删除 tracked source，未移动或读取 local data/secrets 内容。cleanup dry-run readiness 显式支持 preserve-in-place、tracked source target inventory 和 retained evidence root；legacy-surface-evidence 下保留 final/projection manifests。当前 readiness blockers=0，database inventory skipped warning 属于本轮裁剪边界。
+G11k: tracked source deletion execution done。按 predelete readiness report 精确 git-rm 421 个 tracked source candidate；只保留 legacy/core-api/.gitignore、legacy/jaaz/.gitignore、legacy/jaaz/react/.gitignore 三个 tracked legacy 文件；protected local material 原地保留。postdelete readiness blockers=0；final/projection manifest modes、frontend legacy dependency gate、P2 manifest/static audit、RC parser/static boundary、dev launcher missing-root/static checks 均通过或保持 reduced/static warning 边界。
+G11l: local material archive and physical root cleanup done。按用户确认的部署优先策略，把非密钥 legacy local material 迁到 deploy/retained/legacy-local-material 并生成 MATERIALS.sha256；把真实 .env.local、vertex-sa.json、命中 secret-like app-state 的 demo SQLite 和带非空 api_key 字段的 Jaaz config.toml 迁到 ignored deploy/local-secrets/legacy；删除 legacy 与 frontend/tool local logs、XIAOLOU-main/.cache、Python __pycache__、legacy .tanstack 空缓存和剩余空目录；删除剩余 tracked legacy .gitignore，legacy 物理 root 当前不存在。validation: final surface manifest ok、projection manifest ok、frontend dependency gate ok、P2 reduced/static ok、cleanup dry-run blockers=0 warning=database inventory skipped、RC reduced blockers=0 warning=intentional skips、dev launcher missing-root/static ok、git diff --check ok with CRLF warnings only。
 ```
 
-G7 corrective 队列已完成；G8 可以开始。P0-admin 已完成，不再重开，除非出现新的 RC 失败报告或用户要求重新验证。
-
-G8 frontend high-risk optimization owner 队列：
+## G12 已完成摘要
 
 ```text
-1. G8b-1 manualChunks-react-shell  -> done, 只拆 react/react-dom/react-router-dom vendor。
-2. G8b-2 canvas-heavy-chunks       -> done, OrbitCameraControl 面板级 lazy，3D vendor 不再挂在 useCreateCreditQuote shared chunk。
-3. G8c compression                 -> done, build 生成 .br/.gz sidecar；Caddy 使用 precompressed；IIS 示例开启 static compression。
-4. G8d preload-prefetch            -> done, 侧栏导航 hover/focus intent-based route module prefetch；HTML preload 不变。
-5. G8e static-media-format         -> done, 删除未使用 210.44 KiB 大 PNG；当前发布包媒体只剩 shell logo/favicon。
-6. G8f dependency-audit            -> done, 移除未引用 face-api.js；package-lock 487 -> 478；未同轮处理其他 0-import 依赖。
-7. G8g service-worker-cdn          -> done, 不新增 SW/CDN；只退役旧 SW 与旧 XiaoLou/Workbox/Vite precache。
-8. G9a API bandwidth/SSE-WebSocket -> next, 复扫高频 API、payload、SSE/WebSocket 与监控证据缺口。
+G12a: backend module refactor stage done。完成 route-to-module inventory、Auth helper boundary、permission matrix alignment，以及 Health/Metrics、Operational、Toolbox、Media、Playground、Admin、InternalJobs、Payments、Accounts/Auth、Projects endpoint modules。Program.cs 现在保留 middleware、schema apply、hosted service/options/helpers 和各 module registration；/api/schema/apply 仍按边界留在 Program.cs。
+G12a 复核: dotnet build 通过；control-api permission matrix ok；frontend legacy dependency verifier ok；Program.cs route map 只剩 /api/schema/apply；10 个 endpoint module registration 齐全；模块内 route map 共 123 条。逐项 G12a-1..G12a-11 执行记录、验证和回滚路径见 docs\xiaolouai-finalization-handoff.md。
+下一 G12 owner: G12b-1 frontend-api-inventory。
 ```
 
-## 验证入口
+## 下一棒提示词
 
-G9a 建议命令：
+```text
+执行 G12b-1 frontend-api-inventory。先读取 XIAOLOU_REFACTOR_HANDOFF.md、docs\xiaolouai-finalization-handoff.md、docs\xiaolouai-deep-research-structured.md 中 G12/G12a 阶段记录，以及 XIAOLOU-main\src\lib\api.ts、frontend legacy dependency gate、Control API endpoint modules 和 account scope/client assertion helpers。
 
-```powershell
-$env:XDG_CACHE_HOME = 'D:\code\XiaoLouAI\.runtime\xiaolou-cache\tooling-cache'
-Select-String -Path .\XIAOLOU-main\src\**\*.ts,.\XIAOLOU-main\src\**\*.tsx -Pattern @('fetch(','EventSource','WebSocket','ReadableStream','setInterval','poll','stream','/api/','/healthz','/metrics') -Encoding UTF8
-Select-String -Path .\control-plane-dotnet\**\*.cs -Pattern @('MapGet','MapPost','/api/','/healthz','/metrics','text/event-stream','WebSocket') -Encoding UTF8
-Select-String -Path .\deploy\caddy\*,.\deploy\windows\*,.\scripts\**\* -Pattern @('/api/','/healthz','/metrics','providers/health','payments','EventSource','WebSocket','Cache-Control') -Encoding UTF8
-.\scripts\windows\verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency
-git diff --check
+本轮只做 frontend API caller inventory 和 service 边界计划，不直接抽 service、不改页面行为、不改 backend routes、不引入新的 polling/transport/DB/DTO owner。输出 route-to-service inventory：auth/account、media、playground、toolbox、wallet/payment、projects/canvas/create、admin/enterprise、jobs/internal-read callers；标出 exported API names、response shapes、polling loops、account scope propagation、legacy guard interactions 和低耦合第一 owner。
+
+验证 frontend legacy dependency gate、projects/canvas/control-api caller static scan、npm --prefix XIAOLOU-main run build only if frontend code changes、git diff --check。同步三份 handoff 文档；README 仅在用户可见架构/运行契约变化时同步。
 ```
 
-## 禁止项
+## G11 后续拆分
 
-- 不执行 `scripts\windows\execute-legacy-cleanup.ps1`。
-- 不清理 `legacy_quarantine`。
-- 不把 Docker/Linux/Kubernetes/WSL、Windows + Celery 或 Redis OSS on Windows 写成生产方案。
-- 不把 legacy reference 注册回 production runtime。
-- 不跳过当前 owner 的验证。
+```text
+G11e legacy-verifier-docs-decoupling: done
+  范围: verify-final-legacy-surface、legacy physical archive contract、handoff/docs。
+  结果: final legacy surface gate 支持显式 retained manifest；默认 strict live 行为保留。
+
+G11f legacy-generated-cache-cleanup: done
+  范围: legacy 下明确 generated/cache/dependency 输出，例如 node_modules、.venv、__pycache__、dist、logs、.pytest_cache、.ruff_cache、egg-info。
+  结果: 删除 31 个 untracked generated/cache/dependency 目标；复扫无剩余同名候选；data、uploads、backup、user_data、.env.local、vertex-sa.json 未触碰。
+
+G11g legacy-tracked-source-removal-readiness: done
+  范围: 仅在验证器、文档、launcher、fixture、回滚路径全部就绪后，评估 tracked legacy source 是否可移除。
+  结果: readiness 审计完成；source removal blocked；未删除 tracked source。
+
+G11h legacy-projection-p2-rc-launcher-decoupling: done
+  范围: projection/P2/RC verifiers 与 dev launchers 的 live legacy source 耦合。
+  结果: projection retained manifest、P2/RC manifest passthrough、legacy-only launcher skip guards 完成；source removal 仍 blocked。
+
+G11i legacy-local-data-fixture-rollback-readiness: done
+  范围: local data/secrets preserve/archive/approval、fixture/archive 留存、rollback 可执行路径。
+  结果: cleanup dry-run 显式 readiness 模式已记录 protected local material metadata、manifest schema evidence、fixture/archive blocker 和 rollback path；source removal 仍 blocked。
+
+G11j legacy-protected-material-preserve-and-evidence-root: done
+  范围: protected local material preserve-in-place、retained evidence root、tracked source target inventory。
+  结果: cleanup dry-run readiness report blockers=0；legacy-surface-evidence 保存已脱敏 final/projection manifests；protected tracked files=0；candidate tracked source files=421；local data/secrets 未移动未读取。
+
+G11k legacy-tracked-source-deletion-execution: done
+  范围: 只删除 readiness report 中允许的 git tracked source files；保留 protected local material 与 .gitignore 边界。
+  结果: 精确删除 421 个 tracked source candidate；未递归删除 legacy root；未触碰 protected local material；保留 3 个 tracked .gitignore；postdelete readiness blockers=0。
+
+G11l legacy-local-material-archive-and-physical-root-cleanup: done
+  范围: 用户确认部署优先后，处理 G11k 后剩余 physical legacy root、本地材料归拢、日志/缓存/空目录清理和上传策略。
+  结果: 非密钥 deploy handoff material 迁到 deploy/retained/legacy-local-material；真实 env/service-account、敏感 demo SQLite 与 Jaaz config.toml 迁到 ignored deploy/local-secrets/legacy；剩余 tracked legacy .gitignore 已删除；legacy 物理 root 当前不存在；cleanup dry-run 与 RC 子 gate 均显式透传 retained manifests。
+```
+
+## G12 后续提示词
+
+```text
+使用方式: G11l 与 G12a 已完成，后续按以下 G12 owner 顺序推进。每轮只做一个 owner，保持功能正常优先。
+```
+
+### G12a backend-module-refactor (done)
+
+```text
+已归拢为阶段完成项。G12a 完成 Control API backend route-to-module refactor，逐项 owner、验证和回滚记录保留在 docs\xiaolouai-finalization-handoff.md。根 handoff 后续只保留当前阶段入口。
+```
+
+### G12b frontend service layer
+
+```text
+执行 G12b frontend API service layer work。先做 G12b-1 frontend-api-inventory：盘点 XIAOLOU-main API callers、response shapes、polling loops、account scope propagation、legacy guard interactions。随后每轮只抽一个 service：auth/account、media、playground、toolbox、wallet/payment、projects/canvas。保留现有 exported API names 或 compatibility wrappers，默认不改页面行为。每个 frontend owner 验证 npm build、frontend legacy dependency verifier、git diff --check，并在可行时做 route/page smoke。同步三份 handoff 文档。
+```
+
+### G12c DTO and contract review
+
+```text
+执行 G12c domain DTO contract review。先做 G12c-1 dto-contract-inventory，快照 backend request/response DTO 与 frontend expectations。再按单 owner 拆 over-shared create/update/list DTO，必须保留默认 public response shape 或提供 compatibility wrapper。不要和 route migration、frontend service extraction、DB migration 混在同一轮。验证 dotnet build、npm build if frontend contracts touched、contract/static scan、git diff --check。同步三份 handoff 文档。
+```
+
+### G12d helper and cleanup optimization
+
+```text
+执行 G12d helper and cleanup optimization。只在相关 modules/service boundaries 已稳定后执行。G12d-1 清理重复 normalization/auth/JSON helper；G12d-2 清理 dead code/imports/dependencies。删除前必须 reference scan，删除后必须 build。不得删除 legacy reference、verify scripts、deploy examples 或 operator evidence material，除非另有明确 deletion owner 和 rollback。同步三份 handoff 文档。
+```
+
+### G12e test harness
+
+```text
+执行 G12e test harness planning/implementation。先做窄范围测试 owner，不在 route migration 同轮创建大而全 scaffold。Backend 可从 Health/Metrics/auth helper tests 开始；frontend 可等 service layer 后补 service tests。验证 dotnet test only when test project exists、npm test only when script exists、build、git diff --check。同步三份 handoff 文档。
+```
+
+## 后续 G13 队列
+
+```text
+G13a ci-build-test-gate: done
+
+G13 与 G11/G12 依赖判断:
+  G13 最小 PR CI 不需要等待 G11e/G11f/G11g 或 G12a/G12b/G12c 完成。
+  原因: 最小 CI 只固化当前可重复 build/static gates；G11/G12 后续改动会被该 gate 保护，而不是作为前置。
+  边界: 不改当前 Owner，不抢占 G11e；只有用户明确切到 G13 时才创建 workflow。
+
+G13a-1 minimal-github-actions-workflow: ready when user switches to G13
+  前置已接受: workflow 可触发 pull_request 和 push main；使用 windows-latest；允许 npm/NuGet restore；dotnet test 仅在发现 *Tests*.csproj 时运行；frontend test 暂不强制。
+  文件: .github\workflows\ci.yml
+  最小步骤: checkout；setup-node；npm ci --prefix XIAOLOU-main；npm --prefix XIAOLOU-main run build；setup-dotnet 8.x；dotnet restore/build .\control-plane-dotnet\XiaoLou.ControlPlane.sln；conditional dotnet test；verify-final-legacy-surface；verify-frontend-legacy-dependencies；git diff --check。
+  secrets: none required for PR gate。
+  Windows runner: required for first workflow because verifier scripts and path assumptions are Windows-oriented。
+  禁止写入 CI: 真实 provider health、支付商户材料、真实回调捕获、production legacy dump/snapshot、真实 restore drill、production secrets、service publish/register/restart、release-candidate publish、strict production rehearsal、真实 payment replay、backup/restore drill、operator-only .runtime evidence。
+
+G13b lint-security-coverage-plan: pending
+  提示: 整理 lint/security/coverage 后续 gate 计划，避免一次性扩大 owner。
+  前置: 不阻塞 G13a-1；coverage/test gate 需要 backend test project、frontend test script 或明确的测试 owner 后再设为强制。
+```
 
 ## 输出要求
 
-每轮必须列出：
+```text
+每棒最终输出必须包含：
+1. 本棒 owner
+2. 修改了哪些文件
+3. 运行了哪些验证
+4. 是否有 blocker
+5. 下一棒建议
 
-- 变更文件。
-- legacy route 最终状态。
-- 验证命令和结果。
-- 未处理 TODO。
-- 是否同步 `XIAOLOU_REFACTOR_HANDOFF.md`、`docs/xiaolouai-finalization-handoff.md`、`docs/xiaolouai-deep-research-structured.md`、`docs/xiaolouai-top-level-directory-organization-inventory.md`。
-- README 是否修改；若未改，说明原因。
+每棒完成后同步：
+1. XIAOLOU_REFACTOR_HANDOFF.md
+2. docs\xiaolouai-finalization-handoff.md
+3. docs\xiaolouai-deep-research-structured.md
+```
+
+## 快速验证入口
+
+```powershell
+# 后端构建
+dotnet build .\control-plane-dotnet\XiaoLou.ControlPlane.sln --no-restore
+
+# 前端构建
+npm --prefix .\XIAOLOU-main run build
+
+# 前端 legacy 依赖门禁
+.\scripts\windows\verify-frontend-legacy-dependencies.ps1
+
+# 最终 legacy 表面门禁
+.\scripts\windows\verify-final-legacy-surface.ps1 -CoreApiRoot .\legacy\core-api -ServicesApiRoot .\legacy\services-api
+
+# handoff 空白检查
+Select-String -Path .\XIAOLOU_REFACTOR_HANDOFF.md,.\docs\xiaolouai-finalization-handoff.md,.\docs\xiaolouai-deep-research-structured.md -Pattern '[ \t]+$'
+
+# git 空白检查
+git diff --check
+```

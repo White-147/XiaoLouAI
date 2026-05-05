@@ -67,10 +67,13 @@ legacy/core-api/logs/
 legacy/core-api/tmp/
 legacy/core-api/uploads/
 legacy/core-api/video-replace-service/
+legacy/jaaz/server/user_data/
+legacy/jaaz/react/.tanstack/
 video-replace-service/data/
 video-replace-service/weights/
 jaaz/.git/
 jaaz/server/user_data/
+deploy/local-secrets/
 
 # Downloaded binaries and local tooling payloads
 tools/cuda/

@@ -21,6 +21,17 @@ if not defined NODE_BIN (
 
 if not defined LEGACY_CORE_API_ROOT set "LEGACY_CORE_API_ROOT=%ROOT%\legacy\core-api"
 
+echo [legacy backend] start_core_api.cmd is a legacy-only compatibility launcher.
+if not exist "%LEGACY_CORE_API_ROOT%\src\server.js" (
+    echo [legacy backend] legacy core-api source not found, skipping: %LEGACY_CORE_API_ROOT%
+    exit /b 0
+)
+if not exist "%LEGACY_CORE_API_ROOT%\node_modules\pg\package.json" (
+    echo [legacy backend] generated node dependency material is missing under %LEGACY_CORE_API_ROOT%.
+    echo [legacy backend] Skipping legacy core-api startup. Restore dependencies in the legacy root only when you intentionally need this compatibility launcher.
+    exit /b 0
+)
+
 REM video-replace Python venv is used by core-api subprocesses. No sidecar is required.
 set "VR_SERVICE_DIR=%ROOT%\tools\video\video-replace-service"
 if not exist "%VR_SERVICE_DIR%\vr_probe_cli.py" (

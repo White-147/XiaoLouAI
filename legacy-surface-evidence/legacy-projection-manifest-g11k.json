@@ -1,0 +1,44 @@
+﻿{
+    "schema":  "xiaolou-legacy-canonical-projection-manifest-v1",
+    "generated_at_utc":  "2026-05-05T02:12:37.5695938+00:00",
+    "source_mode":  "live-source-evidence",
+    "core_api_root":  "legacy\\core-api",
+    "required_source_files":  [
+                                  {
+                                      "path":  "legacy\\core-api\\package.json",
+                                      "exists":  true,
+                                      "length":  1632,
+                                      "sha256":  "4ec870cd9e93e01c0a889fb5ae76e200021494253668ae9a7c3afbcba1ac87cd"
+                                  },
+                                  {
+                                      "path":  "legacy\\core-api\\scripts\\verify-legacy-canonical-projection.js",
+                                      "exists":  true,
+                                      "length":  55779,
+                                      "sha256":  "d48e066c3ece2f8ba188758a4dc2a5f22f46c2e7cd09db05752f189491109a26"
+                                  },
+                                  {
+                                      "path":  "legacy\\core-api\\scripts\\project-legacy-to-canonical.js",
+                                      "exists":  true,
+                                      "length":  43808,
+                                      "sha256":  "c7ea5d88fb67345a5e300ca524605b4b8cb71e165336dc2eb7af676d5864eee6"
+                                  },
+                                  {
+                                      "path":  "legacy\\core-api\\src\\postgres-schema.js",
+                                      "exists":  true,
+                                      "length":  37450,
+                                      "sha256":  "e0db2937a6349827f4138ade41a73a506eafc07383a328497fd7a4790980a920"
+                                  }
+                              ],
+    "dependency_evidence":  {
+                                "package_json_declares_pg":  true,
+                                "pg_package_present":  false,
+                                "pg_package_path":  "legacy\\core-api\\node_modules\\pg\\package.json",
+                                "generated_dependency_material_may_be_absent":  true
+                            },
+    "boundary":  {
+                     "default_live_mode_remains_strict":  true,
+                     "manifest_mode_is_explicit":  true,
+                     "manifest_mode_does_not_seed_database_fixture":  true,
+                     "manifest_mode_does_not_execute_node_projection_verifier":  true
+                 }
+}

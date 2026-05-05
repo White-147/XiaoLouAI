@@ -7,6 +7,8 @@ param(
   [string]$BaseUrl = "",
   [string]$P0AccountOwnerId = "",
   [string]$ReportPath = "",
+  [string]$LegacySurfaceManifestPath = "",
+  [string]$LegacyProjectionManifestPath = "",
   [int]$CoreApiPort = 4135,
   [int]$P0TimeoutSeconds = 1200,
   [int]$OpsDrillTimeoutSeconds = 180,
@@ -41,6 +43,20 @@ if (-not $ServicesApiRoot) {
   $ServicesApiRoot = Join-Path $RepoRoot $ServicesApiRoot
 }
 $ServicesApiRoot = [System.IO.Path]::GetFullPath($ServicesApiRoot)
+
+if ($LegacySurfaceManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacySurfaceManifestPath)) {
+    $LegacySurfaceManifestPath = Join-Path $RepoRoot $LegacySurfaceManifestPath
+  }
+  $LegacySurfaceManifestPath = [System.IO.Path]::GetFullPath($LegacySurfaceManifestPath)
+}
+
+if ($LegacyProjectionManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacyProjectionManifestPath)) {
+    $LegacyProjectionManifestPath = Join-Path $RepoRoot $LegacyProjectionManifestPath
+  }
+  $LegacyProjectionManifestPath = [System.IO.Path]::GetFullPath($LegacyProjectionManifestPath)
+}
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -251,11 +267,16 @@ if ($SkipFinalLegacySurface) {
   Invoke-RcStep "final-legacy-surface" {
     $finalSurfaceReport = Join-Path $reportDir "release-candidate-final-legacy-surface-$stamp.json"
     Invoke-ReportScript "final-legacy-surface" $finalSurfaceReport {
-      & "$PSScriptRoot\verify-final-legacy-surface.ps1" `
-        -RepoRoot $RepoRoot `
-        -CoreApiRoot $CoreApiRoot `
-        -ServicesApiRoot $ServicesApiRoot `
-        -ReportPath $finalSurfaceReport | Out-Null
+      $finalSurfaceArgs = @{
+        RepoRoot = $RepoRoot
+        CoreApiRoot = $CoreApiRoot
+        ServicesApiRoot = $ServicesApiRoot
+        ReportPath = $finalSurfaceReport
+      }
+      if ($LegacySurfaceManifestPath) {
+        $finalSurfaceArgs.LegacySurfaceManifestPath = $LegacySurfaceManifestPath
+      }
+      & "$PSScriptRoot\verify-final-legacy-surface.ps1" @finalSurfaceArgs | Out-Null
     }
   } | Out-Null
 }
@@ -307,15 +328,26 @@ if ($SkipP2Audit) {
   Invoke-RcStep "p2-audit" {
     $p2Report = Join-Path $reportDir "release-candidate-p2-cutover-audit-$stamp.json"
     Invoke-ReportScript "p2-audit" $p2Report {
-      & "$PSScriptRoot\verify-p2-cutover-audit.ps1" `
-        -RepoRoot $RepoRoot `
-        -EnvFile $EnvFile `
-        -CoreApiRoot $CoreApiRoot `
-        -NodeExe $NodeExe `
-        -ReportPath $p2Report `
-        -CoreApiPort $CoreApiPort `
-        -LegacyWritesFrozen `
-        -FailOnFrontendLegacyWriteDependency | Out-Null
+      $p2Args = @{
+        RepoRoot = $RepoRoot
+        EnvFile = $EnvFile
+        CoreApiRoot = $CoreApiRoot
+        NodeExe = $NodeExe
+        ReportPath = $p2Report
+        CoreApiPort = $CoreApiPort
+        LegacyWritesFrozen = $true
+        FailOnFrontendLegacyWriteDependency = $true
+      }
+      if ($LegacyProjectionManifestPath) {
+        $p2Args.LegacyProjectionManifestPath = $LegacyProjectionManifestPath
+      }
+      if ($LegacySurfaceManifestPath) {
+        $p2Args.LegacySurfaceManifestPath = $LegacySurfaceManifestPath
+      }
+      if ($LegacySurfaceManifestPath -and -not (Test-Path -LiteralPath (Join-Path $CoreApiRoot "package.json"))) {
+        $p2Args.SkipCoreApiReadonly = $true
+      }
+      & "$PSScriptRoot\verify-p2-cutover-audit.ps1" @p2Args | Out-Null
     }
   } | Out-Null
 }
@@ -336,14 +368,19 @@ if ($SkipProjectionVerifier) {
   Invoke-RcStep "projection-verifier" {
     $projectionReport = Join-Path $reportDir "release-candidate-legacy-canonical-projection-$stamp.json"
     Invoke-ReportScript "projection-verifier" $projectionReport {
-      & "$PSScriptRoot\verify-legacy-canonical-projection.ps1" `
-        -RepoRoot $RepoRoot `
-        -EnvFile $EnvFile `
-        -CoreApiRoot $CoreApiRoot `
-        -NodeExe $NodeExe `
-        -ReportPath $projectionReport `
-        -AllowMissingLegacy `
-        -LegacyWritesFrozen | Out-Null
+      $projectionArgs = @{
+        RepoRoot = $RepoRoot
+        EnvFile = $EnvFile
+        CoreApiRoot = $CoreApiRoot
+        NodeExe = $NodeExe
+        ReportPath = $projectionReport
+        AllowMissingLegacy = $true
+        LegacyWritesFrozen = $true
+      }
+      if ($LegacyProjectionManifestPath) {
+        $projectionArgs.LegacyProjectionManifestPath = $LegacyProjectionManifestPath
+      }
+      & "$PSScriptRoot\verify-legacy-canonical-projection.ps1" @projectionArgs | Out-Null
     }
   } | Out-Null
 }
@@ -368,10 +405,20 @@ if ($SkipCleanupDryRun) {
   Invoke-RcStep "cleanup-dry-run" {
     $cleanupReport = Join-Path $reportDir "release-candidate-legacy-cleanup-dry-run-$stamp.json"
     Invoke-ReportScript "cleanup-dry-run" $cleanupReport {
-      & "$PSScriptRoot\verify-legacy-cleanup-dry-run.ps1" `
-        -RepoRoot $RepoRoot `
-        -EnvFile $EnvFile `
-        -ReportPath $cleanupReport | Out-Null
+      $cleanupArgs = @{
+        RepoRoot = $RepoRoot
+        EnvFile = $EnvFile
+        CoreApiRoot = $CoreApiRoot
+        ServicesApiRoot = $ServicesApiRoot
+        ReportPath = $cleanupReport
+      }
+      if ($LegacySurfaceManifestPath) {
+        $cleanupArgs.LegacySurfaceManifestPath = $LegacySurfaceManifestPath
+      }
+      if ($LegacyProjectionManifestPath) {
+        $cleanupArgs.LegacyProjectionManifestPath = $LegacyProjectionManifestPath
+      }
+      & "$PSScriptRoot\verify-legacy-cleanup-dry-run.ps1" @cleanupArgs | Out-Null
     }
   } | Out-Null
 }
@@ -393,6 +440,8 @@ $report = [ordered]@{
   source_root = $RepoRoot
   core_api_root = $CoreApiRoot
   services_api_root = $ServicesApiRoot
+  legacy_surface_manifest_path = $LegacySurfaceManifestPath
+  legacy_projection_manifest_path = $LegacyProjectionManifestPath
   env_file = $EnvFile
   base_url = $BaseUrl
   administrator = $administrator

@@ -43,7 +43,7 @@ Write-Host "=== XiaoLou AI -- Service Status ===" -ForegroundColor Cyan
 Write-Host ""
 
 $services = @(
-    @{ Port = 4100; Label = "legacy core-api" },
+    @{ Port = 4100; Label = "legacy-only core-api" },
     @{ Port = 3000; Label = "Vite    " },
     @{ Port = 57988; Label = "Jaaz API" },
     @{ Port = 5174; Label = "Jaaz UI " }
@@ -67,7 +67,7 @@ Write-Host "  http://127.0.0.1:3000        local"
 # Log tails
 Write-Host ""
 Write-Host "Recent logs (last 15 lines):" -ForegroundColor Cyan
-Show-LogTail (Join-Path $legacyCoreApiRoot "core-api.log") "legacy core-api"
+Show-LogTail (Join-Path $legacyCoreApiRoot "core-api.log") "legacy-only core-api"
 Show-LogTail "$ROOT\XIAOLOU-main\vite-dev.log" "Vite"
 Show-LogTail (Join-Path $legacyJaazRoot "jaaz-server-57988.out.log") "Jaaz API"
 Show-LogTail (Join-Path $legacyJaazRoot "react\vite-dev.log") "Jaaz UI"

@@ -1,0 +1,45 @@
+{
+  "id": "6304c3b4-077d-411e-abce-8a98b66b084e",
+  "title": "Untitled",
+  "nodes": [
+    {
+      "id": "459bb078-81ad-4feb-864d-7af209867c11",
+      "type": "Image",
+      "x": -290.9353105881337,
+      "y": -7.903920222797061,
+      "prompt": "一个美女在逛街",
+      "status": "idle",
+      "model": "vertex:gemini-3-pro-image-preview",
+      "imageModel": "vertex:gemini-3-pro-image-preview",
+      "aspectRatio": "1:1",
+      "resolution": "1K",
+      "parentIds": [],
+      "title": "图片",
+      "batchCount": 1
+    },
+    {
+      "id": "9a55749c-af26-48f0-be39-5b833ef89454",
+      "type": "Video",
+      "x": 242.1434933575651,
+      "y": 248.81482977720293,
+      "prompt": "",
+      "status": "idle",
+      "model": "Banana Pro",
+      "aspectRatio": "Auto",
+      "resolution": "Auto",
+      "parentIds": [],
+      "title": "视频",
+      "videoModel": "vertex:veo-3.1-generate-001"
+    }
+  ],
+  "groups": [],
+  "viewport": {
+    "x": 325.68636129754907,
+    "y": 209.8491142575504,
+    "zoom": 0.6703200460356392
+  },
+  "updatedAt": "2026-04-28T09:51:37.284Z",
+  "createdAt": "2026-04-28T09:51:37.284Z",
+  "ownerActorId": "root_demo_001",
+  "ownerProjectId": "proj_demo_001"
+}

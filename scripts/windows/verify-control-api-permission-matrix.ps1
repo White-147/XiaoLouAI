@@ -97,6 +97,8 @@ function Add-TermCheck {
 }
 
 $programPath = Join-Path $RepoRoot "control-plane-dotnet\src\XiaoLou.ControlApi\Program.cs"
+$modulesRoot = Join-Path $RepoRoot "control-plane-dotnet\src\XiaoLou.ControlApi\Modules"
+$authHelpersPath = Join-Path $RepoRoot "control-plane-dotnet\src\XiaoLou.ControlApi\Modules\Auth\AuthHelpers.cs"
 $p0Path = Join-Path $RepoRoot "scripts\windows\verify-control-plane-p0.ps1"
 $frontendApiPath = Join-Path $RepoRoot "XIAOLOU-main\src\lib\api.ts"
 $frontendGatePath = Join-Path $RepoRoot "scripts\windows\verify-frontend-legacy-dependencies.ps1"
@@ -104,6 +106,18 @@ $caddyPath = Join-Path $RepoRoot "deploy\windows\Caddyfile.windows.example"
 $iisPath = Join-Path $RepoRoot "deploy\windows\iis-web.config.example"
 
 $programText = Read-TextFile $programPath
+$moduleTexts = @()
+if (Test-Path -LiteralPath $modulesRoot) {
+  foreach ($modulePath in @(Get-ChildItem -LiteralPath $modulesRoot -Recurse -Filter "*.cs" -File | Select-Object -ExpandProperty FullName)) {
+    $moduleText = Read-TextFile $modulePath
+    if ($moduleText) {
+      $moduleTexts += $moduleText
+    }
+  }
+}
+$authHelpersText = Read-TextFile $authHelpersPath
+$controlApiSurfaceText = (@($programText) + $moduleTexts) -join "`n"
+$controlApiAuthBoundaryText = @($programText, $authHelpersText) -join "`n"
 $p0Text = Read-TextFile $p0Path
 $frontendApiText = Read-TextFile $frontendApiPath
 $frontendGateText = Read-TextFile $frontendGatePath
@@ -246,11 +260,11 @@ $reverseProxyTerms = @(
   "/api/*"
 )
 
-Add-TermCheck $checks $blockers "program-public-client-surface" $programText $publicClientRouteTerms "Program.cs public client route surface is explicit." "Program.cs is missing one or more public client route terms."
-Add-TermCheck $checks $blockers "program-client-permission-map" $programText $clientPermissionTerms "Program.cs maps public client routes to named permissions." "Program.cs is missing one or more public client permission terms."
-Add-TermCheck $checks $blockers "program-anonymous-identity-map" $programText $anonymousIdentityTerms "Program.cs keeps anonymous identity/application exceptions explicit." "Program.cs is missing one or more anonymous identity/application terms."
-Add-TermCheck $checks $blockers "program-operational-boundary" $programText $operationalTerms "Program.cs operational routes require the internal boundary." "Program.cs is missing one or more operational route terms."
-Add-TermCheck $checks $blockers "program-internal-boundary" $programText $internalTerms "Program.cs internal routes require the internal boundary." "Program.cs is missing one or more internal route terms."
+Add-TermCheck $checks $blockers "control-api-public-client-surface" $controlApiSurfaceText $publicClientRouteTerms "Control API public client route surface is explicit across Program.cs and endpoint modules." "Control API source is missing one or more public client route terms."
+Add-TermCheck $checks $blockers "control-api-client-permission-map" $controlApiAuthBoundaryText $clientPermissionTerms "Control API auth boundary maps public client routes to named permissions." "Program.cs/AuthHelpers.cs is missing one or more public client permission terms."
+Add-TermCheck $checks $blockers "control-api-anonymous-identity-map" $controlApiSurfaceText $anonymousIdentityTerms "Control API keeps anonymous identity/application exceptions explicit." "Control API source is missing one or more anonymous identity/application terms."
+Add-TermCheck $checks $blockers "control-api-operational-boundary" $controlApiSurfaceText $operationalTerms "Control API operational routes require the internal boundary." "Control API source is missing one or more operational route terms."
+Add-TermCheck $checks $blockers "control-api-internal-boundary" $controlApiSurfaceText $internalTerms "Control API internal routes require the internal boundary." "Control API source is missing one or more internal route terms."
 
 Add-TermCheck $checks $blockers "p0-public-client-helper" $p0Text $publicClientRouteTerms "P0 client token helper covers the full public client matrix." "verify-control-plane-p0.ps1 is missing one or more public client route terms."
 Add-TermCheck $checks $blockers "p0-forbidden-boundary-checks" $p0Text @(

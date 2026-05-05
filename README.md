@@ -26,10 +26,12 @@ locks, `FOR UPDATE SKIP LOCKED`, and `LISTEN/NOTIFY`.
 ```text
 XIAOLOU-main/          React + Vite SPA; production output is dist/
 control-plane-dotnet/  .NET control plane and Windows worker projects
-legacy/core-api/       Node compatibility layer and migration reference
-legacy/services-api/   legacy Python API reference; not production control plane
-legacy/jaaz/           upstream Jaaz / Agent Studio reference; not production runtime
-legacy/                archived legacy references; not production runtime
+legacy/core-api/       historical Node compatibility path; source/root removed
+legacy/services-api/   historical legacy Python reference path; source/root removed
+legacy/jaaz/           historical upstream Jaaz path; source/root removed
+legacy/                archived legacy references; no live working-tree root
+legacy-surface-evidence/ retained sanitized manifests for non-live legacy source gates
+deploy/retained/legacy-local-material/ non-secret retained legacy material for deployment handoff
 tools/video/video-replace-service/ local model / video replacement reference code
 deploy/caddy/          Windows Caddy static site + API proxy config
 scripts/windows/       Windows install, service, backup, and runtime scripts
@@ -45,8 +47,24 @@ G2b-2 has moved the former root legacy reference paths `core-api/` and
 the former root upstream Jaaz reference to `legacy/jaaz`. The archive paths
 remain migration references only: do not register them as production services,
 reverse-proxy backends, scheduled tasks, or control-plane working directories.
-Any future deletion remains outside this contract and would require final
-legacy-surface checks to no longer need the references.
+G11k removed the reviewed git-tracked legacy source candidates from
+`legacy/core-api`, `legacy/services-api`, and `legacy/jaaz`. G11l moved
+operator-approved non-secret local material out of `legacy/` into
+`deploy/retained/legacy-local-material/`, moved real env/service-account files
+and secret-like demo SQLite state into ignored `deploy/local-secrets/legacy/`,
+removed logs/caches/empty directories, and removed the remaining tracked legacy
+`.gitignore` files after root ignore coverage existed. The retained non-secret
+final-surface and projection manifests under `legacy-surface-evidence/` are now
+the explicit non-live verifier evidence. The cleanup dry-run and release
+candidate verifiers pass these manifests into their dependent sub-gates when
+live legacy roots are intentionally absent; reduced RC runs remain warning
+evidence, not full final acceptance.
+
+Final positioning anchors remain unchanged for verifier clarity: the historical
+`legacy/core-api` role was "Node compatibility layer and migration reference",
+`legacy/services-api` was "legacy Python API reference; not production control plane",
+and `legacy/` remains "archived legacy references" rather than a production
+runtime.
 
 ## Development Setup
 
@@ -58,15 +76,11 @@ npm install
 npm run dev
 ```
 
-Legacy Node compatibility API, only for local read-only comparison while routes
-are being migrated. The default archive path is `legacy/core-api`; set
-`LEGACY_CORE_API_ROOT` only when testing a nonstandard local copy.
-
-```powershell
-cd legacy\core-api
-npm install
-npm run dev
-```
+The legacy Node compatibility source is no longer part of the tracked working
+tree. Legacy-only launchers skip missing roots or generated dependencies by
+default. For a deliberate historical comparison, restore the needed legacy
+source from an earlier git commit into a separate local copy, restore
+dependencies there, and point `LEGACY_CORE_API_ROOT` at that copy.
 
 .NET control plane:
 
@@ -266,8 +280,11 @@ Do not commit these materials:
 
 Store collected evidence only under `.runtime` on the deployment host or in an
 operator-controlled evidence store. The repository may keep sanitized examples,
-dry-run reports, verifier code, and synthetic fixtures, but not the real
-material.
+dry-run reports, verifier code, synthetic fixtures, and operator-approved
+non-secret deployment handoff material under
+`deploy/retained/legacy-local-material/`, but not the real material. True local
+secrets for this checkout belong under ignored `deploy/local-secrets/` or the
+deployment host's own secret store, not in Git.
 
 Final acceptance evidence should include, when available:
 
@@ -303,10 +320,9 @@ Current Windows-native Control API callbacks accept normalized canonical JSON
 signed with the configured HMAC secret
 (`Payments:{provider}:WebhookSecret` / `X-XiaoLou-Signature`). Native Alipay
 RSA2 and WeChat Pay v3 inputs are handled by the Windows adapter/normalizer
-tooling under `scripts/windows/`; the legacy
-`legacy/core-api/src/payments/alipay.js` and
-`legacy/core-api/src/payments/wechat.js` files
-are migration references only, not the long-term production control plane.
+tooling under `scripts/windows/`. Historical legacy payment route evidence is
+retained through `legacy-surface-evidence/`; legacy source is not a production
+control-plane dependency.
 
 To connect a real provider account:
 
@@ -356,13 +372,12 @@ refactor toward P2.
   keep canonical task state in memory.
 - Media primary storage is object storage. Windows local folders are cache/temp
   only.
-- The legacy reference directories now live at `legacy/core-api` and
-  `legacy/services-api` after the G2b-2 archive move. The former root paths
-  `core-api/` and `services/api/` are not production control-plane locations.
-  New control-plane work belongs in `control-plane-dotnet/`. Set
-  `CORE_API_COMPAT_READ_ONLY=1` for any temporary compatibility process so old
-  Node routes cannot continue accepting writes; in that mode, legacy public GET
-  routes are closed by default except `GET /healthz` and
+- Tracked legacy source was removed in G11k after manifest gates and deletion
+  readiness passed. The former root paths `core-api/` and `services/api/` are
+  not production control-plane locations, and new control-plane work belongs in
+  `control-plane-dotnet/`. If a temporary historical compatibility process is
+  restored from an earlier commit, set `CORE_API_COMPAT_READ_ONLY=1`; legacy
+  public GET routes must remain closed by default except `GET /healthz` and
   `GET /api/windows-native/status`.
 
 ## Handoff
@@ -376,8 +391,9 @@ Read these first before continuing the refactor:
   G2b-2 archive record and rollback path
 
 After every code, script, config, reverse-proxy, runtime, or README change,
-update both handoff files before closing the work. Use the structured deep
-research reader to keep the remaining work as finite task cards. If a prior
+update the root handoff plus the related docs handoff files before closing the
+work. Use the structured deep research reader to keep the remaining work as
+finite task cards. If a prior
 "next execution" note has been superseded, mark it as historical in
 `docs/xiaolouai-finalization-handoff.md` instead of leaving two competing
 instructions.

@@ -52,9 +52,18 @@ $legacyCoreApiRoot = Resolve-WorkspacePath $env:LEGACY_CORE_API_ROOT "legacy\cor
 $legacyJaazRoot = Resolve-WorkspacePath $env:LEGACY_JAAZ_ROOT "legacy\jaaz"
 $coreLog = Join-Path $legacyCoreApiRoot "core-api.log"
 $coreErr = Join-Path $legacyCoreApiRoot "core-api.err.log"
+$coreServer = Join-Path $legacyCoreApiRoot "src\server.js"
+$corePgPackage = Join-Path $legacyCoreApiRoot "node_modules\pg\package.json"
+$legacyCoreApiLaunchSkipped = $false
 
 if (Test-Port 4100) {
-    Write-Host "[legacy core-api] Already running on :4100, skipping." -ForegroundColor Yellow
+    Write-Host "[legacy-only core-api] Already running on :4100, skipping." -ForegroundColor Yellow
+} elseif (-not (Test-Path $coreServer)) {
+    $legacyCoreApiLaunchSkipped = $true
+    Write-Host "[legacy-only core-api] Source not found, skipping: $legacyCoreApiRoot" -ForegroundColor Yellow
+} elseif (-not (Test-Path $corePgPackage)) {
+    $legacyCoreApiLaunchSkipped = $true
+    Write-Host "[legacy-only core-api] Generated node dependency material is missing, skipping: $corePgPackage" -ForegroundColor Yellow
 } else {
     Rotate-Log $coreLog
     Rotate-Log $coreErr
@@ -63,7 +72,7 @@ if (Test-Port 4100) {
         -WorkingDirectory $legacyCoreApiRoot `
         -WindowStyle Hidden `
         -PassThru
-    Write-Host "[legacy core-api] Started  PID=$($proc.Id)" -ForegroundColor Green
+    Write-Host "[legacy-only core-api] Started  PID=$($proc.Id)" -ForegroundColor Green
     Write-Host "                  Root: $legacyCoreApiRoot" -ForegroundColor DarkGray
     Write-Host "                  Log:  $coreLog" -ForegroundColor DarkGray
 }
@@ -98,8 +107,10 @@ $jaazServerRoot = Join-Path $legacyJaazRoot "server"
 
 if (Test-Port 57988) {
     Write-Host "[jaaz-api] Already running on :57988, skipping." -ForegroundColor Yellow
+} elseif (-not (Test-Path $jaazServerRoot)) {
+    Write-Host "[jaaz-api] Legacy server source not found, skipping: $jaazServerRoot" -ForegroundColor Yellow
 } elseif (-not (Test-Path $jaazPython)) {
-    Write-Host "[jaaz-api] Python venv not found, skipping: $jaazPython" -ForegroundColor Red
+    Write-Host "[jaaz-api] Python venv not found, skipping: $jaazPython" -ForegroundColor Yellow
 } else {
     Rotate-Log $jaazServerLog
     Rotate-Log $jaazServerErr
@@ -119,9 +130,15 @@ if (Test-Port 57988) {
 $jaazReactRoot = Join-Path $legacyJaazRoot "react"
 $jaazViteLog = Join-Path $jaazReactRoot "vite-dev.log"
 $jaazViteErr = Join-Path $jaazReactRoot "vite-dev.err.log"
+$jaazReactPackage = Join-Path $jaazReactRoot "package.json"
+$jaazReactNodeModules = Join-Path $jaazReactRoot "node_modules"
 
 if (Test-Port 5174) {
     Write-Host "[jaaz-ui]  Already running on :5174, skipping." -ForegroundColor Yellow
+} elseif (-not (Test-Path $jaazReactPackage)) {
+    Write-Host "[jaaz-ui]  Legacy React source not found, skipping: $jaazReactRoot" -ForegroundColor Yellow
+} elseif (-not (Test-Path $jaazReactNodeModules)) {
+    Write-Host "[jaaz-ui]  Generated node dependency material is missing, skipping: $jaazReactNodeModules" -ForegroundColor Yellow
 } else {
     Rotate-Log $jaazViteLog
     Rotate-Log $jaazViteErr
@@ -139,12 +156,16 @@ if (Test-Port 5174) {
 # Wait for legacy core-api to be ready (up to 20s)
 # ===========================================================
 Write-Host ""
-Write-Host "Waiting for legacy core-api..." -NoNewline
-$waited = 0
-while (-not (Test-Port 4100) -and $waited -lt 20) {
-    Start-Sleep -Seconds 1
-    $waited++
-    Write-Host "." -NoNewline
+if ($legacyCoreApiLaunchSkipped) {
+    Write-Host "Legacy-only core-api launch skipped; not waiting for :4100."
+} else {
+    Write-Host "Waiting for legacy core-api..." -NoNewline
+    $waited = 0
+    while (-not (Test-Port 4100) -and $waited -lt 20) {
+        Start-Sleep -Seconds 1
+        $waited++
+        Write-Host "." -NoNewline
+    }
 }
 Write-Host ""
 
@@ -154,8 +175,9 @@ Write-Host ""
 Write-Host ""
 Write-Host "--- Port status ---" -ForegroundColor DarkGray
 
-if (Test-Port 4100) { Write-Host "  legacy core-api :4100  OK" -ForegroundColor Green } `
-else                 { Write-Host "  legacy core-api :4100  TIMEOUT (check $coreLog)" -ForegroundColor Red }
+if (Test-Port 4100) { Write-Host "  legacy-only core-api :4100  OK" -ForegroundColor Green } `
+elseif ($legacyCoreApiLaunchSkipped) { Write-Host "  legacy-only core-api :4100  skipped (legacy deps/source absent)" -ForegroundColor Yellow } `
+else                 { Write-Host "  legacy-only core-api :4100  TIMEOUT (check $coreLog)" -ForegroundColor Red }
 
 if (Test-Port 3000) { Write-Host "  Vite      :3000  OK" -ForegroundColor Green } `
 else                 { Write-Host "  Vite      :3000  starting... (check vite-dev.log)" -ForegroundColor Yellow }

@@ -1,9 +1,18 @@
 param(
   [string]$RepoRoot = "",
   [string]$EnvFile = "$PSScriptRoot\.env.windows",
+  [string]$CoreApiRoot = "",
+  [string]$ServicesApiRoot = "",
+  [string]$JaazRoot = "",
   [string]$PgBin = "",
   [string]$DatabaseUrl = "",
   [string]$ReportPath = "",
+  [string]$LegacySurfaceManifestPath = "",
+  [string]$LegacyProjectionManifestPath = "",
+  [switch]$AssessPhysicalSourceRemovalReadiness,
+  [switch]$PreserveProtectedLocalMaterialInPlace,
+  [switch]$AssessTrackedSourceDeletionTargets,
+  [string]$RetainedEvidenceRoot = "",
   [switch]$SkipDatabaseInventory,
   [switch]$SkipRuntimeDependencyGate,
   [switch]$SkipProjectionGate,
@@ -16,6 +25,48 @@ if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+
+if (-not $CoreApiRoot) {
+  $CoreApiRoot = Join-Path $RepoRoot "legacy\core-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($CoreApiRoot)) {
+  $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
+}
+$CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
+
+if (-not $ServicesApiRoot) {
+  $ServicesApiRoot = Join-Path $RepoRoot "legacy\services-api"
+} elseif (-not [System.IO.Path]::IsPathRooted($ServicesApiRoot)) {
+  $ServicesApiRoot = Join-Path $RepoRoot $ServicesApiRoot
+}
+$ServicesApiRoot = [System.IO.Path]::GetFullPath($ServicesApiRoot)
+
+if (-not $JaazRoot) {
+  $JaazRoot = Join-Path $RepoRoot "legacy\jaaz"
+} elseif (-not [System.IO.Path]::IsPathRooted($JaazRoot)) {
+  $JaazRoot = Join-Path $RepoRoot $JaazRoot
+}
+$JaazRoot = [System.IO.Path]::GetFullPath($JaazRoot)
+
+if ($LegacySurfaceManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacySurfaceManifestPath)) {
+    $LegacySurfaceManifestPath = Join-Path $RepoRoot $LegacySurfaceManifestPath
+  }
+  $LegacySurfaceManifestPath = [System.IO.Path]::GetFullPath($LegacySurfaceManifestPath)
+}
+
+if ($LegacyProjectionManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacyProjectionManifestPath)) {
+    $LegacyProjectionManifestPath = Join-Path $RepoRoot $LegacyProjectionManifestPath
+  }
+  $LegacyProjectionManifestPath = [System.IO.Path]::GetFullPath($LegacyProjectionManifestPath)
+}
+
+if ($RetainedEvidenceRoot) {
+  if (-not [System.IO.Path]::IsPathRooted($RetainedEvidenceRoot)) {
+    $RetainedEvidenceRoot = Join-Path $RepoRoot $RetainedEvidenceRoot
+  }
+  $RetainedEvidenceRoot = [System.IO.Path]::GetFullPath($RetainedEvidenceRoot)
+}
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -176,6 +227,126 @@ function Quote-SqlLiteral {
   return "'" + $Value.Replace("'", "''") + "'"
 }
 
+function Get-DisplayPath {
+  param([string]$Path)
+
+  $fullRoot = [System.IO.Path]::GetFullPath($RepoRoot).TrimEnd("\", "/")
+  $fullPath = [System.IO.Path]::GetFullPath($Path)
+  if ($fullPath.StartsWith($fullRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    return $fullPath.Substring($fullRoot.Length).TrimStart("\", "/")
+  }
+  return $fullPath
+}
+
+function Test-IsUnderPath {
+  param(
+    [string]$Path,
+    [string]$Parent
+  )
+
+  if (-not $Path -or -not $Parent) {
+    return $false
+  }
+
+  $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd("\", "/")
+  $fullParent = [System.IO.Path]::GetFullPath($Parent).TrimEnd("\", "/")
+  return $fullPath.Equals($fullParent, [StringComparison]::OrdinalIgnoreCase) -or
+    $fullPath.StartsWith($fullParent + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+    $fullPath.StartsWith($fullParent + [System.IO.Path]::AltDirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function ConvertTo-GitPath {
+  param([string]$Path)
+
+  $displayPath = Get-DisplayPath $Path
+  return $displayPath.Replace("\", "/")
+}
+
+function Test-GitPathMatchesPrefix {
+  param(
+    [string]$Path,
+    [string]$Prefix
+  )
+
+  $normalizedPath = $Path.TrimStart("/").Replace("\", "/")
+  $normalizedPrefix = $Prefix.TrimStart("/").TrimEnd("/").Replace("\", "/")
+  return $normalizedPath.Equals($normalizedPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+    $normalizedPath.StartsWith($normalizedPrefix + "/", [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-GitTrackedFiles {
+  param([string[]]$Paths)
+
+  $gitPaths = @($Paths | ForEach-Object { ConvertTo-GitPath $_ })
+  $output = & git -C $RepoRoot ls-files -- $gitPaths 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    throw "git ls-files failed with exit code $LASTEXITCODE"
+  }
+
+  return @($output | Where-Object { $_ })
+}
+
+function Get-PathInventory {
+  param(
+    [string]$Path,
+    [string]$Kind,
+    [string]$Reason
+  )
+
+  $exists = Test-Path -LiteralPath $Path
+  $entry = [ordered]@{
+    path = Get-DisplayPath $Path
+    kind = $Kind
+    exists = [bool]$exists
+    reason = $Reason
+  }
+  if ($exists) {
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.PSIsContainer) {
+      $children = @(Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue)
+      $files = @($children | Where-Object { -not $_.PSIsContainer })
+      $entry["item_count"] = $children.Count
+      $entry["file_count"] = $files.Count
+      $entry["total_bytes"] = [int64](($files | Measure-Object -Property Length -Sum).Sum)
+    } else {
+      $entry["item_count"] = 1
+      $entry["file_count"] = 1
+      $entry["total_bytes"] = [int64]$item.Length
+    }
+  }
+  return $entry
+}
+
+function Add-ManifestEvidence {
+  param(
+    [string]$Name,
+    [string]$Path,
+    [string]$ExpectedSchema,
+    [System.Collections.Generic.List[object]]$Checks,
+    [System.Collections.Generic.List[object]]$Blockers
+  )
+
+  if (-not $Path) {
+    Add-Item $Blockers $Name "missing" "$Name is required before tracked legacy source deletion readiness can be claimed."
+    return
+  }
+  if (-not (Test-Path -LiteralPath $Path)) {
+    Add-Item $Blockers $Name "missing" "$Name path does not exist." ([ordered]@{ path = Get-DisplayPath $Path })
+    return
+  }
+
+  try {
+    $json = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ([string]$json.schema -eq $ExpectedSchema) {
+      Add-Item $Checks $Name "ok" "$Name exists and has the expected schema." ([ordered]@{ path = Get-DisplayPath $Path; schema = [string]$json.schema })
+    } else {
+      Add-Item $Blockers $Name "failed" "$Name must have schema '$ExpectedSchema'." ([ordered]@{ path = Get-DisplayPath $Path; actual = [string]$json.schema })
+    }
+  } catch {
+    Add-Item $Blockers $Name "failed" "$Name is not valid JSON." ([ordered]@{ path = Get-DisplayPath $Path; error = $_.Exception.Message })
+  }
+}
+
 function Get-TableInventory {
   param(
     [string]$Psql,
@@ -312,6 +483,10 @@ $blockers = New-List
 $warnings = New-List
 $reviewItems = New-List
 $evidencePending = New-List
+$protectedLocalMaterial = @()
+$trackedSourceRollbackPlan = $null
+$fixtureArchivePlan = $null
+$trackedSourceDeletionPlan = $null
 
 $requiredScripts = @(
   "backup-postgres.ps1",
@@ -381,7 +556,17 @@ if (-not $SkipDatabaseInventory) {
 
 if (-not $SkipRuntimeDependencyGate) {
   $runtimeReport = Join-Path $planDir "legacy-runtime-dependencies.json"
-  $runtimeArgs = @{ RepoRoot = $RepoRoot; ReportPath = $runtimeReport }
+  $runtimeArgs = @{
+    RepoRoot = $RepoRoot
+    CoreApiRoot = $CoreApiRoot
+    ReportPath = $runtimeReport
+  }
+  if ($LegacySurfaceManifestPath) {
+    $runtimeArgs.LegacySurfaceManifestPath = $LegacySurfaceManifestPath
+  }
+  if ($LegacyProjectionManifestPath) {
+    $runtimeArgs.LegacyProjectionManifestPath = $LegacyProjectionManifestPath
+  }
   Invoke-GuardScript `
     -Name "legacy-runtime-dependency-isolation" `
     -ScriptPath (Join-Path $PSScriptRoot "verify-legacy-runtime-dependencies.ps1") `
@@ -400,6 +585,9 @@ if (-not $SkipProjectionGate) {
     AllowMissingLegacy = $true
     LegacyWritesFrozen = $true
   }
+  if ($LegacyProjectionManifestPath) {
+    $projectionArgs.LegacyProjectionManifestPath = $LegacyProjectionManifestPath
+  }
   Invoke-GuardScript `
     -Name "legacy-canonical-projection-gate" `
     -ScriptPath (Join-Path $PSScriptRoot "verify-legacy-canonical-projection.ps1") `
@@ -416,6 +604,138 @@ if ($existingWithRows.Count -gt 0) {
 }
 
 Add-Item $evidencePending "operator-final-acceptance-evidence" "pending-evidence" "Real provider health, production legacy dump/source, real payment material, and real restore drill remain tracked only in the README final acceptance module."
+
+if ($AssessPhysicalSourceRemovalReadiness) {
+  $protectedLocalMaterial = @(
+    (Get-PathInventory -Path (Join-Path $CoreApiRoot "uploads") -Kind "local-user-data" -Reason "Legacy upload material; preserve/archive/approval required before any source tree deletion.")
+    (Get-PathInventory -Path (Join-Path $CoreApiRoot "data") -Kind "local-runtime-data" -Reason "Legacy SQLite/canvas-library data; preserve/archive/approval required before any source tree deletion.")
+    (Get-PathInventory -Path (Join-Path $CoreApiRoot "backup") -Kind "local-backup-data" -Reason "Legacy backup material; preserve/archive/approval required before any source tree deletion.")
+    (Get-PathInventory -Path (Join-Path $JaazRoot "server\user_data") -Kind "local-user-data" -Reason "Jaaz local user data; preserve/archive/approval required before any source tree deletion.")
+    (Get-PathInventory -Path (Join-Path $CoreApiRoot ".env.local") -Kind "local-secret-or-env" -Reason "Local env file; do not read or move without explicit approval.")
+    (Get-PathInventory -Path (Join-Path $CoreApiRoot "vertex-sa.json") -Kind "local-secret" -Reason "Local service-account material; do not read or move without explicit approval.")
+  )
+  $presentProtected = @($protectedLocalMaterial | Where-Object { $_.exists })
+  if ($presentProtected.Count -gt 0) {
+    if ($PreserveProtectedLocalMaterialInPlace) {
+      Add-Item $checks "protected-local-data-secrets-preserve-in-place" "ok" "Protected local data/secrets are present and explicitly preserved in place; any source deletion target must be git-tracked-files-only and must not recurse over live legacy roots." $presentProtected
+      Add-Item $reviewItems "protected-local-data-secrets-present" "review" "Protected local data/secrets remain on disk by design. They are not deletion targets and their contents were not read." $presentProtected
+    } else {
+      Add-Item $blockers "protected-local-data-secrets-present" "blocked" "Tracked legacy source deletion cannot be proposed while protected local data/secrets remain in place without an explicit preserve/archive/approval path." $presentProtected
+    }
+  } else {
+    Add-Item $checks "protected-local-data-secrets-present" "ok" "No protected local data/secrets were found under the configured legacy roots."
+  }
+
+  Add-ManifestEvidence "retained-final-legacy-surface-manifest" $LegacySurfaceManifestPath "xiaolou-final-legacy-surface-manifest-v1" $checks $blockers
+  Add-ManifestEvidence "retained-legacy-projection-manifest" $LegacyProjectionManifestPath "xiaolou-legacy-canonical-projection-manifest-v1" $checks $blockers
+
+  if ($AssessTrackedSourceDeletionTargets) {
+    try {
+      $trackedFiles = @(Get-GitTrackedFiles @($CoreApiRoot, $ServicesApiRoot, $JaazRoot))
+      $protectedTrackedPrefixes = @(
+        "legacy/core-api/uploads",
+        "legacy/core-api/data",
+        "legacy/core-api/backup",
+        "legacy/jaaz/server/user_data",
+        "legacy/core-api/.env.local",
+        "legacy/core-api/vertex-sa.json"
+      )
+      $protectedTrackedFiles = @($trackedFiles | Where-Object {
+        $path = $_
+        @($protectedTrackedPrefixes | Where-Object { Test-GitPathMatchesPrefix $path $_ }).Count -gt 0
+      })
+      $trackedGitIgnoreFiles = @($trackedFiles | Where-Object {
+        [System.IO.Path]::GetFileName($_) -eq ".gitignore"
+      })
+      $candidateTrackedSourceFiles = @($trackedFiles | Where-Object {
+        $path = $_
+        -not ($protectedTrackedFiles -contains $path) -and -not ($trackedGitIgnoreFiles -contains $path)
+      })
+      $trackedSourceDeletionPlan = [ordered]@{
+        mode = "git-tracked-files-only"
+        tracked_file_count = $trackedFiles.Count
+        protected_tracked_file_count = $protectedTrackedFiles.Count
+        protected_tracked_files = $protectedTrackedFiles
+        preserved_gitignore_files = $trackedGitIgnoreFiles
+        candidate_tracked_source_file_count = $candidateTrackedSourceFiles.Count
+        candidate_tracked_source_files = $candidateTrackedSourceFiles
+        forbidden_commands = @(
+          "Remove-Item -Recurse legacy",
+          "Remove-Item -Recurse legacy\core-api",
+          "Remove-Item -Recurse legacy\services-api",
+          "Remove-Item -Recurse legacy\jaaz",
+          "rmdir /s legacy"
+        )
+        deletion_policy = "Use git rm only against the reviewed tracked file list. Preserve .gitignore files or add equivalent higher-level ignore coverage before removing them."
+      }
+
+      if ($protectedTrackedFiles.Count -gt 0) {
+        Add-Item $blockers "tracked-source-targets-include-protected-material" "blocked" "Tracked deletion candidates include protected local material paths." $trackedSourceDeletionPlan
+      } else {
+        Add-Item $checks "tracked-source-targets-exclude-protected-material" "ok" "Git tracked legacy source inventory excludes protected local data/secret paths." $trackedSourceDeletionPlan
+      }
+
+      if ($trackedGitIgnoreFiles.Count -gt 0) {
+        Add-Item $reviewItems "tracked-source-gitignore-preserve" "review" "Tracked .gitignore files under legacy roots protect future local data/secrets; keep them until equivalent ignore coverage exists." ([ordered]@{ files = $trackedGitIgnoreFiles })
+      }
+    } catch {
+      Add-Item $blockers "tracked-source-target-inventory" "blocked" $_.Exception.Message
+    }
+  } else {
+    Add-Item $reviewItems "tracked-source-target-inventory" "review" "Pass -AssessTrackedSourceDeletionTargets to produce the git-tracked-files-only deletion target inventory before proposing source deletion."
+  }
+
+  $fixtureArchivePlan = [ordered]@{
+    required = $true
+    retained_evidence_root = if ($RetainedEvidenceRoot) { Get-DisplayPath $RetainedEvidenceRoot } else { "" }
+    current_final_surface_manifest = if ($LegacySurfaceManifestPath) { Get-DisplayPath $LegacySurfaceManifestPath } else { "" }
+    current_projection_manifest = if ($LegacyProjectionManifestPath) { Get-DisplayPath $LegacyProjectionManifestPath } else { "" }
+    required_retention = @(
+      "final legacy surface manifest generated from live source",
+      "legacy projection manifest generated from live source",
+      "projection fixture boundary report or explicit fixtureSeeded=false manifest report",
+      "P2 and RC reports that name skipped/reduced gates when full live evidence is unavailable"
+    )
+    decision = "Retain these artifacts as operator evidence before any tracked source deletion; .runtime evidence alone is local and should be copied to the chosen operator archive if deletion is approved."
+  }
+  $runtimeRoot = Join-Path $RepoRoot ".runtime"
+  $retainedEvidenceRootOk = $false
+  if ($RetainedEvidenceRoot -and
+      -not (Test-IsUnderPath $RetainedEvidenceRoot $runtimeRoot) -and
+      $LegacySurfaceManifestPath -and
+      $LegacyProjectionManifestPath -and
+      (Test-IsUnderPath $LegacySurfaceManifestPath $RetainedEvidenceRoot) -and
+      (Test-IsUnderPath $LegacyProjectionManifestPath $RetainedEvidenceRoot)) {
+    $retainedEvidenceRootOk = $true
+  }
+
+  if ($retainedEvidenceRootOk) {
+    Add-Item $checks "fixture-archive-retention-path" "ok" "Retained final/projection manifests are under an explicit non-runtime evidence root." $fixtureArchivePlan
+  } else {
+    Add-Item $blockers "fixture-archive-retention-path" "blocked" "A committed or operator-approved fixture/archive retention path is still required before tracked legacy source deletion." $fixtureArchivePlan
+  }
+
+  $trackedSourceRollbackPlan = [ordered]@{
+    tracked_source_restore = "git restore --source HEAD -- legacy\core-api legacy\services-api legacy\jaaz"
+    dependency_restore = @(
+      "npm --prefix legacy\core-api install",
+      "npm --prefix legacy\jaaz\react install",
+      "create legacy\services-api .venv only if a legacy reference run is explicitly required",
+      "create legacy\jaaz .venv only if a legacy reference run is explicitly required"
+    )
+    retained_manifest_verification = @(
+      ".\scripts\windows\verify-final-legacy-surface.ps1 -CoreApiRoot .\legacy\__missing-core-api -ServicesApiRoot .\legacy\__missing-services-api -LegacySurfaceManifestPath <retained-final-surface-manifest>",
+      ".\scripts\windows\verify-legacy-canonical-projection.ps1 -CoreApiRoot .\legacy\__missing-core-api -LegacyProjectionManifestPath <retained-projection-manifest>"
+    )
+    post_restore_gates = @(
+      ".\scripts\windows\verify-final-legacy-surface.ps1 -CoreApiRoot .\legacy\core-api -ServicesApiRoot .\legacy\services-api",
+      ".\scripts\windows\verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency",
+      "projection/P2/RC parser checks",
+      "full P2/RC only after generated dependencies and required runtime evidence are restored"
+    )
+  }
+  Add-Item $reviewItems "tracked-source-rollback-plan" "review" "Rollback path is documented for planning, but it is not yet an approval to delete tracked legacy source." $trackedSourceRollbackPlan
+}
 
 $quarantineSqlPath = Join-Path $planDir "legacy-cleanup-quarantine-dry-run.sql"
 $cleanupSqlPath = Join-Path $planDir "legacy-cleanup-candidate.sql"
@@ -510,10 +830,22 @@ $report = [ordered]@{
   phase = "S4-legacy-cleanup-dry-run"
   source_root = $RepoRoot
   env_file = $EnvFile
+  core_api_root = $CoreApiRoot
+  services_api_root = $ServicesApiRoot
+  jaaz_root = $JaazRoot
   database_url = Redact-DatabaseUrl $DatabaseUrl
+  assess_physical_source_removal_readiness = [bool]$AssessPhysicalSourceRemovalReadiness
+  preserve_protected_local_material_in_place = [bool]$PreserveProtectedLocalMaterialInPlace
+  assess_tracked_source_deletion_targets = [bool]$AssessTrackedSourceDeletionTargets
+  legacy_surface_manifest_path = $LegacySurfaceManifestPath
+  legacy_projection_manifest_path = $LegacyProjectionManifestPath
+  retained_evidence_root = $RetainedEvidenceRoot
   policy = [ordered]@{
     physical_cleanup_executed = $false
+    tracked_source_cleanup_executed = $false
+    local_data_cleanup_executed = $false
     canonical_runtime = ".NET 8 Control API + Windows Service workers + PostgreSQL canonical"
+    source_deletion_mode = "not authorized by default; explicit readiness mode may produce git-tracked-files-only candidates"
     cleanup_allowed_only_after = @("fresh backup", "restore drill", "fixed publish/restart/P0", "frontend hard gate", "P2 audit", "projection verifier", "wallet audit", "service ops drill", "README final acceptance evidence")
   }
   generated_sql = [ordered]@{
@@ -523,6 +855,10 @@ $report = [ordered]@{
   }
   cleanup_candidates = $cleanupCandidates
   retained_objects = $retainedObjects
+  protected_local_material = $protectedLocalMaterial
+  fixture_archive_plan = $fixtureArchivePlan
+  tracked_source_deletion_plan = $trackedSourceDeletionPlan
+  tracked_source_rollback_plan = $trackedSourceRollbackPlan
   database_inventory = $inventory
   execution_gates = $executionGates
   checks = $checks

@@ -1,6 +1,8 @@
 param(
   [string]$RepoRoot = "",
   [string]$CoreApiRoot = "",
+  [string]$LegacySurfaceManifestPath = "",
+  [string]$LegacyProjectionManifestPath = "",
   [string]$ReportPath = ""
 )
 
@@ -17,6 +19,20 @@ if (-not $CoreApiRoot) {
   $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
 }
 $CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
+
+if ($LegacySurfaceManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacySurfaceManifestPath)) {
+    $LegacySurfaceManifestPath = Join-Path $RepoRoot $LegacySurfaceManifestPath
+  }
+  $LegacySurfaceManifestPath = [System.IO.Path]::GetFullPath($LegacySurfaceManifestPath)
+}
+
+if ($LegacyProjectionManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacyProjectionManifestPath)) {
+    $LegacyProjectionManifestPath = Join-Path $RepoRoot $LegacyProjectionManifestPath
+  }
+  $LegacyProjectionManifestPath = [System.IO.Path]::GetFullPath($LegacyProjectionManifestPath)
+}
 
 if (-not $ReportPath) {
   $logDir = [Environment]::GetEnvironmentVariable("LOG_DIR", "Process")
@@ -148,6 +164,39 @@ function Read-TextFile {
   return Get-Content -LiteralPath $Path -Raw
 }
 
+function Read-JsonFile {
+  param(
+    [string]$Path,
+    [string]$ExpectedSchema,
+    [string]$Name,
+    [System.Collections.Generic.List[object]]$Checks,
+    [System.Collections.Generic.List[object]]$Blockers
+  )
+
+  if (-not $Path) {
+    Add-Item $Blockers $Name "missing" "$Name is required for explicit non-live legacy source verification."
+    return $null
+  }
+  if (-not (Test-Path -LiteralPath $Path)) {
+    Add-Item $Blockers $Name "missing" "$Name path does not exist." ([ordered]@{ path = Get-DisplayPath $Path })
+    return $null
+  }
+
+  try {
+    $json = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ([string]$json.schema -ne $ExpectedSchema) {
+      Add-Item $Blockers $Name "failed" "$Name schema must be '$ExpectedSchema'." ([ordered]@{ path = Get-DisplayPath $Path; actual = [string]$json.schema })
+      return $null
+    }
+
+    Add-Item $Checks $Name "ok" "$Name loaded with expected schema." ([ordered]@{ path = Get-DisplayPath $Path; schema = [string]$json.schema })
+    return $json
+  } catch {
+    Add-Item $Blockers $Name "failed" "$Name is not valid JSON." ([ordered]@{ path = Get-DisplayPath $Path; error = $_.Exception.Message })
+    return $null
+  }
+}
+
 $checks = New-List
 $blockers = New-List
 $warnings = New-List
@@ -254,15 +303,40 @@ $publishText = Read-TextFile (Join-Path $RepoRoot "scripts\windows\publish-runti
 $registerText = Read-TextFile (Join-Path $RepoRoot "scripts\windows\register-services.ps1")
 $p2Text = Read-TextFile (Join-Path $RepoRoot "scripts\windows\verify-p2-cutover-audit.ps1")
 $projectionText = Read-TextFile (Join-Path $CoreApiRoot "scripts\verify-legacy-canonical-projection.js")
+$legacySurfaceManifest = $null
+$legacyProjectionManifest = $null
+$coreApiSourceMissing = -not (Test-Path -LiteralPath (Join-Path $CoreApiRoot "src"))
+if ($coreApiSourceMissing -and ($LegacySurfaceManifestPath -or $LegacyProjectionManifestPath)) {
+  if ($LegacySurfaceManifestPath) {
+    $legacySurfaceManifest = Read-JsonFile `
+      -Path $LegacySurfaceManifestPath `
+      -ExpectedSchema "xiaolou-final-legacy-surface-manifest-v1" `
+      -Name "retained-final-legacy-surface-manifest" `
+      -Checks $checks `
+      -Blockers $blockers
+  }
+  if ($LegacyProjectionManifestPath) {
+    $legacyProjectionManifest = Read-JsonFile `
+      -Path $LegacyProjectionManifestPath `
+      -ExpectedSchema "xiaolou-legacy-canonical-projection-manifest-v1" `
+      -Name "retained-legacy-projection-manifest" `
+      -Checks $checks `
+      -Blockers $blockers
+  }
+}
 
 if ($serverText -match "CORE_API_COMPAT_READ_ONLY" -and $serverText -match "CORE_API_COMPAT_ROUTE_CLOSED" -and $serverText -match "CORE_API_COMPAT_READ_ONLY") {
   Add-Item $checks "core-api-readonly-middleware" "ok" "core-api server defaults to read-only compatibility and closes non-allowlisted routes."
+} elseif ($coreApiSourceMissing -and $legacySurfaceManifest -and [bool]$legacySurfaceManifest.core_api_default_public_allowlist.matched -and @($legacySurfaceManifest.core_api_final_route_defaults.missing_terms).Count -eq 0) {
+  Add-Item $checks "core-api-readonly-middleware" "ok" "core-api live source is removed; retained final legacy surface manifest preserves the read-only and route-closed boundary."
 } else {
   Add-Item $blockers "core-api-readonly-middleware" "missing" "core-api server must keep CORE_API_COMPAT_READ_ONLY and route-closed guards."
 }
 
 if ($postgresStoreText -match "Refusing to persist core-api legacy snapshot while CORE_API_COMPAT_READ_ONLY=1") {
   Add-Item $checks "core-api-persistence-guard" "ok" "core-api postgres store refuses legacy snapshot persistence in read-only mode."
+} elseif ($coreApiSourceMissing -and $legacySurfaceManifest) {
+  Add-Item $checks "core-api-persistence-guard" "ok" "core-api live source is removed; legacy postgres-store persistence code is absent from the configured source root."
 } else {
   Add-Item $blockers "core-api-persistence-guard" "missing" "core-api postgres store must refuse writes while CORE_API_COMPAT_READ_ONLY=1."
 }
@@ -287,6 +361,8 @@ if ($p2Text -match "core-api-compat-readonly" -and $p2Text -match "verify-core-a
 
 if ($projectionText -match "projectAdjacentHealth" -and $projectionText -match "apiCenterHealth") {
   Add-Item $checks "projection-verifier-health-gates" "ok" "Projection verifier still contains projectAdjacentHealth and apiCenterHealth."
+} elseif ($coreApiSourceMissing -and $legacyProjectionManifest -and @($legacyProjectionManifest.required_source_files).Count -gt 0) {
+  Add-Item $checks "projection-verifier-health-gates" "ok" "Projection live source is removed; retained projection manifest preserves the prior projection verifier source evidence."
 } else {
   Add-Item $blockers "projection-verifier-health-gates" "missing" "Projection verifier must keep projectAdjacentHealth and apiCenterHealth."
 }
@@ -304,6 +380,8 @@ $report = [ordered]@{
   status = $status
   source_root = $RepoRoot
   core_api_root = $CoreApiRoot
+  legacy_surface_manifest_path = $LegacySurfaceManifestPath
+  legacy_projection_manifest_path = $LegacyProjectionManifestPath
   policy = [ordered]@{
     canonical_runtime = ".NET 8 Control API + Windows Service workers + PostgreSQL canonical"
     legacy_allowed_only_for = @("core-api read-only compatibility", "frontend retired/dev guards", "legacy import/projection verification")

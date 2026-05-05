@@ -1,0 +1,30 @@
+{
+  "id": "40a5a4a7-b008-4e93-a6c4-c4bc083ee74c",
+  "title": "Untitled",
+  "nodes": [
+    {
+      "id": "96e5732f-fac1-451b-81aa-f6a3f24b8ea8",
+      "type": "Image",
+      "x": 1265.1256784499055,
+      "y": 1554.3891967724546,
+      "prompt": "",
+      "status": "idle",
+      "model": "vertex:gemini-3-pro-image-preview",
+      "imageModel": "vertex:gemini-3-pro-image-preview",
+      "aspectRatio": "1:1",
+      "resolution": "1K",
+      "parentIds": [],
+      "title": "图片"
+    }
+  ],
+  "groups": [],
+  "viewport": {
+    "x": 37.07650005661333,
+    "y": -163.37778965452685,
+    "zoom": 0.366929666761925
+  },
+  "updatedAt": "2026-04-29T03:08:43.649Z",
+  "createdAt": "2026-04-29T03:08:43.649Z",
+  "ownerActorId": "root_demo_001",
+  "ownerProjectId": "proj_demo_001"
+}

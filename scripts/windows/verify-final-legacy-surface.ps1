@@ -2,7 +2,9 @@ param(
   [string]$RepoRoot = "",
   [string]$CoreApiRoot = "",
   [string]$ServicesApiRoot = "",
-  [string]$ReportPath = ""
+  [string]$ReportPath = "",
+  [string]$LegacySurfaceManifestPath = "",
+  [string]$WriteLegacySurfaceManifestPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +27,24 @@ if (-not $ServicesApiRoot) {
   $ServicesApiRoot = Join-Path $RepoRoot $ServicesApiRoot
 }
 $ServicesApiRoot = [System.IO.Path]::GetFullPath($ServicesApiRoot)
+
+if ($LegacySurfaceManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacySurfaceManifestPath)) {
+    $LegacySurfaceManifestPath = Join-Path $RepoRoot $LegacySurfaceManifestPath
+  }
+  $LegacySurfaceManifestPath = [System.IO.Path]::GetFullPath($LegacySurfaceManifestPath)
+}
+
+if ($WriteLegacySurfaceManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($WriteLegacySurfaceManifestPath)) {
+    $WriteLegacySurfaceManifestPath = Join-Path $RepoRoot $WriteLegacySurfaceManifestPath
+  }
+  $WriteLegacySurfaceManifestPath = [System.IO.Path]::GetFullPath($WriteLegacySurfaceManifestPath)
+}
+
+if ($LegacySurfaceManifestPath -and $WriteLegacySurfaceManifestPath) {
+  throw "Use either -LegacySurfaceManifestPath or -WriteLegacySurfaceManifestPath, not both."
+}
 
 if (-not $ReportPath) {
   $logDir = [Environment]::GetEnvironmentVariable("LOG_DIR", "Process")
@@ -114,6 +134,20 @@ function Test-AllTerms {
   return $missing
 }
 
+function Get-JsonArray {
+  param([object]$Value)
+
+  if ($null -eq $Value) {
+    return @()
+  }
+
+  if ($Value -is [System.Array]) {
+    return @($Value)
+  }
+
+  return @($Value)
+}
+
 function Add-TermCheck {
   param(
     [string]$Name,
@@ -166,6 +200,16 @@ function Get-ServicesApiTextFiles {
 }
 
 $allowlistValue = "GET /healthz;GET /api/windows-native/status"
+$legacySurfaceManifestSchema = "xiaolou-final-legacy-surface-manifest-v1"
+$coreApiFinalRouteTerms = @(
+  'route("GET", "/api/tasks/stream"',
+  'envFlag("CORE_API_COMPAT_DISABLE_TASKS_STREAM", true)',
+  'compatRouteClosed("core-api legacy task stream is retired. Use the .NET control plane job APIs.")',
+  'routeWithStatus("POST", "/api/payments/wechat/notify"',
+  'routeWithStatus("POST", "/api/payments/alipay/notify"',
+  'envFlag("CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY", false)',
+  'CORE_API_COMPAT_ROUTE_CLOSED'
+)
 $allowedServiceNames = @(
   "XiaoLou-ControlApi",
   "XiaoLou-LocalModelWorker",
@@ -188,18 +232,36 @@ $readmePath = Join-Path $RepoRoot "README.md"
 $readmeZhPath = Join-Path $RepoRoot "README.zh-CN.md"
 $servicesApiPath = $ServicesApiRoot
 
-$serverText = Read-TextFile $serverPath
-$routesText = Read-TextFile $routesPath
+$legacySourceMode = if ($LegacySurfaceManifestPath) { "manifest" } else { "live" }
+$legacySurfaceManifest = $null
+$serverText = $null
+$routesText = $null
+if ($legacySourceMode -eq "live") {
+  $serverText = Read-TextFile $serverPath
+  $routesText = Read-TextFile $routesPath
+}
 $envExampleText = Read-TextFile $envExamplePath
 $publishText = Read-TextFile $publishPath
 $registerText = Read-TextFile $registerPath
 $readmeText = Read-TextFile $readmePath
 $readmeZhText = Read-TextFile $readmeZhPath
 
-if ($serverText -and $serverText -match ('DEFAULT_COMPAT_PUBLIC_ROUTE_ALLOWLIST\s*=\s*"' + [regex]::Escape($allowlistValue) + '"')) {
-  Add-Item $checks "core-api-default-public-allowlist" "ok" "core-api default public compatibility allowlist remains narrow."
-} else {
-  Add-Item $blockers "core-api-default-public-allowlist" "failed" "core-api/src/server.js must default CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST to '$allowlistValue'."
+if ($legacySourceMode -eq "manifest") {
+  $legacyManifestText = Read-TextFile $LegacySurfaceManifestPath
+  if ($null -eq $legacyManifestText) {
+    Add-Item $blockers "legacy-source-manifest-load" "missing" "Legacy surface manifest is required when -LegacySurfaceManifestPath is used."
+  } else {
+    try {
+      $legacySurfaceManifest = $legacyManifestText | ConvertFrom-Json
+      if ([string]$legacySurfaceManifest.schema -eq $legacySurfaceManifestSchema) {
+        Add-Item $checks "legacy-source-manifest-load" "ok" "Loaded retained legacy surface manifest." ([ordered]@{ manifest = Get-DisplayPath $LegacySurfaceManifestPath })
+      } else {
+        Add-Item $blockers "legacy-source-manifest-schema" "failed" "Legacy surface manifest schema must be '$legacySurfaceManifestSchema'." ([ordered]@{ actual = [string]$legacySurfaceManifest.schema })
+      }
+    } catch {
+      Add-Item $blockers "legacy-source-manifest-load" "failed" "Legacy surface manifest is not valid JSON." ([ordered]@{ error = $_.Exception.Message })
+    }
+  }
 }
 
 if ($envExampleText -and $envExampleText -match ('(?m)^CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=' + [regex]::Escape($allowlistValue) + '\s*$')) {
@@ -208,20 +270,68 @@ if ($envExampleText -and $envExampleText -match ('(?m)^CORE_API_COMPAT_PUBLIC_RO
   Add-Item $blockers "windows-env-public-allowlist" "failed" ".env.windows.example must keep CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=$allowlistValue."
 }
 
-Add-TermCheck `
-  -Name "core-api-final-route-defaults" `
-  -Text $routesText `
-  -Terms @(
-    'route("GET", "/api/tasks/stream"',
-    'envFlag("CORE_API_COMPAT_DISABLE_TASKS_STREAM", true)',
-    'compatRouteClosed("core-api legacy task stream is retired. Use the .NET control plane job APIs.")',
-    'routeWithStatus("POST", "/api/payments/wechat/notify"',
-    'routeWithStatus("POST", "/api/payments/alipay/notify"',
-    'envFlag("CORE_API_COMPAT_ENABLE_LEGACY_PAYMENT_NOTIFY", false)',
-    'CORE_API_COMPAT_ROUTE_CLOSED'
-  ) `
-  -OkDetail "core-api legacy task stream and legacy payment notify aliases default to closed." `
-  -FailedDetail "core-api/src/routes.js must keep F1 route closures as defaults."
+$coreApiAllowlistMatched = $false
+$coreApiRouteMissingTerms = @()
+$servicesApiScannedCount = 0
+$productionWordingHits = New-List
+
+if ($legacySourceMode -eq "manifest") {
+  if ($legacySurfaceManifest) {
+    $manifestAllowlist = $legacySurfaceManifest.core_api_default_public_allowlist
+    if ($manifestAllowlist -and [bool]$manifestAllowlist.matched -and [string]$manifestAllowlist.expected -eq $allowlistValue) {
+      Add-Item $checks "core-api-default-public-allowlist" "ok" "Manifest preserves the core-api default public compatibility allowlist."
+    } else {
+      Add-Item $blockers "core-api-default-public-allowlist" "failed" "Manifest must prove CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST stayed '$allowlistValue'."
+    }
+
+    $manifestRoutes = $legacySurfaceManifest.core_api_final_route_defaults
+    $manifestRouteTerms = @(Get-JsonArray $manifestRoutes.required_terms)
+    $missingRouteTerms = @(Get-JsonArray $manifestRoutes.missing_terms)
+    $manifestRouteTermGaps = @($coreApiFinalRouteTerms | Where-Object { $_ -notin $manifestRouteTerms })
+    if ($manifestRoutes -and $missingRouteTerms.Count -eq 0 -and $manifestRouteTermGaps.Count -eq 0) {
+      Add-Item $checks "core-api-final-route-defaults" "ok" "Manifest proves core-api legacy task stream and legacy payment notify aliases default to closed."
+    } else {
+      Add-Item $blockers "core-api-final-route-defaults" "failed" "Manifest must prove F1 route closures and legacy payment notify defaults." ([ordered]@{
+        missing_terms = $missingRouteTerms
+        required_term_gaps = $manifestRouteTermGaps
+      })
+    }
+
+    $manifestServicesScan = $legacySurfaceManifest.services_api_source_scan
+    $servicesApiScannedCount = [int]$manifestServicesScan.scanned_count
+    if ($manifestServicesScan -and $servicesApiScannedCount -gt 0) {
+      Add-Item $checks "services-api-source-scan" "ok" "Manifest records $servicesApiScannedCount legacy services API text file(s) scanned for production API wording."
+    } else {
+      Add-Item $blockers "services-api-source-scan" "missing" "Manifest must record at least one scanned legacy services API text file."
+    }
+
+    $manifestWording = $legacySurfaceManifest.services_api_production_api_wording
+    $manifestProductionWordingHits = @(Get-JsonArray $manifestWording.hits)
+    if ($manifestWording -and $manifestProductionWordingHits.Count -eq 0) {
+      Add-Item $checks "services-api-production-api-wording" "ok" "Manifest proves legacy services API no longer self-identifies as a production API."
+    } else {
+      Add-Item $blockers "services-api-production-api-wording" "failed" "Manifest must prove no 'production API' or 'Python production API' wording remains." ([ordered]@{ hits = $manifestProductionWordingHits })
+    }
+  }
+} else {
+  $coreApiAllowlistMatched = $serverText -and $serverText -match ('DEFAULT_COMPAT_PUBLIC_ROUTE_ALLOWLIST\s*=\s*"' + [regex]::Escape($allowlistValue) + '"')
+  if ($coreApiAllowlistMatched) {
+    Add-Item $checks "core-api-default-public-allowlist" "ok" "core-api default public compatibility allowlist remains narrow."
+  } else {
+    Add-Item $blockers "core-api-default-public-allowlist" "failed" "core-api/src/server.js must default CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST to '$allowlistValue'."
+  }
+
+  if ($null -eq $routesText) {
+    Add-Item $blockers "core-api-final-route-defaults" "missing" "core-api/src/routes.js must keep F1 route closures as defaults."
+  } else {
+    $coreApiRouteMissingTerms = @(Test-AllTerms $routesText $coreApiFinalRouteTerms)
+    if ($coreApiRouteMissingTerms.Count -eq 0) {
+      Add-Item $checks "core-api-final-route-defaults" "ok" "core-api legacy task stream and legacy payment notify aliases default to closed."
+    } else {
+      Add-Item $blockers "core-api-final-route-defaults" "failed" "core-api/src/routes.js must keep F1 route closures as defaults." ([ordered]@{ missing = $coreApiRouteMissingTerms })
+    }
+  }
+}
 
 Add-TermCheck `
   -Name "windows-env-core-api-final-flags" `
@@ -247,33 +357,63 @@ Add-TermCheck `
   -OkDetail "publish/register scripts preserve final core-api compatibility env values." `
   -FailedDetail "publish/register scripts must sync final core-api compatibility env values."
 
-$servicesApiFiles = @(Get-ServicesApiTextFiles $servicesApiPath)
-if ($servicesApiFiles.Count -eq 0) {
-  Add-Item $blockers "services-api-source-scan" "missing" "legacy services API reference contains no scannable text files."
-} else {
-  Add-Item $checks "services-api-source-scan" "ok" "Scanned $($servicesApiFiles.Count) legacy services API text file(s) for production API wording."
-}
+if ($legacySourceMode -eq "live") {
+  $servicesApiFiles = @(Get-ServicesApiTextFiles $servicesApiPath)
+  $servicesApiScannedCount = $servicesApiFiles.Count
+  if ($servicesApiFiles.Count -eq 0) {
+    Add-Item $blockers "services-api-source-scan" "missing" "legacy services API reference contains no scannable text files."
+  } else {
+    Add-Item $checks "services-api-source-scan" "ok" "Scanned $($servicesApiFiles.Count) legacy services API text file(s) for production API wording."
+  }
 
-$productionWordingHits = New-List
-foreach ($file in $servicesApiFiles) {
-  Add-CheckedFile $file.FullName
-  $lines = Get-Content -LiteralPath $file.FullName
-  for ($index = 0; $index -lt $lines.Count; $index++) {
-    $line = [string]$lines[$index]
-    if ($line -match "(?i)\b(Python\s+production\s+API|production\s+API)\b") {
-      $productionWordingHits.Add([ordered]@{
-        file = Get-DisplayPath $file.FullName
-        line = $index + 1
-        text = $line.Trim()
-      }) | Out-Null
+  foreach ($file in $servicesApiFiles) {
+    Add-CheckedFile $file.FullName
+    $lines = Get-Content -LiteralPath $file.FullName
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+      $line = [string]$lines[$index]
+      if ($line -match "(?i)\b(Python\s+production\s+API|production\s+API)\b") {
+        $productionWordingHits.Add([ordered]@{
+          file = Get-DisplayPath $file.FullName
+          line = $index + 1
+          text = $line.Trim()
+        }) | Out-Null
+      }
     }
+  }
+
+  if ($productionWordingHits.Count -eq 0) {
+    Add-Item $checks "services-api-production-api-wording" "ok" "legacy services API no longer self-identifies as a production API."
+  } else {
+    Add-Item $blockers "services-api-production-api-wording" "failed" "legacy services API must not contain 'production API' or 'Python production API' wording." ([ordered]@{ hits = $productionWordingHits })
   }
 }
 
-if ($productionWordingHits.Count -eq 0) {
-  Add-Item $checks "services-api-production-api-wording" "ok" "legacy services API no longer self-identifies as a production API."
-} else {
-  Add-Item $blockers "services-api-production-api-wording" "failed" "legacy services API must not contain 'production API' or 'Python production API' wording." ([ordered]@{ hits = $productionWordingHits })
+if ($WriteLegacySurfaceManifestPath) {
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $WriteLegacySurfaceManifestPath) | Out-Null
+  $legacySurfaceManifest = [ordered]@{
+    schema = $legacySurfaceManifestSchema
+    generated_at_utc = [DateTimeOffset]::UtcNow.ToString("O")
+    source_mode = "live"
+    core_api_root = Get-DisplayPath $CoreApiRoot
+    services_api_root = Get-DisplayPath $ServicesApiRoot
+    core_api_default_public_allowlist = [ordered]@{
+      expected = $allowlistValue
+      matched = [bool]$coreApiAllowlistMatched
+    }
+    core_api_final_route_defaults = [ordered]@{
+      required_terms = $coreApiFinalRouteTerms
+      missing_terms = $coreApiRouteMissingTerms
+    }
+    services_api_source_scan = [ordered]@{
+      scanned_count = $servicesApiScannedCount
+    }
+    services_api_production_api_wording = [ordered]@{
+      hits = $productionWordingHits
+    }
+    checked_files = $checkedFiles
+  }
+  $legacySurfaceManifest | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $WriteLegacySurfaceManifestPath -Encoding UTF8
+  Add-Item $checks "legacy-source-manifest-write" "ok" "Wrote retained legacy surface manifest for future non-live verification." ([ordered]@{ manifest = Get-DisplayPath $WriteLegacySurfaceManifestPath })
 }
 
 Add-TermCheck `
@@ -353,6 +493,9 @@ $report = [ordered]@{
     core_api_public_allowlist = $allowlistValue
     core_api_root = $CoreApiRoot
     services_api_root = $ServicesApiRoot
+    legacy_source_mode = $legacySourceMode
+    legacy_surface_manifest_path = $LegacySurfaceManifestPath
+    write_legacy_surface_manifest_path = $WriteLegacySurfaceManifestPath
   }
   checked_files = $checkedFiles
   checks = $checks

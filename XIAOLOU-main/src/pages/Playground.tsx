@@ -194,20 +194,27 @@ export default function Playground() {
     let cancelled = false;
     const refresh = async () => {
       try {
-        const [jobs, latestConversations] = await Promise.all([
-          loadActiveJobs(),
-          loadConversations(),
-        ]);
+        const jobs = await loadActiveJobs();
         if (cancelled) return;
 
-        if (activeConversation?.id) {
-          const current = latestConversations.find((item) => item.id === activeConversation.id);
-          if (current) setActiveConversation(current);
-          const response = await listPlaygroundMessages(activeConversation.id);
+        const selectedConversationId = activeConversation?.id || null;
+        const stillHasActiveJobs = jobs.some(isActiveChatJob);
+        const selectedConversationHasActiveJob = selectedConversationId
+          ? jobs.some((job) => isActiveChatJob(job) && job.conversationId === selectedConversationId)
+          : false;
+
+        if (selectedConversationId && (selectedConversationHasActiveJob || !stillHasActiveJobs)) {
+          const response = await listPlaygroundMessages(selectedConversationId);
           if (!cancelled) setMessages(response.items);
         }
 
-        if (!jobs.some(isActiveChatJob)) {
+        if (!stillHasActiveJobs) {
+          const latestConversations = await loadConversations();
+          if (cancelled) return;
+          if (selectedConversationId) {
+            const current = latestConversations.find((item) => item.id === selectedConversationId);
+            if (current) setActiveConversation(current);
+          }
           void loadMemories();
         }
       } catch (caught) {

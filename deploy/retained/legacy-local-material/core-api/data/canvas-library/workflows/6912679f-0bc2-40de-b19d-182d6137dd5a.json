@@ -1,0 +1,30 @@
+{
+  "id": "6912679f-0bc2-40de-b19d-182d6137dd5a",
+  "title": "Untitled",
+  "nodes": [
+    {
+      "id": "6104b626-1c96-4f69-b3be-e0a8dde2c133",
+      "type": "Video",
+      "x": 569.6666870117188,
+      "y": 362,
+      "prompt": "",
+      "status": "idle",
+      "model": "Banana Pro",
+      "aspectRatio": "Auto",
+      "resolution": "Auto",
+      "parentIds": [],
+      "title": "视频",
+      "videoModel": "vertex:veo-3.1-generate-001"
+    }
+  ],
+  "groups": [],
+  "viewport": {
+    "x": 0,
+    "y": -23.750045776367188,
+    "zoom": 1
+  },
+  "updatedAt": "2026-04-29T02:24:39.122Z",
+  "createdAt": "2026-04-29T02:24:39.122Z",
+  "ownerActorId": "root_demo_001",
+  "ownerProjectId": "proj_demo_001"
+}

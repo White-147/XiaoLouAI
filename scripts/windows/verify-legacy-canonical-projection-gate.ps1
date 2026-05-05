@@ -5,6 +5,7 @@ param(
   [string]$NodeExe = "",
   [string]$DatabaseUrl = "",
   [string]$ReportDir = "",
+  [string]$LegacyProjectionManifestPath = "",
   [string]$SchemaName = ""
 )
 
@@ -21,6 +22,13 @@ if (-not $CoreApiRoot) {
   $CoreApiRoot = Join-Path $RepoRoot $CoreApiRoot
 }
 $CoreApiRoot = [System.IO.Path]::GetFullPath($CoreApiRoot)
+
+if ($LegacyProjectionManifestPath) {
+  if (-not [System.IO.Path]::IsPathRooted($LegacyProjectionManifestPath)) {
+    $LegacyProjectionManifestPath = Join-Path $RepoRoot $LegacyProjectionManifestPath
+  }
+  $LegacyProjectionManifestPath = [System.IO.Path]::GetFullPath($LegacyProjectionManifestPath)
+}
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   $runtimeEnvFile = Join-Path $RepoRoot ".runtime\app\scripts\windows\.env.windows"
@@ -69,6 +77,34 @@ function Add-SearchPathToDatabaseUrl {
   return "$Url${separator}options=-c%20search_path%3D$Schema"
 }
 
+if (-not $ReportDir) {
+  $ReportDir = [Environment]::GetEnvironmentVariable("LOG_DIR", "Process")
+}
+if (-not $ReportDir) {
+  $ReportDir = Join-Path $RepoRoot ".runtime\xiaolou-logs"
+}
+New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
+
+if ($LegacyProjectionManifestPath) {
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  $verifyReport = Join-Path $ReportDir "legacy-canonical-projection-gate-manifest-$stamp.json"
+  & "$PSScriptRoot\verify-legacy-canonical-projection.ps1" `
+    -RepoRoot $RepoRoot `
+    -EnvFile $EnvFile `
+    -CoreApiRoot $CoreApiRoot `
+    -ReportPath $verifyReport `
+    -LegacyProjectionManifestPath $LegacyProjectionManifestPath | Out-Null
+
+  @{
+    status = "ok"
+    mode = "manifest"
+    verifyReport = $verifyReport
+    legacyProjectionManifestPath = $LegacyProjectionManifestPath
+    fixtureSeeded = $false
+  } | ConvertTo-Json -Depth 5
+  return
+}
+
 $NodeExe = Resolve-DTool $NodeExe "NODE_EXE" "D:\soft\program\nodejs\node.exe" "Node.js"
 if (-not (Test-Path -LiteralPath (Join-Path $CoreApiRoot "scripts\project-legacy-to-canonical.js"))) {
   throw "core-api projector not found under $CoreApiRoot"
@@ -80,14 +116,6 @@ if (-not $DatabaseUrl) {
 if (-not $DatabaseUrl -or $DatabaseUrl.Contains("change-me")) {
   $DatabaseUrl = "postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_test"
 }
-
-if (-not $ReportDir) {
-  $ReportDir = [Environment]::GetEnvironmentVariable("LOG_DIR", "Process")
-}
-if (-not $ReportDir) {
-  $ReportDir = Join-Path $RepoRoot ".runtime\xiaolou-logs"
-}
-New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
 
 if (-not $SchemaName) {
   $SchemaName = "legacy_projection_staging_$(Get-Date -Format "yyyyMMdd_HHmmss")_provider_video"

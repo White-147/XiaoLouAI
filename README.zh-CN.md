@@ -25,10 +25,12 @@ Windows + Celery 或 Redis Open Source on Windows 作为关键运行时依赖。
 ```text
 XIAOLOU-main/          React + Vite SPA；生产产物是 dist/
 control-plane-dotnet/  .NET 控制面和 Windows worker 项目
-legacy/core-api/       Node 兼容层与迁移参考
-legacy/services-api/   旧 Python API 参考；不是生产控制面
-legacy/jaaz/           上游 Jaaz / Agent Studio 参考；不是生产运行时
-legacy/                已归档的 legacy reference；不是生产运行时
+legacy/core-api/       历史 Node 兼容路径；source/root 已删除
+legacy/services-api/   历史 legacy Python reference 路径；source/root 已删除
+legacy/jaaz/           历史上游 Jaaz 路径；source/root 已删除
+legacy/                archived legacy references；当前无 live working-tree root
+legacy-surface-evidence/ 已脱敏的 retained manifest，用于非 live legacy source gate
+deploy/retained/legacy-local-material/ 非密钥 legacy 本地材料，供部署交接使用
 tools/video/video-replace-service/ 本地模型 / 视频替换参考代码
 deploy/caddy/          Windows Caddy 静态站点与 API 代理配置
 scripts/windows/       Windows 安装、服务、备份和运行脚本
@@ -40,9 +42,22 @@ Docker、Linux、Celery、Redis、RabbitMQ 或容器启动，也不能视为生�
 生产运维以本 README 和 `deploy/windows/ops-runbook.md` 为准。
 G2b-2 已把原根目录 legacy reference `core-api/` 和 `services/api/` 移动到
 `legacy/core-api` 与 `legacy/services-api`；G7d-3 已把原根目录上游 Jaaz
-reference 移动到 `legacy/jaaz`。这些归档路径仍只作为迁移参考：不要把它们
-注册为生产服务、反代后端、计划任务或控制面 working directory。未来删除不属于
-本契约，只有最终 legacy-surface 检查不再需要这些 reference 后才能作为独立决策处理。
+reference 移动到 `legacy/jaaz`。这些路径不能注册为生产服务、反代后端、计划任务
+或控制面 working directory。G11k 已按经过复核的 git-tracked 候选清单删除
+`legacy/core-api`、`legacy/services-api` 与 `legacy/jaaz` 下的 tracked legacy
+source；G11l 又把用户确认可随部署携带的非密钥本地材料移动到
+`deploy/retained/legacy-local-material/`，把真实 env/service-account 文件、命中
+secret-like app-state 的 demo SQLite，以及带非空 API-key 字段的 Jaaz config 移到被忽略的
+`deploy/local-secrets/legacy/`，
+删除日志、缓存和空目录，并在根 `.gitignore` 覆盖后删除剩余 tracked legacy
+`.gitignore`。`legacy-surface-evidence/` 保留已脱敏的 final-surface 和 projection
+manifest，用于显式非 live verifier 模式。cleanup dry-run 与 release candidate verifier
+会在 live legacy root 有意缺席时把这些 manifest 继续传给子 gate；reduced RC 仍是 warning
+evidence，不等同于完整最终验收。
+
+为保持 verifier 锚点清晰，最终定位不变：历史 `legacy/core-api` 角色是 Node
+兼容层与迁移参考，`legacy/services-api` 是旧 Python API 参考但不是生产控制面，
+`legacy/` 仍是 archived legacy references，而不是生产运行时。
 
 ## 开发启动
 
@@ -54,14 +69,10 @@ npm install
 npm run dev
 ```
 
-Legacy Node 兼容 API，仅用于本地只读对照和迁移期排查。默认归档路径是
-`legacy/core-api`；只有测试非标准本地副本时才需要覆盖 `LEGACY_CORE_API_ROOT`。
-
-```powershell
-cd legacy\core-api
-npm install
-npm run dev
-```
+Legacy Node 兼容源代码已不再作为 tracked working tree 的一部分。legacy-only
+launcher 默认会跳过缺失的 source root 或 generated dependency。若确实需要做历史
+只读对照，请从较早 git commit 把所需 legacy source 恢复到单独本地副本，在该副本
+中恢复依赖，并把 `LEGACY_CORE_API_ROOT` 指向该副本。
 
 .NET 控制面：
 
@@ -181,7 +192,10 @@ client permissions 进入运行态。组合 publish/restart/P0 已经加固，�
 - 真实对象存储凭据、CDN/WAF 凭据、生产域名 secret 和运营侧审计导出。
 
 已收集的 evidence 只能存放在部署机 `.runtime` 下，或运营侧受控 evidence 存储中。
-仓库可以保留脱敏示例、dry-run 报告、verifier 代码和 synthetic fixture，但不能保留真实材料。
+仓库可以保留脱敏示例、dry-run 报告、verifier 代码、synthetic fixture，以及
+`deploy/retained/legacy-local-material/` 下经确认可随部署携带的非密钥交接材料，
+但不能保留真实材料。本 checkout 的真实本地 secret 应留在被忽略的
+`deploy/local-secrets/` 或部署主机自己的 secret store 中，不能进入 Git。
 
 最终验收 evidence 在可获得时应包括：
 
@@ -210,10 +224,9 @@ evidence 模块跟踪，不作为源码仓库输入。
 
 当前 Windows-native Control API 的支付回调入口接收标准化 canonical JSON，并用
 `Payments:{provider}:WebhookSecret` / `X-XiaoLou-Signature` 做 HMAC 校验。原生支付宝
-RSA2 与微信支付 v3 输入由 `scripts/windows/` 下的 adapter/normalizer 工具链处理；旧的
-`legacy/core-api/src/payments/alipay.js` 与
-`legacy/core-api/src/payments/wechat.js` 只作为迁移参考，
-不是长期生产控制面。
+RSA2 与微信支付 v3 输入由 `scripts/windows/` 下的 adapter/normalizer 工具链处理。
+历史 legacy payment route evidence 由 `legacy-surface-evidence/` 保留；legacy
+source 不是生产控制面依赖。
 
 接入真实 provider 账号时：
 
@@ -249,9 +262,9 @@ RSA2 与微信支付 v3 输入由 `scripts/windows/` 下的 adapter/normalizer �
 - 支付回调必须幂等、验签，并通过 `account-finance` lane 写入不可变 `wallet_ledger`。
 - Jobs 通过 PostgreSQL `FOR UPDATE SKIP LOCKED` 租约执行；worker 不在内存中保存权威任务状态。
 - 媒体主存储是对象存储；Windows 本地目录只用于缓存和临时文件。
-- legacy reference 目录现在位于 `legacy/core-api` 与 `legacy/services-api`。
+- G11k 已在 manifest gates 和 deletion readiness 通过后删除 tracked legacy source。
   原根目录路径 `core-api/` 与 `services/api/` 不是生产控制面位置。新控制面工作归属
-  `control-plane-dotnet/`。任何临时兼容进程都应设置
+  `control-plane-dotnet/`。若从较早 commit 恢复临时兼容进程，仍必须设置
   `CORE_API_COMPAT_READ_ONLY=1`，避免旧 Node 路由继续接收写入。
 
 ## 交接
@@ -264,8 +277,8 @@ RSA2 与微信支付 v3 输入由 `scripts/windows/` 下的 adapter/normalizer �
 - G2b-2 归档记录和回滚路径见
   `docs/xiaolouai-legacy-physical-archive-contract.md`
 
-每次代码、脚本、配置、反代、运行态或 README 发生变更后，收尾前都要同步更新这两份
-handoff。使用 deep research 结构化阅读版把剩余工作保持为有限任务卡。如果旧的“下一轮执行顺序”已被新状态取代，必须在
+每次代码、脚本、配置、反代、运行态或 README 发生变更后，收尾前都要同步更新根
+handoff 和相关 docs handoff。使用 deep research 结构化阅读版把剩余工作保持为有限任务卡。如果旧的“下一轮执行顺序”已被新状态取代，必须在
 `docs/xiaolouai-finalization-handoff.md` 中标为历史记录，或替换为当前有效下一步。
 
 ## README 语言维护规则
