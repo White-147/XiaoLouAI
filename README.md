@@ -371,7 +371,7 @@ follow-up readiness items, not routine handoff blockers.
 
 ```text
 Status: parked until user testing, harnesses, fixtures, baselines and runtime budget exist.
-Current PR gate: only the minimal `CI / Build and static gates` job after its first green GitHub run.
+Current PR gate: `main` branch protection requires the GitHub Actions `Build and static gates` check only.
 Do not require yet: coverage thresholds, E2E, CodeQL, npm audit failure, dotnet vulnerability failure, standalone dotnet test when no *Tests*.csproj exists.
 Do not read or upload: .runtime, deploy/local-secrets, real env/provider/payment/object-storage/operator material, production dumps/snapshots, restore drills, or real payment replay captures.
 ```
@@ -379,7 +379,7 @@ Do not read or upload: .runtime, deploy/local-secrets, real env/provider/payment
 Deferred queue:
 
 ```text
-G13-post-1 branch-protection-enable: after the first green GitHub Actions run and with repository settings access, set the real `CI / Build and static gates` context as required; otherwise record that branch protection was not changed.
+G13-post-1 branch-protection-enable: done after first green GitHub Actions run. `main` branch protection requires only the GitHub Actions `Build and static gates` check; coverage, E2E, CodeQL, npm audit failure, dotnet vulnerability failure, deployment, and operator evidence remain non-required/deferred.
 G13-post-2 security-baseline-nonblocking-execution: completed a manual non-blocking baseline after allowlist/noise policy and secret boundary confirmation. The follow-up G13-post-2b package remediation updated the Vite/PostCSS lockfile/install resolution to Vite 6.4.2 and PostCSS 8.5.14; `npm audit --json` now reports 0 vulnerabilities. `dotnet list package --vulnerable --include-transitive` found no vulnerable packages across the solution/test projects, and CodeQL was not run because the local `codeql` CLI is unavailable. This remains advisory/non-required; no npm audit failure gate, workflow change, branch protection, or CI required security check has been added.
 G13-post-3 backend-test-harness-and-coverage-advisory: create a backend *Tests*.csproj, synthetic fixtures, auth/internal-token test boundary, DB/storage mocks or isolated test DB, then advisory coverage. Start with Health/Metrics/Auth helper.
 G13-post-4 frontend-test-harness-and-coverage-advisory: done for the first service-harness advisory baseline; `npm --prefix XIAOLOU-main run test:coverage:advisory` writes a non-required Vitest V8 json-summary/text report with no thresholds. Broader fetch/timer mocks and any required coverage gate remain deferred.

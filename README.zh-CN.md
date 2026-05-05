@@ -264,7 +264,7 @@ security/coverage/E2E 方案已经记录，frontend service harness 现在已有
 
 ```text
 Status: parked until user testing, harnesses, fixtures, baselines and runtime budget exist.
-Current PR gate: 仅在 GitHub 首次绿灯后要求最小 `CI / Build and static gates` job。
+Current PR gate: `main` branch protection 目前只要求 GitHub Actions 的 `Build and static gates` check。
 Do not require yet: coverage threshold、E2E、CodeQL、npm audit failure、dotnet vulnerability failure、无 *Tests*.csproj 时的 standalone dotnet test。
 Do not read or upload: .runtime、deploy/local-secrets、真实 env/provider/payment/object-storage/operator material、production dumps/snapshots、restore drills、真实 payment replay captures。
 ```
@@ -272,7 +272,7 @@ Do not read or upload: .runtime、deploy/local-secrets、真实 env/provider/pay
 延期队列：
 
 ```text
-G13-post-1 branch-protection-enable: GitHub Actions 首次绿灯且有 repository settings 权限后，把真实 `CI / Build and static gates` context 设为 required；否则只记录未修改 branch protection。
+G13-post-1 branch-protection-enable: 已在 GitHub Actions 首次绿灯后完成。`main` branch protection 只要求 GitHub Actions 的 `Build and static gates` check；coverage、E2E、CodeQL、npm audit failure、dotnet vulnerability failure、deployment 和 operator evidence 仍 non-required/deferred。
 G13-post-2 security-baseline-nonblocking-execution: 已在确认 allowlist/noise policy 和 secret boundary 后完成一次 manual non-blocking baseline。后续 G13-post-2b package remediation 已把 Vite/PostCSS lockfile/install resolution 更新为 Vite 6.4.2 和 PostCSS 8.5.14；`npm audit --json` 现在报告 0 vulnerabilities。`dotnet list package --vulnerable --include-transitive` 在 solution/test projects 中未发现 vulnerable package；本机没有 `codeql` CLI，因此未运行 CodeQL。该结果仍是 advisory/non-required；未新增 npm audit failure gate、workflow change、branch protection 或 CI required security check。
 G13-post-3 backend-test-harness-and-coverage-advisory: 先创建 backend *Tests*.csproj、synthetic fixtures、auth/internal-token test boundary、DB/storage mock 或隔离 test DB，再做 advisory coverage；第一批从 Health/Metrics/Auth helper 开始。
 G13-post-4 frontend-test-harness-and-coverage-advisory: 首批 service-harness advisory baseline 已完成；`npm --prefix XIAOLOU-main run test:coverage:advisory` 会输出非 required 的 Vitest V8 json-summary/text 报告且无阈值。更广的 fetch/timer mocks 和任何 required coverage gate 仍 deferred。
