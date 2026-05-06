@@ -116,6 +116,37 @@ describe("createAuthAccountService", () => {
     expect(parseJsonBody(calls[1])).toEqual(defaultsInput);
   });
 
+  it("uses scoped and encoded API-center vendor routes with stable request bodies", async () => {
+    const response = { id: "synthetic-vendor/model" };
+    const { calls, scopeCalls, service } = createServiceHarness({ response });
+
+    await expect(
+      service.saveApiCenterVendorApiKey("synthetic vendor/one", "synthetic-api-key"),
+    ).resolves.toBe(response);
+    await expect(service.testApiCenterVendorConnection("synthetic vendor/one")).resolves.toBe(response);
+    await expect(
+      service.updateApiVendorModel("synthetic vendor/one", "model/one", {
+        enabled: true,
+      }),
+    ).resolves.toBe(response);
+
+    expect(scopeCalls).toEqual([undefined, undefined, undefined]);
+    expect(calls[0].path).toBe(
+      "/api/api-center/vendors/synthetic%20vendor%2Fone/api-key?actorId=synthetic-actor",
+    );
+    expect(calls[0].init?.method).toBe("PUT");
+    expect(parseJsonBody(calls[0])).toEqual({ apiKey: "synthetic-api-key" });
+    expect(calls[1]).toEqual({
+      path: "/api/api-center/vendors/synthetic%20vendor%2Fone/test?actorId=synthetic-actor",
+      init: { method: "POST" },
+    });
+    expect(calls[2].path).toBe(
+      "/api/api-center/vendors/synthetic%20vendor%2Fone/models/model%2Fone?actorId=synthetic-actor",
+    );
+    expect(calls[2].init?.method).toBe("PUT");
+    expect(parseJsonBody(calls[2])).toEqual({ enabled: true });
+  });
+
   it("uses auth provider and login routes with synthetic credentials", async () => {
     const response = { actorId: "synthetic-actor" };
     const { calls, service } = createServiceHarness({ response });
@@ -217,5 +248,31 @@ describe("createAuthAccountService", () => {
         ownerId: "synthetic-organization",
       },
     ]);
+  });
+
+  it("returns organization wallets and rethrows non-not-found wallet failures", async () => {
+    const successHarness = createServiceHarness();
+
+    await expect(successHarness.service.getOrganizationWallet("synthetic-organization")).resolves.toEqual(
+      createSyntheticWallet("organization", "synthetic-organization"),
+    );
+    expect(successHarness.walletCalls).toEqual([
+      {
+        ownerType: "organization",
+        ownerId: "synthetic-organization",
+      },
+    ]);
+    expect(successHarness.emptyWalletCalls).toEqual([]);
+
+    const failure = new Error("synthetic wallet failure");
+    const failureHarness = createServiceHarness({
+      walletError: failure,
+      routeNotFoundError: new Error("different synthetic not found"),
+    });
+
+    await expect(failureHarness.service.getOrganizationWallet("synthetic-organization")).rejects.toThrow(
+      "synthetic wallet failure",
+    );
+    expect(failureHarness.emptyWalletCalls).toEqual([]);
   });
 });

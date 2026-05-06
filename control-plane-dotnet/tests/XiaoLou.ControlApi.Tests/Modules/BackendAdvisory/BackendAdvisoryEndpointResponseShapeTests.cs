@@ -1,0 +1,327 @@
+using System.Text;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Npgsql;
+using XiaoLou.ControlApi.Modules.Auth;
+using XiaoLou.ControlApi.Modules.InternalJobs;
+using XiaoLou.ControlApi.Modules.Media;
+using XiaoLou.ControlApi.Modules.Payments;
+using XiaoLou.ControlApi.Modules.Toolbox;
+using XiaoLou.Infrastructure.Postgres;
+using XiaoLou.Infrastructure.Storage;
+using Xunit;
+
+namespace XiaoLou.ControlApi.Tests.Modules.BackendAdvisory;
+
+public sealed class BackendAdvisoryEndpointResponseShapeTests
+{
+    [Theory]
+    [MemberData(nameof(AccountScopeDeniedPostRoutes))]
+    public async Task AccountScopedPostHandlers_ReturnStableForbiddenEnvelopeBeforeSyntheticStores(
+        string path,
+        string body)
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(app, HttpMethods.Post, path, body);
+
+        Assert.True(
+            response.StatusCode == StatusCodes.Status403Forbidden,
+            $"Expected 403 before synthetic stores, got {response.StatusCode} with body: {response.Body}");
+        Assert.Equal(
+            """{"error":"account scope is not authorized for this client token"}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task PaymentCallback_InvalidJson_ReturnsStableBadRequestBeforeLedger()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp(new PaymentCallbackOptions
+        {
+            AllowedProviders = "alipay,wechat",
+            RequireAllowedProvider = true,
+        });
+
+        var response = await InvokeJsonAsync(app, HttpMethods.Post, "/api/payments/callbacks/alipay", """{""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":"payment callback body must be normalized JSON before ledger processing","provider":"alipay"}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task PaymentCallback_ProviderMismatch_ReturnsStableBadRequestBeforeLedger()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp(new PaymentCallbackOptions
+        {
+            AllowedProviders = "alipay,wechat",
+            RequireAllowedProvider = true,
+        });
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/payments/callbacks/wechat",
+            """{"provider":"alipay","accountOwnerType":"user","accountOwnerId":"synthetic-owner"}""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":"payment callback provider mismatch","routeProvider":"wechat","bodyProvider":"alipay"}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task PaymentCallback_DisabledProvider_ReturnsStableForbiddenBeforeLedger()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp(new PaymentCallbackOptions
+        {
+            AllowedProviders = "alipay",
+            RequireAllowedProvider = true,
+        });
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/payments/callbacks/wechat",
+            """{"provider":"wechat","accountOwnerType":"user","accountOwnerId":"synthetic-owner"}""");
+
+        Assert.Equal(StatusCodes.Status403Forbidden, response.StatusCode);
+        Assert.Equal(
+            """{"error":"payment callback provider is not enabled","provider":"wechat"}""",
+            response.Body);
+    }
+
+    public static IEnumerable<object[]> AccountScopeDeniedPostRoutes()
+    {
+        yield return RouteBody(
+            "/api/media/upload-begin",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "idempotencyKey": "synthetic-upload",
+              "bucket": "synthetic-bucket",
+              "objectKey": "temp/synthetic-object.png",
+              "mediaType": "image"
+            }
+            """);
+        yield return RouteBody(
+            "/api/jobs",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "lane": "account-media",
+              "jobType": "synthetic-image",
+              "providerRoute": "synthetic-provider",
+              "payload": {}
+            }
+            """);
+        yield return RouteBody(
+            "/api/toolbox/translate-text",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "text": "synthetic source",
+              "targetLang": "zh",
+              "payload": {}
+            }
+            """);
+    }
+
+    private static WebApplication BuildSyntheticApp(PaymentCallbackOptions? paymentCallbackOptions = null)
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddSingleton<IOptions<ClientApiOptions>>(Options.Create(new ClientApiOptions
+        {
+            Token = "synthetic-client-token",
+            RequireConfiguredAccountGrant = true,
+            AllowedAccountOwnerIds = "user:allowed-owner",
+        }));
+        builder.Services.AddSingleton<IOptions<PaymentCallbackOptions>>(
+            Options.Create(paymentCallbackOptions ?? new PaymentCallbackOptions()));
+        builder.Services.AddSingleton(_ =>
+            new NpgsqlDataSourceBuilder(
+                "Host=127.0.0.1;Port=1;Username=synthetic;Password=synthetic;Database=xiaolou_synthetic;Timeout=1;Command Timeout=1;Pooling=false")
+            .Build());
+        builder.Services.AddSingleton<PostgresAccountStore>();
+        builder.Services.AddSingleton<PostgresWalletStore>();
+        builder.Services.AddSingleton<PostgresPaymentLedger>();
+        builder.Services.AddSingleton<PostgresMediaStore>();
+        builder.Services.AddSingleton<PostgresJobQueue>();
+        builder.Services.AddSingleton<PostgresJobNotificationListener>();
+        builder.Services.AddSingleton<PostgresOutboxStore>();
+        builder.Services.AddSingleton<PostgresToolboxStore>();
+        builder.Services.AddSingleton<IObjectStorageSigner, ThrowingObjectStorageSigner>();
+        builder.Services.AddSingleton<IPaymentSignatureVerifier, ThrowingPaymentSignatureVerifier>();
+
+        var app = builder.Build();
+        app.MapPaymentEndpoints();
+        app.MapMediaEndpoints();
+        app.MapInternalJobsEndpoints();
+        app.MapToolboxEndpoints();
+        return app;
+    }
+
+    private static async Task<RouteResponse> InvokeJsonAsync(
+        WebApplication app,
+        string method,
+        string path,
+        string body)
+    {
+        var route = FindRoute(app, method, path);
+        var context = new DefaultHttpContext
+        {
+            RequestServices = app.Services,
+        };
+        context.Features.Set<IHttpRequestBodyDetectionFeature>(new SyntheticRequestBodyDetectionFeature());
+        context.Request.Method = method;
+        context.Request.Path = path;
+        context.Request.ContentType = "application/json";
+        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
+        context.Request.ContentLength = context.Request.Body.Length;
+        ApplyRouteValues(context, route, path);
+        await using var responseBody = new MemoryStream();
+        context.Response.Body = responseBody;
+
+        await route.RequestDelegate!(context);
+
+        responseBody.Position = 0;
+        using var reader = new StreamReader(responseBody, Encoding.UTF8);
+        return new RouteResponse(
+            context.Response.StatusCode,
+            context.Response.ContentType,
+            await reader.ReadToEndAsync());
+    }
+
+    private static RouteEndpoint FindRoute(WebApplication app, string method, string path)
+    {
+        var exact = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => string.Equals(endpoint.RoutePattern.RawText, path, StringComparison.Ordinal))
+            .Where(endpoint =>
+                endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods.Contains(
+                    method,
+                    StringComparer.Ordinal) == true)
+            .ToArray();
+        if (exact.Length > 0)
+        {
+            return exact.Single();
+        }
+
+        return ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint =>
+                string.Equals(
+                    endpoint.RoutePattern.RawText,
+                    "/api/payments/callbacks/{provider}",
+                    StringComparison.Ordinal)
+                && path.StartsWith("/api/payments/callbacks/", StringComparison.Ordinal))
+            .Where(endpoint =>
+                endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods.Contains(
+                    method,
+                    StringComparer.Ordinal) == true)
+            .Single();
+    }
+
+    private static void ApplyRouteValues(DefaultHttpContext context, RouteEndpoint route, string path)
+    {
+        if (!string.Equals(
+                route.RoutePattern.RawText,
+                "/api/payments/callbacks/{provider}",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        context.Request.RouteValues["provider"] = path["/api/payments/callbacks/".Length..];
+    }
+
+    private static object[] RouteBody(string path, string body)
+    {
+        return new object[] { path, body };
+    }
+
+    private static EnvironmentVariableScope ClearSyntheticEnvironment()
+    {
+        return new EnvironmentVariableScope(
+            "CLIENT_API_TOKEN",
+            "CLIENT_API_TOKEN_HEADER",
+            "CLIENT_API_AUTH_PROVIDER",
+            "CLIENT_API_REQUIRE_AUTH_PROVIDER",
+            "CLIENT_API_REQUIRE_ACCOUNT_SCOPE",
+            "CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT",
+            "CLIENT_API_ALLOWED_ACCOUNT_IDS",
+            "CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS",
+            "CLIENT_API_ALLOWED_PERMISSIONS",
+            "ClientApi__AllowedPermissions",
+            "CONTROL_API_CLIENT_ASSERTION_PERMISSIONS",
+            "PAYMENT_CALLBACK_ALLOWED_PROVIDERS",
+            "PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER",
+            "PAYMENT_CALLBACK_ALLOWED_ACCOUNT_IDS",
+            "PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS",
+            "PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT");
+    }
+
+    private sealed class ThrowingObjectStorageSigner : IObjectStorageSigner
+    {
+        public SignedObjectUrl SignUpload(string bucket, string objectKey, TimeSpan expiresIn)
+        {
+            throw new InvalidOperationException("Synthetic response-shape tests must not sign uploads.");
+        }
+
+        public SignedObjectUrl SignRead(string bucket, string objectKey, TimeSpan expiresIn)
+        {
+            throw new InvalidOperationException("Synthetic response-shape tests must not sign reads.");
+        }
+    }
+
+    private sealed class ThrowingPaymentSignatureVerifier : IPaymentSignatureVerifier
+    {
+        public bool Verify(string provider, string rawBody, string? signature)
+        {
+            throw new InvalidOperationException("Synthetic response-shape tests must not verify payment signatures.");
+        }
+    }
+
+    private sealed class EnvironmentVariableScope : IDisposable
+    {
+        private readonly Dictionary<string, string?> previousValues = new(StringComparer.Ordinal);
+
+        public EnvironmentVariableScope(params string[] names)
+        {
+            foreach (var name in names)
+            {
+                previousValues[name] = Environment.GetEnvironmentVariable(name);
+                Environment.SetEnvironmentVariable(name, null);
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var (name, value) in previousValues)
+            {
+                Environment.SetEnvironmentVariable(name, value);
+            }
+        }
+    }
+
+    private sealed class SyntheticRequestBodyDetectionFeature : IHttpRequestBodyDetectionFeature
+    {
+        public bool CanHaveBody => true;
+    }
+
+    private sealed record RouteResponse(int StatusCode, string? ContentType, string Body);
+}
