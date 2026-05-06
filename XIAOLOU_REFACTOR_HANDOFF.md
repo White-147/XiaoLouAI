@@ -1,6 +1,6 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-05 22:23 +08
+更新时间：2026-05-06 09:59 +08
 工作目录：`D:\code\XiaoLouAI`
 
 本文件是后续每一棒的第一读取文件。根短棒只保留总进度、固定边界、当前 owner/队列提示词和验证入口；历史细节见 docs handoff：
@@ -59,40 +59,16 @@ G8 handoff-sync: done
 G9 operations-evidence-and-acceptance: done
 G10 postgres-performance-inventory-and-tuning: done
 G11 final-legacy-surface-and-physical-cleanup: done
-G12a backend-module-refactor: done
-G12b frontend-api-service-layer: done
-G12c domain-dto-contract-review: done
-G12d shared-helper-and-dependency-cleanup: done
-G12e test-harness-planning: done
-G12f test-harness-implementation: done
-G13-post-4 frontend-test-harness-and-coverage-advisory: done
-G13-post-4a frontend-coverage-report-advisory-script: done
-G13-post-4b api-compatibility-wrapper-runtime-tests: done
-G13-post-4c frontend-polling-stream-fake-timer-tests: done
-G13-post-4d frontend-synthetic-fixture-redaction-pack: done
-G13-post-5 synthetic-e2e-smoke-harness-precondition-plan: done
-G13-post-2 security-baseline-nonblocking-execution: done
-G13-post-2a npm-audit-vite-postcss-remediation-plan: done
-G13-post-2b npm-audit-vite-postcss-lockfile-update: done
-G13-post-1a ci-typecheck-fix-api-compat-wrapper-tests: done
-G13-post-1 branch-protection-enable: done
-G13-post-1b ci-actions-node24-runtime-update: done
-G13-post-5a synthetic-browser-e2e-harness-foundation: done
-G13-post-5b synthetic-browser-e2e-interaction-flows: done
-G13-post-5c synthetic-browser-e2e-runtime-baseline-and-flake-policy: done
-G13-post-5d synthetic-browser-e2e-advisory-green-accumulation: done
-G13-post-6-preflight required-gate-ratchet-plan-owner-signoff-record: done
-G13-post-6 required-gate-ratchet: done (`Build and static gates` plus `Synthetic browser E2E advisory` are required on `main`)
+G12 canonical module/service/test-harness refactor: done; detailed G12a-G12f task history is archived in docs\xiaolouai-finalization-handoff.md
+G13 CI/static/test-gate hardening through required synthetic E2E: done; detailed G13 and G13-post task history is archived in docs\xiaolouai-finalization-handoff.md
+Post-G13 advisory/monitor follow-ups: active queue remains split by owner; latest completed first passes are required-synthetic-e2e-stability-monitor, backend-advisory-coverage-expansion, and frontend-advisory-coverage-expansion, plus a second required-synthetic-e2e-stability-monitor pass through 2026-05-06 09:55 +08. Coverage remains advisory/non-required and branch protection was not expanded.
 ```
 
 ## 当前模块
 
 ```text
-Owner: G13 deferred CI/Test gate follow-up
-当前: G12a through G12f service/test-harness work remains complete. G13-post-5a/5b added the synthetic Playwright browser harness with synthetic auth/localStorage, intercepted synthetic Control API fixtures, fake storage/job mocks, production preview on 127.0.0.1:3100, system Chrome channel, and interaction coverage for login/register/create/upload/toolbox without real material. G13-post-5c captured the local runtime/flake baseline; G13-post-5d completed 5/5 effective non-blocking greens while treating the G13-post-5c burst as seed evidence only. G13-post-6-preflight recorded scope, rollback, and baseline-reset constraints. G13-post-6 then first added remote non-required `Synthetic browser E2E advisory` context/evidence, and after explicit owner signoff on 2026-05-05 promoted that existing GitHub Actions check context to required. Current `main` branch protection requires `Build and static gates` and `Synthetic browser E2E advisory`, both from GitHub Actions app id 15368, with strict up-to-date branches false, enforce admins false, no required PR review, no restrictions, no force pushes, and no deletions. npm audit reports 0 vulnerabilities; dotnet vulnerable scan found no vulnerable packages across solution/test projects, and CodeQL was not run because codeql CLI is not installed. No coverage threshold, npm audit required gate, dotnet vulnerable required gate, CodeQL gate, real fixture/material dependency, DTO/route/status/response/auth/exported-name/polling/transport/DB behavior change, api.ts wrapper deletion, or legacy evidence deletion was introduced.
-G13-post-5d evidence accumulation complete: effective greens are 5/5. Run 1: 2026-05-05 21:22 +08 local manual `npm --prefix .\XIAOLOU-main run test:e2e:synthetic`, 13/13 passed, outer PowerShell runtime 31.13s, no flake/timeout, counted. Run 2: 2026-05-05 21:30 +08 local manual same entry, 13/13 passed, Playwright reported 29.4s, outer PowerShell runtime 30.89s, no flake/timeout, counted. Run 3: 2026-05-05 21:36 +08 local manual same entry, 13/13 passed, Playwright reported 29.6s, outer PowerShell runtime 31.06s, no flake/timeout, counted. Run 4: 2026-05-05 21:45 +08 local manual same entry, 13/13 passed, Playwright reported 32.5s, outer PowerShell runtime 34.05s, no flake/timeout, counted. Run 5: 2026-05-05 21:55 +08 local manual same entry, 13/13 passed, Playwright reported 29.5s, outer PowerShell runtime 31.05s, no flake/timeout, counted. G13-post-5c's three-run burst remains seed/baseline evidence only. At G13-post-5d close, harness inventory was 13 tests in 2 files, latest Playwright `.last-run.json` status was passed with failedTests empty, legacy dependency gate was ok with blockers 0/warnings 0, latest ci.yml run 25373669120 was success, and main branch protection still required only `Build and static gates`. This did not change E2E harness, fixtures, Vite config, auth/session, create/upload/toolbox/polling code, CI required checks, or branch protection.
-G13-post-6 limited execution record: 2026-05-05 22:13 +08 owner signoff received to execute only the remote advisory context/evidence portion while preserving `Build and static gates` as the sole required check. Added a non-required GitHub Actions workflow named `Synthetic E2E Advisory` with job/check context `Synthetic browser E2E advisory`; it runs `npm --prefix .\XIAOLOU-main run test:e2e:synthetic` on windows-latest with Node 22 and Chrome channel, uploads no artifacts, and does not read real material. Remote run 25381961070 succeeded on commit 2e7c553 with `Synthetic browser E2E advisory` success and log evidence `13 passed (55.7s)`; required CI run 25381961063 succeeded on the same commit. Branch protection after execution still requires only `Build and static gates`; `Synthetic browser E2E advisory` is not required.
-G13-post-6 required promotion record: 2026-05-05 22:36 +08 owner explicitly asked to continue promoting synthetic E2E from advisory to required. Pre-promotion readback: branch protection required only `Build and static gates`; latest head 116b4c8 had successful GitHub Actions check-runs for `Build and static gates` (run 25382399379) and `Synthetic browser E2E advisory` (run 25382399392, 13 passed in 39.8s). Branch protection was updated via `required_status_checks` only; after readback, required contexts/checks are `Build and static gates` and `Synthetic browser E2E advisory`, both app id 15368, strict=false, enforce_admins=false, required PR reviews=false, restrictions=false, force pushes=false, deletions=false. Rollback owner/action: restore required checks to only `Build and static gates`, rerun protection/check readback, and record the rollback. No workflow/harness/fixture/Vite/auth/session/create/upload/toolbox/polling code changed and no real material was read or uploaded.
+Owner: next-owner-selection-pending（执行前先从当前可继续队列选择一个 owner）
+当前: G12/G13 已完成的详细阶段记录已归档到 docs\xiaolouai-finalization-handoff.md；根 handoff 只保留当前事实和可继续任务。当前没有单一默认 owner，但下方“当前可继续队列”中的 NEXT 项均可按显式选择继续。当前 `main` branch protection 要求两个 GitHub Actions required checks：`Build and static gates` 与 `Synthetic browser E2E advisory`，二者均来自 app id 15368。最新 required 后首轮远端验证在 commit 6229031 通过：Synthetic E2E Advisory run 25383164041 报告 13 passed (40.0s)，CI run 25383164073 success。2026-05-06 09:19 +08 required-synthetic-e2e-stability-monitor 本地采样先捕到 email-login 用例因 modal 动画稳定性等待导致 30s timeout、外层 74.52s；未回滚 branch protection，因为远端 required checks 仍为 success，随后仅将 synthetic harness 的登录按钮点击改为 forced click，targeted login 通过，完整 `test:e2e:synthetic` 13/13 通过（Playwright 30.5s，外层 32.30s）。2026-05-06 09:31 +08 backend-advisory-coverage-expansion 第一轮完成：新增 backend advisory route/method metadata 测试覆盖 Payments、Projects/canvas/create、Media、Toolbox、Playground、Jobs/outbox，并扩展 AuthHelpers synthetic account-scope/auth-provider grant 边界；`dotnet test` 184/184 通过，solution build 0 warnings/0 errors。2026-05-06 09:44 +08 frontend-advisory-coverage-expansion 第一轮完成：新增 synthetic browser fetch/download/cache/service-worker 边界 Vitest，覆盖 `guessMediaFilename`、`downloadMediaFile` same-origin/remote/data-URL/failure fallback 和 `retireStaticBuildServiceWorkers` scope/cache delete 行为；frontend lint、test:unit 57/57、test:coverage:advisory 57/57、build、legacy dependency gate 均通过；branch protection 读取仍未变。2026-05-06 09:55 +08 required-synthetic-e2e-stability-monitor 第二轮读取到远端 required checks 仍为 commit 6229031 success，branch protection 仍要求同两个 contexts；本机 `test:e2e:synthetic` 13/13 通过（Playwright 32.4s，外层 34.27s），legacy dependency gate status ok，未触发 rollback。当前未启用 coverage threshold、CodeQL required gate、npm audit failure gate、dotnet vulnerability failure gate、branch-up-to-date strict mode、enforce admins 或 required PR review。真实 auth/provider/payment/storage/operator material、production dump/snapshot、真实 DB fixture、真实 object storage 仍只作为最终验收或运营侧 evidence，不计入日常工程 blocker。
 规则: inventory first; 每轮只处理一个 owner；保留现有 route path、exported API names、response shapes、auth/permission/account-scope 行为；不在同轮引入 backend/frontend behavior、polling/transport/DB/DTO owner 变更。
 详细记录: docs\xiaolouai-finalization-handoff.md 和 docs\xiaolouai-deep-research-structured.md
 ```
@@ -100,54 +76,33 @@ G13-post-6 required promotion record: 2026-05-05 22:36 +08 owner explicitly aske
 ### 当前可继续队列
 
 ```text
-DONE G12a backend-module-refactor
-DONE G12b frontend-api-service-layer (G12b-1 through G12b-9)
-DONE G12c-1 dto-contract-inventory
-DONE G12c-2 dto-split-safe-contracts
-DONE G12c-3 contract-snapshot-or-openapi-plan
-DONE G12d-1 shared-helper-cleanup
-DONE G12d-2 dead-code-dependency-cleanup
-DONE G12e-1 backend-test-harness-plan
-DONE G12e-2 frontend-test-harness-plan
-DONE G12f-1 backend-test-harness-first-implementation
-DONE G12f-1b backend-health-metrics-no-db-tests
-DONE G12f-1c backend-authhelpers-client-token-synthetic-tests
-DONE G12f-2 frontend-test-harness-first-implementation
-DONE G12f-3 frontend-auth-account-service-tests
-DONE G12f-4 frontend-jobs-public-facade-tests
-DONE G12f-5 frontend-playground-nonstream-service-tests
-DONE G12f-6 frontend-media-upload-service-tests
-DONE G12f-7 frontend-toolbox-service-tests
-DONE G12f-8 frontend-wallet-payment-service-tests
-DONE G12f-9 frontend-projects-canvas-create-service-tests
-DONE G13-post-4 frontend-test-harness-and-coverage-advisory
-DONE G13-post-4a frontend-coverage-report-advisory-script
-DONE G13-post-4b api-compatibility-wrapper-runtime-tests
-DONE G13-post-4c frontend-polling-stream-fake-timer-tests
-DONE G13-post-4d frontend-synthetic-fixture-redaction-pack
-DONE G13-post-5 synthetic-e2e-smoke-harness-precondition-plan
-DONE G13-post-2 security-baseline-nonblocking-execution
-DONE G13-post-2a npm-audit-vite-postcss-remediation-plan
-DONE G13-post-2b npm-audit-vite-postcss-lockfile-update
-DONE G13-post-1a ci-typecheck-fix-api-compat-wrapper-tests
-DONE G13-post-1 branch-protection-enable (requires GitHub Actions Build and static gates on main)
-DONE G13-post-1b ci-actions-node24-runtime-update (workflow actions upgraded to Node 24-runtime major versions; project Node remains 22)
-DONE G13-post-5a synthetic-browser-e2e-harness-foundation (non-required Playwright synthetic browser smoke foundation)
-DONE G13-post-5b synthetic-browser-e2e-interaction-flows (login/register, create submit/poll, media fake PUT, toolbox run; synthetic only)
-DONE G13-post-5c synthetic-browser-e2e-runtime-baseline-and-flake-policy (3 consecutive local green runs; non-required)
-DONE G13-post-5d synthetic-browser-e2e-advisory-green-accumulation (5/5 effective non-blocking green rounds counted; G13-post-5c burst remains seed evidence)
-DONE G13-post-6-preflight required-gate-ratchet-plan-owner-signoff-record (plan/signoff recorded; original execution signoff absent, later limited signoff granted for remote advisory context only)
-DONE G13-post-6 required-gate-ratchet (`Synthetic browser E2E advisory` promoted to required alongside `Build and static gates`)
+NEXT required-synthetic-e2e-stability-monitor: continue observing the now-required `Synthetic browser E2E advisory` check on new pushes/PRs. If it flakes, times out, or blocks routine work without a product regression, rollback branch protection to only `Build and static gates`, reread protection/check state, and record the rollback.
+NEXT backend-advisory-coverage-expansion: first route/method metadata plus account-scope/auth-provider grant pass is done. Continue this owner only for deeper handler/store response-shape coverage with mocks/isolated synthetic fixtures; no real DB fixture, provider material, object storage, payment capture, or production dump.
+NEXT frontend-advisory-coverage-expansion: first synthetic browser fetch/download/cache/service-worker boundary pass is done. Continue this owner only for deeper service/fetch/timer boundaries with synthetic mocks; keep coverage advisory/non-required until stable baselines and owner signoff exist.
+NEXT coverage-threshold-preflight: after backend/frontend advisory coverage is broader and stable, design a narrow threshold plan for critical routes/services with rollback and owner signoff. Do not add thresholds directly.
+NEXT security-required-gate-preflight: npm audit is currently clean and dotnet vulnerable scan previously had no findings, but npm audit failure, dotnet vulnerability failure, and CodeQL remain non-required. Any required security gate needs noise policy, allowlist, remote runner evidence, and explicit owner signoff.
+NEXT branch-protection-hardening-review: optional policy review for strict up-to-date branches, enforce admins, and required PR reviews. Treat as a separate owner; do not change protection without explicit signoff and rollback record.
+```
+
+### 推荐下一棒顺序
+
+```text
+1. DEFAULT NEXT coverage-threshold-preflight: plan/preflight only. Backend and frontend advisory first passes are now present, so the next useful move is to inventory exact advisory coverage evidence and draft a narrow threshold proposal with rollback/signoff requirements. Do not add thresholds, workflow changes, or required checks in this owner.
+2. security-required-gate-preflight: plan/preflight only after coverage-threshold-preflight, or sooner only if the user explicitly asks for security. Keep npm audit failure, dotnet vulnerable failure, and CodeQL non-required until noise policy, allowlist, remote evidence, and owner signoff exist.
+3. required-synthetic-e2e-stability-monitor: run again on new pushes/PRs, before any required-gate/branch-protection mutation, or if the required `Synthetic browser E2E advisory` check flakes/times out. Otherwise treat it as a recurring guard, not the default next code owner.
+4. branch-protection-hardening-review: optional policy review only after explicit owner selection; do not change strict mode, enforce admins, required reviews, restrictions, force pushes, or deletions without signed before/after plus rollback.
+5. backend-advisory-coverage-expansion: continue only for deeper handler/store response-shape coverage with mocks/isolated synthetic fixtures.
+6. frontend-advisory-coverage-expansion: continue only for deeper service/fetch/timer boundaries with synthetic mocks.
 ```
 
 ### 下一棒提示词
 
 ```text
-当前没有无条件 READY NEXT owner。G13-post-6 required-gate-ratchet 已完成：`main` branch protection 现在要求 GitHub Actions `Build and static gates` 与 `Synthetic browser E2E advisory` 两个 required contexts/checks。先读取三份 handoff、README Deferred CI/Test Gate Follow-Up、当前 dirty worktree、G13-post-5a/5b/5c/5d/5d-completion/G13-post-6-preflight/G13-post-6 records、XIAOLOU-main test:e2e:synthetic/Playwright harness、backend/frontend route/type static scan records、legacy dependency gate、当前 CI/branch-protection 状态。
+当前默认下一棒是 `coverage-threshold-preflight`（只做 plan/preflight，不加阈值、不改 workflow、不改 required checks、不改 branch protection）。若用户显式指定其他 owner，则按指定 owner 执行；否则按“推荐下一棒顺序”从上到下选择第一个仍适用的 owner。下一棒先读取根 handoff、README Deferred CI/Test Gate Follow-Up、docs\xiaolouai-finalization-handoff.md 当前结论/队列、当前 dirty worktree、XIAOLOU-main test:e2e:synthetic/Playwright harness、backend/frontend route/type static scan records、legacy dependency gate、当前 CI/branch-protection 状态。
 
-当前 required-check scope 是 `Build and static gates` + `Synthetic browser E2E advisory`；不得继续新增 required check、workflow 或 branch protection 范围。若 synthetic required check 出现 flake/timeout 或无法稳定运行，优先按记录的 rollback owner/action 将 required checks 恢复为仅 `Build and static gates`，并重新读取 CI/protection 状态。
+执行前先明确选择一个 owner，并只处理该 owner：coverage-threshold-preflight、security-required-gate-preflight、required-synthetic-e2e-stability-monitor、branch-protection-hardening-review、backend-advisory-coverage-expansion、frontend-advisory-coverage-expansion。不要把多个 NEXT 项合并到同一棒；required-synthetic-e2e-stability-monitor 只在新 push/PR、required check 不稳定、或任何 required-gate/branch-protection mutation 前优先插队；backend/frontend advisory coverage 只在需要更深 synthetic mock coverage 时继续。
 
-任何后续 required gate 扩展仍必须重新签收并确认精确 check context、CI workflow/check-run 来源、branch-protection before/after、rollback owner、稳定证据、以及是否发生 harness/fixture/Vite config/auth/session/create/upload/toolbox/polling 变更导致 baseline 重置。保持 DTO、route path、status code、response shape、auth/permission/account-scope 行为、frontend exported API names、polling/transport/DB owner 不变；不删除 api.ts compatibility wrappers 或 legacy verifier/deploy evidence；不读取或上传真实 auth/provider/payment/storage/operator material、production dump/snapshot、真实 DB fixture 或真实 object storage。
+保持 DTO、route path、status code、response shape、auth/permission/account-scope 行为、frontend exported API names、polling/transport/DB owner 不变；不删除 api.ts compatibility wrappers 或 legacy verifier/deploy evidence；不读取或上传真实 auth/provider/payment/storage/operator material、production dump/snapshot、真实 DB fixture 或真实 object storage。任何 required gate 或 branch-protection 扩展都必须重新签收并确认精确 check context、CI workflow/check-run 来源、branch-protection before/after、rollback owner、稳定证据和 baseline-reset 条件。
 ```
 
 ## 输出要求
@@ -182,7 +137,7 @@ if ($testProjects.Count -gt 0) { foreach ($project in $testProjects) { dotnet te
 # 前端构建
 npm --prefix .\XIAOLOU-main run build
 
-# 非 required synthetic browser smoke（仅 G13-post-5a+ 合成 harness）
+# required synthetic browser E2E（合成 harness；check context: Synthetic browser E2E advisory）
 npm --prefix .\XIAOLOU-main run test:e2e:synthetic
 
 # 前端 legacy 依赖门禁

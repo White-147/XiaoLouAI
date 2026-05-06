@@ -255,17 +255,18 @@ source 不是生产控制面依赖。
 
 ## 延期 CI/测试门禁后续
 
-G13 当前能直接完成的 CI/static gate 工作已经完成：minimal GitHub Actions workflow
-已存在，frontend typecheck lint 已进入 CI，conditional `.NET` test 检测已经加固，
-security/coverage/E2E 方案已经记录，frontend service harness 现在已有非 required
-的 advisory coverage script。剩余 CI/test gate 仍需要 fixture、baseline、仓库设置
-权限、owner 签收或稳定运行时间预算后才能继续。处理方式与真实支付/provider 材料一致：
-这是后续 readiness 项，不是日常 handoff blocker。
+G13 当前能直接完成的 CI/static gate 工作已经完成：required GitHub Actions
+build/static gate 已存在，frontend typecheck lint 已进入 CI，conditional `.NET`
+test 检测已经加固，synthetic browser E2E 现在已是 required check，security/
+coverage 方案已经记录，frontend service harness 现在已有非 required 的 advisory
+coverage script。剩余 CI/test gate 仍需要 fixture、baseline、owner 签收或稳定运行
+时间预算后才能继续。处理方式与真实支付/provider 材料一致：这是后续 readiness
+项，不是日常 handoff blocker。
 
 ```text
 Status: synthetic browser E2E required gate ratchet 已完成。`main` 现在要求 `Build and static gates` 与 `Synthetic browser E2E advisory` 两个 required checks。
 Current PR gate: `main` branch protection 目前要求 GitHub Actions 的 `Build and static gates` 加 `Synthetic browser E2E advisory`，二者均来自 app id 15368。
-Do not require yet: coverage threshold、CodeQL、npm audit failure、dotnet vulnerability failure、无 *Tests*.csproj 时的 standalone dotnet test。
+Do not require yet: coverage threshold、CodeQL、npm audit failure、dotnet vulnerability failure，或现有 `Build and static gates` workflow 之外的 standalone test check。
 Do not read or upload: .runtime、deploy/local-secrets、真实 env/provider/payment/object-storage/operator material、production dumps/snapshots、restore drills、真实 payment replay captures。
 ```
 
@@ -274,12 +275,13 @@ Do not read or upload: .runtime、deploy/local-secrets、真实 env/provider/pay
 ```text
 G13-post-1 branch-protection-enable: 已在 GitHub Actions 首次绿灯后完成。该阶段 `main` branch protection 只要求 GitHub Actions 的 `Build and static gates` check；coverage、E2E、CodeQL、npm audit failure、dotnet vulnerability failure、deployment 和 operator evidence 当时仍 non-required/deferred，后续 synthetic E2E required promotion 另有 owner 签收记录。
 G13-post-2 security-baseline-nonblocking-execution: 已在确认 allowlist/noise policy 和 secret boundary 后完成一次 manual non-blocking baseline。后续 G13-post-2b package remediation 已把 Vite/PostCSS lockfile/install resolution 更新为 Vite 6.4.2 和 PostCSS 8.5.14；`npm audit --json` 现在报告 0 vulnerabilities。`dotnet list package --vulnerable --include-transitive` 在 solution/test projects 中未发现 vulnerable package；本机没有 `codeql` CLI，因此未运行 CodeQL。该结果仍是 advisory/non-required；未新增 npm audit failure gate、workflow change、branch protection 或 CI required security check。
-G13-post-3 backend-test-harness-and-coverage-advisory: 先创建 backend *Tests*.csproj、synthetic fixtures、auth/internal-token test boundary、DB/storage mock 或隔离 test DB，再做 advisory coverage；第一批从 Health/Metrics/Auth helper 开始。
-G13-post-4 frontend-test-harness-and-coverage-advisory: 首批 service-harness advisory baseline 已完成；`npm --prefix XIAOLOU-main run test:coverage:advisory` 会输出非 required 的 Vitest V8 json-summary/text 报告且无阈值。更广的 fetch/timer mocks 和任何 required coverage gate 仍 deferred。
-G13-post-5 synthetic-e2e-smoke-harness: foundation 和 interaction flows 已新增非 required 的 Playwright synthetic browser smoke script，使用 synthetic auth/localStorage、拦截式 synthetic Control API fixtures、fake storage/job mocks、3100 production preview，且不使用真实材料。当前覆盖 static route smoke、API-center client navigation、Playground synthetic requests、email login、personal registration、image create submit/job polling、asset fake PUT upload、toolbox synthetic route/job polling。2026-05-05 首轮本地 runtime baseline：连续 3 次 `test:e2e:synthetic` 均 13/13 通过，Playwright 报告 29.7-30.0s，外层 PowerShell 计时 31.07-31.88s。flake policy：保持 retries=0、workers=1；任何失败或单次超过 60s 都先人工调查；立即 rerun 不计入绿灯基线；CI required E2E 和 required gate promotion 仍等 repeated advisory 绿灯与 owner 签收后再推进。
+G13-post-3 backend-test-harness-and-coverage-advisory: backend xUnit harness 已存在于 `control-plane-dotnet/tests/XiaoLou.ControlApi.Tests`。2026-05-06 的 backend-advisory-coverage-expansion 第一轮已新增 Payments、Projects/canvas/create、Media、Toolbox、Playground、Jobs/outbox 的 synthetic/no-secret route+method metadata 覆盖，并补充 account-scope/auth-provider grant edge tests；最新本机 backend xUnit 184/184 通过。后续若继续深化 backend advisory coverage，只能使用 mock 或隔离 synthetic fixtures，不能使用真实 DB fixture、provider material、object storage、payment capture 或 production dump。
+G13-post-4 frontend-test-harness-and-coverage-advisory: 首批 service-harness advisory baseline 已完成，2026-05-06 的 frontend-advisory-coverage-expansion 第一轮又新增了 `guessMediaFilename`、`downloadMediaFile`、`retireStaticBuildServiceWorkers` 的 synthetic browser fetch/download/service-worker/cache 边界测试。最新本机 frontend 验证通过 lint、test:unit 57/57、test:coverage:advisory 57/57、build，以及 frontend legacy dependency gate status=ok、blockers 0/warnings 0。Coverage 仍是 advisory/non-required 且无阈值；更深的 fetch/timer/service boundaries 和任何 required coverage gate 仍需稳定 baseline 与 owner 签收后才能推进。
+G13-post-5 synthetic-e2e-smoke-harness: foundation 和 interaction flows 已新增 Playwright synthetic browser smoke script，使用 synthetic auth/localStorage、拦截式 synthetic Control API fixtures、fake storage/job mocks、3100 production preview，且不使用真实材料。当前覆盖 static route smoke、API-center client navigation、Playground synthetic requests、email login、personal registration、image create submit/job polling、asset fake PUT upload、toolbox synthetic route/job polling。2026-05-05 首轮本地 runtime baseline：连续 3 次 `test:e2e:synthetic` 均 13/13 通过，Playwright 报告 29.7-30.0s，外层 PowerShell 计时 31.07-31.88s。flake policy：保持 retries=0、workers=1；任何失败或单次超过 60s 都先人工调查；立即 rerun 不计入绿灯基线。G13-post-6 后续已把 synthetic E2E check 提升为 required。
 G13-post-5d synthetic-browser-e2e-advisory-green-accumulation: done。有效绿灯 5/5：2026-05-05 21:22 +08 本机 manual `npm --prefix .\XIAOLOU-main run test:e2e:synthetic`，13/13 passed，外层 runtime 31.13s，无 flake/timeout，计入有效绿灯；2026-05-05 21:30 +08 本机 manual 同一入口，13/13 passed，Playwright reported 29.4s，外层 runtime 30.89s，无 flake/timeout，计入有效绿灯；2026-05-05 21:36 +08 本机 manual 同一入口，13/13 passed，Playwright reported 29.6s，外层 runtime 31.06s，无 flake/timeout，计入有效绿灯；2026-05-05 21:45 +08 本机 manual 同一入口，13/13 passed，Playwright reported 32.5s，外层 runtime 34.05s，无 flake/timeout，计入有效绿灯；2026-05-05 21:55 +08 本机 manual 同一入口，13/13 passed，Playwright reported 29.5s，外层 runtime 31.05s，无 flake/timeout，计入有效绿灯。G13-post-5c 的连续 3 次本机运行仍只算 seed/baseline evidence。未改动 E2E harness、fixture、Vite config、auth/session、create/upload/toolbox、polling 代码、workflow、CI required check 或 branch protection。
 G13-post-6-preflight required-gate-ratchet-plan-owner-signoff-record: done。最初 preflight 建议 synthetic E2E 继续 advisory/non-required，随后 owner 分两次签收远端 evidence 与 required promotion。ratchet 回滚方案是把 branch protection 恢复为只要求 `Build and static gates`，从 required 列表移除 `Synthetic browser E2E advisory`，重新读取 CI/protection 状态，并同步 README 与 handoff。
 G13-post-6 required-gate-ratchet: done。新增 GitHub Actions workflow `.github/workflows/synthetic-e2e-advisory.yml`，check context 为 `Synthetic browser E2E advisory`；它在 windows-latest/Node 22/Chrome 上运行 `npm --prefix .\XIAOLOU-main run test:e2e:synthetic`，不上传 artifact。promotion 前远端 evidence：commit 2e7c553 上的 run 25381961070 success，13 passed，runtime 55.7s；commit 116b4c8 上的 run 25382399392 success，13 passed，runtime 39.8s；同一 head 的 required CI run 25382399379 也 success。2026-05-05 22:36 +08 已只通过 `required_status_checks` 执行 required promotion：branch protection 现在要求 `Build and static gates` 与 `Synthetic browser E2E advisory`，二者 app id 均为 15368，strict=false，enforce_admins=false，required PR reviews=false，restrictions=false，force pushes=false，deletions=false。
+G13-post-6a required-synthetic-e2e-stability-monitor: 2026-05-06 最新两轮监控均读取到 commit 6229031 上两个 required checks 仍为 green，因此 branch protection 未回滚。第一轮本机 synthetic run 捕到 email-login 用例 timeout，原因是 Playwright 在等待带动画 auth modal 内的登录按钮达到 stable；本轮只把该 synthetic harness 的既有登录按钮点击改为 forced click。修复后 targeted login 通过，完整 `test:e2e:synthetic` 13/13 通过，Playwright reported 30.5s，外层 PowerShell 32.30s。第二轮 09:55 +08 本机完整 `test:e2e:synthetic` 13/13 通过，Playwright reported 32.4s，外层 PowerShell 34.27s；frontend legacy dependency gate 仍为 `status=ok`、blockers 0、warnings 0，未触发 rollback 条件。
 ```
 
 PowerShell 读取入口：

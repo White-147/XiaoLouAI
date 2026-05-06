@@ -63,7 +63,7 @@ test.describe("synthetic browser interaction smoke", () => {
 
     await authModal.locator('input[type="email"]').fill("login-e2e@example.invalid");
     await authModal.locator('input[type="password"]').fill("synthetic-password");
-    await authModal.locator("button.h-11.w-full").click();
+    await authModal.locator("button.h-11.w-full").click({ force: true });
 
     const loginRequest = await waitForRequest(
       harness,

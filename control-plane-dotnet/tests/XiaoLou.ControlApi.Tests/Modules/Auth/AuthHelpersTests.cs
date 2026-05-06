@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using XiaoLou.ControlApi.Modules.Auth;
+using XiaoLou.Domain;
 using Xunit;
 
 namespace XiaoLou.ControlApi.Tests.Modules.Auth;
@@ -288,6 +289,143 @@ public sealed class AuthHelpersTests
         Assert.Equal(expected, AuthHelpers.GetRequiredClientPermission(context));
     }
 
+    [Fact]
+    public void ResolvePublicOwnerScope_DefaultsToUserActorAndCnCny()
+    {
+        var context = NewHttpContext("GET", "/api/projects");
+        context.Request.Headers["X-Actor-Id"] = "  synthetic-actor  ";
+
+        var scope = AuthHelpers.ResolvePublicOwnerScope(context, null, null);
+
+        Assert.Null(scope.AccountId);
+        Assert.Equal("user", scope.AccountOwnerType);
+        Assert.Equal("synthetic-actor", scope.AccountOwnerId);
+        Assert.Equal("CN", scope.RegionCode);
+        Assert.Equal("CNY", scope.Currency);
+    }
+
+    [Fact]
+    public void ResolvePublicOwnerScope_UsesOrganizationModeAndExplicitOwner()
+    {
+        var context = NewHttpContext("POST", "/api/canvas-projects");
+
+        var scope = AuthHelpers.ResolvePublicOwnerScope(
+            context,
+            accountOwnerType: null,
+            accountOwnerId: "  tenant-1  ",
+            mode: "organization");
+
+        Assert.Equal("organization", scope.AccountOwnerType);
+        Assert.Equal("tenant-1", scope.AccountOwnerId);
+        Assert.Equal("CN", scope.RegionCode);
+        Assert.Equal("CNY", scope.Currency);
+    }
+
+    [Fact]
+    public void AuthorizeAccountScope_RequiresConfiguredOwnerGrantWhenEnabled()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var context = NewHttpContext("POST", "/api/projects");
+        var options = new ClientApiOptions
+        {
+            Token = "synthetic-client-token",
+            RequireConfiguredAccountGrant = true,
+            AllowedAccountOwnerIds = "user:allowed-owner",
+        };
+        var scope = new AccountScope
+        {
+            AccountOwnerType = "user",
+            AccountOwnerId = "denied-owner",
+        };
+
+        var result = InspectResult(AuthHelpers.AuthorizeAccountScope(context, options, scope)!);
+
+        Assert.Equal(StatusCodes.Status403Forbidden, result.StatusCode);
+        Assert.Equal(
+            """{"error":"account scope is not authorized for this client token"}""",
+            result.Body);
+    }
+
+    [Fact]
+    public void AuthorizeAccountScope_AllowsConfiguredOwnerWildcard()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var context = NewHttpContext("POST", "/api/agent-canvas/projects");
+        var options = new ClientApiOptions
+        {
+            Token = "synthetic-client-token",
+            RequireConfiguredAccountGrant = true,
+            AllowedAccountOwnerIds = "organization:*",
+        };
+        var scope = new AccountScope
+        {
+            AccountOwnerType = "organization",
+            AccountOwnerId = "tenant-1",
+        };
+
+        Assert.Null(AuthHelpers.AuthorizeAccountScope(context, options, scope));
+    }
+
+    [Fact]
+    public void AuthorizeAccountId_UsesConfiguredAccountIdGrant()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var allowedAccountId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var deniedAccountId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var context = NewHttpContext("POST", "/api/media/signed-read-url");
+        var options = new ClientApiOptions
+        {
+            Token = "synthetic-client-token",
+            RequireConfiguredAccountGrant = true,
+            AllowedAccountIds = allowedAccountId.ToString("D"),
+        };
+
+        Assert.Null(AuthHelpers.AuthorizeAccountId(context, options, allowedAccountId));
+        var denied = InspectResult(AuthHelpers.AuthorizeAccountId(context, options, deniedAccountId)!);
+        Assert.Equal(StatusCodes.Status403Forbidden, denied.StatusCode);
+        Assert.Equal(
+            """{"error":"account scope is not authorized for this client token"}""",
+            denied.Body);
+    }
+
+    [Fact]
+    public void AuthorizeAccountScope_RequiresAuthProviderPrincipalGrantBeforeConfiguredGrant()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var context = NewHttpContext("POST", "/api/jobs");
+        context.Items[ClientPrincipal.ItemKey] = new ClientPrincipal(
+            Subject: "provider-subject",
+            FromAuthProvider: true,
+            AllowedAccountIds: null,
+            AllowedAccountOwnerIds: "organization:tenant-1",
+            AllowedPermissions: "jobs:*");
+        var options = new ClientApiOptions
+        {
+            AuthProvider = "hs256-jwt",
+            RequireConfiguredAccountGrant = true,
+            AllowedAccountOwnerIds = "organization:tenant-1",
+        };
+        var scope = new AccountScope
+        {
+            AccountOwnerType = "organization",
+            AccountOwnerId = "tenant-1",
+        };
+
+        Assert.Null(AuthHelpers.AuthorizeAccountScope(context, options, scope));
+
+        var deniedOptions = new ClientApiOptions
+        {
+            AuthProvider = "hs256-jwt",
+            RequireConfiguredAccountGrant = true,
+            AllowedAccountOwnerIds = "organization:other-tenant",
+        };
+        var denied = InspectResult(AuthHelpers.AuthorizeAccountScope(context, deniedOptions, scope)!);
+        Assert.Equal(StatusCodes.Status403Forbidden, denied.StatusCode);
+        Assert.Equal(
+            """{"error":"account scope is not authorized for this client token"}""",
+            denied.Body);
+    }
+
     [Theory]
     [InlineData("GET", "/api/jobs", true)]
     [InlineData("POST", "/api/toolbox/translate-text", true)]
@@ -381,6 +519,10 @@ public sealed class AuthHelpersTests
             "CLIENT_API_TOKEN_HEADER",
             "CLIENT_API_AUTH_PROVIDER",
             "CLIENT_API_REQUIRE_AUTH_PROVIDER",
+            "CLIENT_API_REQUIRE_ACCOUNT_SCOPE",
+            "CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT",
+            "CLIENT_API_ALLOWED_ACCOUNT_IDS",
+            "CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS",
             "CLIENT_API_ALLOWED_PERMISSIONS",
             "ClientApi__AllowedPermissions",
             "CONTROL_API_CLIENT_ASSERTION_PERMISSIONS");
