@@ -30,7 +30,7 @@ internal static class ProjectEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -68,7 +68,7 @@ internal static class ProjectEndpoints
                 RegionCode = scope.RegionCode,
                 Currency = scope.Currency,
             };
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -83,17 +83,13 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
 
+            var project = projectAccess.Project!;
             return Results.Ok(project);
         });
 
@@ -105,13 +101,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var existing = await projects.GetProjectAsync(projectId, ct);
-            if (existing is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, existing) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -127,13 +118,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -149,13 +135,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -171,13 +152,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -192,13 +168,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -214,13 +185,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -235,13 +201,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -257,13 +218,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -279,13 +235,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -301,13 +252,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -324,13 +270,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -350,13 +291,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -375,13 +311,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -398,13 +329,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -420,13 +346,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -444,13 +365,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -469,13 +385,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -491,13 +402,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -514,13 +420,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -538,13 +439,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -561,13 +457,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -585,13 +476,8 @@ internal static class ProjectEndpoints
             PostgresProjectSurfaceStore projects,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
@@ -608,17 +494,13 @@ internal static class ProjectEndpoints
             PostgresJobQueue jobs,
             CancellationToken ct) =>
         {
-            var project = await projects.GetProjectAsync(projectId, ct);
-            if (project is null)
-            {
-                return Results.NotFound(new { error = "project not found" });
-            }
-
-            if (AuthorizeAccountRow(httpContext, clientApi.Value, project) is { } denied)
+            var projectAccess = await LoadAuthorizedProjectAsync(projectId, httpContext, clientApi.Value, projects.GetProjectAsync, ct);
+            if (projectAccess.Error is { } denied)
             {
                 return denied;
             }
 
+            var project = projectAccess.Project!;
             var format = ReadJsonString(request, "format") ?? "mp4";
             var payload = request.ValueKind == JsonValueKind.Object
                 ? JsonSerializer.Deserialize<Dictionary<string, object?>>(request.GetRawText(), ProjectJsonOptions) ?? new Dictionary<string, object?>()
@@ -912,5 +794,46 @@ internal static class ProjectEndpoints
         });
 
         return endpoints;
+    }
+
+    internal static async Task<AuthorizedProjectResult> LoadAuthorizedProjectAsync(
+        string projectId,
+        HttpContext httpContext,
+        ClientApiOptions clientApi,
+        Func<string, CancellationToken, Task<Dictionary<string, object?>?>> loadProjectAsync,
+        CancellationToken cancellationToken)
+    {
+        var project = await loadProjectAsync(projectId, cancellationToken);
+        if (project is null)
+        {
+            return AuthorizedProjectResult.Denied(ProjectNotFound());
+        }
+
+        if (AuthorizeAccountRow(httpContext, clientApi, project) is { } denied)
+        {
+            return AuthorizedProjectResult.Denied(denied);
+        }
+
+        return AuthorizedProjectResult.Allowed(project);
+    }
+
+    private static IResult ProjectNotFound()
+    {
+        return Results.NotFound(new { error = "project not found" });
+    }
+
+    internal sealed record AuthorizedProjectResult(
+        Dictionary<string, object?>? Project,
+        IResult? Error)
+    {
+        internal static AuthorizedProjectResult Allowed(Dictionary<string, object?> project)
+        {
+            return new AuthorizedProjectResult(project, null);
+        }
+
+        internal static AuthorizedProjectResult Denied(IResult error)
+        {
+            return new AuthorizedProjectResult(null, error);
+        }
     }
 }

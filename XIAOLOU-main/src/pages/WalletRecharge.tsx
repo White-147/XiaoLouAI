@@ -35,6 +35,10 @@ import {
   type WalletRechargeScene,
 } from "../lib/api";
 import { cn } from "../lib/utils";
+import {
+  filterWalletsForRecharge,
+  resolveWalletEntitlement,
+} from "../lib/wallet-entitlements";
 
 type BillingCycle = "monthly" | "annual" | "oneTime";
 type Plan = {
@@ -174,17 +178,6 @@ function isMobileViewport() {
   return window.matchMedia("(max-width: 768px)").matches || /Mobi|Android|iPhone/i.test(window.navigator.userAgent);
 }
 
-function resolveVisibleWallets(wallets: WalletInfo[], me: PermissionContext | null) {
-  if (!me || !wallets.length) return wallets;
-  const isEnterprise =
-    me.currentOrganizationRole === "enterprise_admin" || me.currentOrganizationRole === "enterprise_member";
-  if (isEnterprise) {
-    const organizationWallets = wallets.filter((wallet) => wallet.ownerType === "organization");
-    return organizationWallets.length ? organizationWallets : wallets;
-  }
-  return wallets.filter((wallet) => wallet.ownerType !== "organization");
-}
-
 function findMethodCapability(
   capabilities: WalletRechargeCapabilities | null,
   paymentMethod: WalletRechargePaymentMethod,
@@ -265,7 +258,11 @@ export default function WalletRecharge() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const selectedPlan = useMemo(() => PLANS.find((item) => item.id === selectedPlanId) ?? PLANS[0], [selectedPlanId]);
-  const visibleWallets = useMemo(() => resolveVisibleWallets(wallets, me), [wallets, me]);
+  const walletEntitlement = useMemo(() => resolveWalletEntitlement(me), [me]);
+  const visibleWallets = useMemo(
+    () => filterWalletsForRecharge(wallets, walletEntitlement),
+    [wallets, walletEntitlement],
+  );
   const selectedWallet = useMemo(
     () => visibleWallets.find((wallet) => wallet.id === selectedWalletId) ?? visibleWallets[0] ?? null,
     [selectedWalletId, visibleWallets],
@@ -283,17 +280,21 @@ export default function WalletRecharge() {
   const loadContext = async () => {
     setLoading(true);
     try {
-      const [meResponse, walletResponse, capabilityResponse] = await Promise.all([
+      const [meResponse, capabilityResponse] = await Promise.all([
         getMe(),
-        listWallets(),
         getWalletRechargeCapabilities(),
       ]);
+      const entitlement = resolveWalletEntitlement(meResponse);
+      const walletResponse =
+        entitlement.canRecharge && entitlement.ownerType && entitlement.ownerId
+          ? await listWallets(entitlement.ownerType, entitlement.ownerId)
+          : { items: [] as WalletInfo[] };
 
       setMe(meResponse);
       setWallets(walletResponse.items);
       setCapabilities(capabilityResponse);
 
-      const visible = resolveVisibleWallets(walletResponse.items, meResponse);
+      const visible = filterWalletsForRecharge(walletResponse.items, entitlement);
       setSelectedWalletId((current) => (visible.some((wallet) => wallet.id === current) ? current : visible[0]?.id ?? null));
 
       setPaymentMode((current) => {
@@ -318,7 +319,10 @@ export default function WalletRecharge() {
   }, []);
 
   useEffect(() => {
-    if (!selectedWallet?.id) return;
+    if (!selectedWallet?.id) {
+      setLedger([]);
+      return;
+    }
     void listWalletLedger(selectedWallet.id).then((response) => setLedger(response.items.slice(0, 5)));
   }, [selectedWallet?.id]);
 
@@ -670,7 +674,7 @@ export default function WalletRecharge() {
                 <div>
                   <h3 className="text-base font-semibold text-foreground">充值钱包</h3>
                   <p className="text-xs text-muted-foreground">
-                    {loading ? "加载中..." : `${formatRole(me)} · ${visibleWallets.length} 个可用钱包`}
+                    {loading ? "加载中..." : `${walletEntitlement.displayLabel} · ${visibleWallets.length} 个可充值钱包`}
                   </p>
                 </div>
               </div>
@@ -705,7 +709,7 @@ export default function WalletRecharge() {
                 </div>
               ) : (
                 <div className="mt-5 rounded-2xl border border-dashed border-border/70 px-4 py-5 text-sm text-muted-foreground">
-                  当前账号下没有可充值的钱包。
+                  {walletEntitlement.emptyRechargeMessage}
                 </div>
               )}
             </div>
@@ -1094,7 +1098,7 @@ export default function WalletRecharge() {
 
               <button
                 type="button"
-                disabled={creating || loading}
+                disabled={creating || loading || !walletEntitlement.canRecharge || !selectedWallet?.id}
                 onClick={() => void handleCreateOrder()}
                 className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
               >

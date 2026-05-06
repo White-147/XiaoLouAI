@@ -97,16 +97,6 @@ www.example.com {
 		reverse_proxy 127.0.0.1:4100
 	}
 
-	# Legacy provider callback aliases are exposed only for payment-provider
-	# cutover compatibility. Frontend legacy writes stay blocked below.
-	handle /api/payments/alipay/notify {
-		reverse_proxy 127.0.0.1:4100
-	}
-
-	handle /api/payments/wechat/notify {
-		reverse_proxy 127.0.0.1:4100
-	}
-
 	handle /api/media/upload-begin {
 		reverse_proxy 127.0.0.1:4100
 	}

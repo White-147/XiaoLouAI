@@ -12,8 +12,18 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getCurrentActorId, useActorId } from "../lib/actor-session";
 import {
+  getCurrentActorId,
+  getKnownActors,
+  hasSessionCredentials,
+  isLocalDemoActorId,
+  rememberKnownActor,
+  setAuthToken,
+  setControlApiClientAssertion,
+  useActorId,
+} from "../lib/actor-session";
+import {
+  ApiRequestError,
   createProject,
   getMe,
   getNetworkAccessInfo,
@@ -22,6 +32,7 @@ import {
   listWallets,
   mapStepToComicPath,
   runToolboxCapability,
+  startDemoSession,
   type NetworkAccessInfo,
   type PermissionContext,
   type Project,
@@ -30,6 +41,11 @@ import {
 } from "../lib/api";
 import { setCurrentProjectId, useCurrentProjectId } from "../lib/session";
 import { cn } from "../lib/utils";
+import {
+  filterWalletsForEntitlement,
+  resolveWalletEntitlement,
+  resolveWalletListRequest,
+} from "../lib/wallet-entitlements";
 
 const RUNNABLE_TOOLBOX_CODES = [
   "motion_transfer",
@@ -118,7 +134,15 @@ function applyLocalOverrides(tools: ToolboxCapability[]): ToolboxCapability[] {
 }
 
 const TOOLBOX_CACHE_KEY_PREFIX = "xiaolou.home.toolbox-capabilities.v3";
+const GREETING_NAME_CACHE_KEY_PREFIX = "xiaolou.home.greeting-name";
 const TOOLBOX_RETRY_DELAYS_MS = [1200, 3000];
+const LOCAL_DEMO_GREETING_NAMES: Record<string, string> = {
+  user_personal_001: "注册用户",
+  user_demo_001: "企业管理员",
+  user_member_001: "企业成员",
+  ops_demo_001: "运营管理员",
+  root_demo_001: "超级管理员",
+};
 const DEFAULT_TOOLBOX_CAPABILITIES: ToolboxCapability[] = [
   {
     code: "video_character_replace",
@@ -166,6 +190,40 @@ const DEFAULT_TOOLBOX_CAPABILITIES: ToolboxCapability[] = [
 
 function getToolboxCacheKey(actorId: string) {
   return `${TOOLBOX_CACHE_KEY_PREFIX}:${actorId || "guest"}`;
+}
+
+function getGreetingNameCacheKey(actorId: string) {
+  return `${GREETING_NAME_CACHE_KEY_PREFIX}:${actorId || "guest"}`;
+}
+
+function readCachedGreetingName(actorId: string) {
+  if (!actorId || actorId === "guest") return null;
+
+  if (LOCAL_DEMO_GREETING_NAMES[actorId]) {
+    return LOCAL_DEMO_GREETING_NAMES[actorId];
+  }
+
+  const knownActorName =
+    getKnownActors().find((item) => item.id === actorId)?.label?.trim() || null;
+  if (knownActorName) return knownActorName;
+
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(getGreetingNameCacheKey(actorId))?.trim() || null;
+}
+
+function writeCachedGreetingName(actorId: string, displayName: string | null | undefined) {
+  if (typeof window === "undefined" || !actorId || actorId === "guest") return;
+
+  const normalized = displayName?.trim();
+  if (!normalized) return;
+
+  window.localStorage.setItem(getGreetingNameCacheKey(actorId), normalized);
+}
+
+function normalizeGreetingName(displayName: string | null | undefined) {
+  const normalized = displayName?.trim();
+  if (!normalized) return null;
+  return normalized.toLowerCase() === "guest" ? "游客" : normalized;
 }
 
 function readCachedToolboxCapabilities(actorId: string) {
@@ -272,17 +330,6 @@ function formatRole(me: PermissionContext | null) {
   return "游客";
 }
 
-function resolveVisibleWallets(wallets: WalletInfo[], me: PermissionContext | null) {
-  if (!me || !wallets.length) return wallets;
-  const isEnterprise =
-    me.currentOrganizationRole === "enterprise_admin" || me.currentOrganizationRole === "enterprise_member";
-  if (isEnterprise) {
-    const orgWallets = wallets.filter((w) => w.ownerType === "organization");
-    return orgWallets.length ? orgWallets : wallets;
-  }
-  return wallets.filter((w) => w.ownerType !== "organization");
-}
-
 function toolStatusLabel(status: string) {
   if (status === "mock_ready") return "已接入";
   if (status === "placeholder") return "待接入";
@@ -293,6 +340,14 @@ function toolStatusLabel(status: string) {
 // Tools in any of these statuses render as visually locked + not clickable.
 function isToolLocked(status: string) {
   return status === "placeholder" || status === "coming_soon";
+}
+
+function isAuthBoundaryError(error: unknown) {
+  return error instanceof ApiRequestError && (error.status === 401 || error.status === 403);
+}
+
+function isSignedOutDashboardContext(context: PermissionContext | null) {
+  return !hasSessionCredentials() && (!context || context.actor.id === "guest" || context.platformRole === "guest");
 }
 
 function statusTone(status: string) {
@@ -343,6 +398,18 @@ export default function Home() {
   }, [currentProjectId, projects]);
 
   const activeProject = orderedProjects.find((p) => p.id === currentProjectId) ?? orderedProjects[0] ?? null;
+  const cachedGreetingName = useMemo(
+    () => readCachedGreetingName(actorId),
+    [actorId],
+  );
+  const guestGreetingName = actorId === "guest" ? "游客" : null;
+  const localDemoGreetingName = LOCAL_DEMO_GREETING_NAMES[actorId] ?? null;
+  const greetingName =
+    guestGreetingName ||
+    localDemoGreetingName ||
+    normalizeGreetingName(me?.actor?.displayName) ||
+    cachedGreetingName ||
+    (hasSessionCredentials() && actorId !== "guest" ? "小楼用户" : null);
   const visibleNetworkEntries = useMemo(() => {
     if (!networkAccess) return [];
     return networkAccess.recommendedEntries.length
@@ -354,11 +421,12 @@ export default function Home() {
     () => me?.organizations.find((o) => o.id === me.currentOrganizationId) ?? null,
     [me],
   );
+  const walletEntitlement = useMemo(() => resolveWalletEntitlement(me), [me]);
 
   const primaryWallet = useMemo(() => {
-    const list = resolveVisibleWallets(wallets, me);
+    const list = filterWalletsForEntitlement(wallets, walletEntitlement);
     return list[0] ?? null;
-  }, [wallets, me]);
+  }, [wallets, walletEntitlement]);
 
   const dashboardNotice = useMemo(() => {
     const notices: string[] = [];
@@ -391,7 +459,7 @@ export default function Home() {
       toolsUsingCache: false,
     });
 
-    setTools(initialTools);
+    setTools(applyLocalOverrides(initialTools));
     setToolboxLoading(true);
 
     const commitIfCurrent = (callback: () => void) => {
@@ -400,48 +468,106 @@ export default function Home() {
       return true;
     };
 
-    const mePromise = getMe()
-      .then((value) => {
-        commitIfCurrent(() => {
-          setMe(value);
-          setDashboardIssues((prev) => ({ ...prev, me: false }));
+    let permissionContext: PermissionContext | null = null;
+    if (isLocalDemoActorId(actorId) && !hasSessionCredentials()) {
+      try {
+        const demoSession = await startDemoSession(actorId);
+        const sessionCommitted = commitIfCurrent(() => {
+          const demoName = LOCAL_DEMO_GREETING_NAMES[demoSession.actorId] ?? demoSession.displayName;
+          setAuthToken(demoSession.token);
+          setControlApiClientAssertion(demoSession.controlApiClientAssertion);
+          rememberKnownActor({
+            id: demoSession.actorId,
+            label: demoName,
+            detail: demoSession.email,
+            token: demoSession.token,
+            controlApiClientAssertion: demoSession.controlApiClientAssertion,
+          });
+          writeCachedGreetingName(demoSession.actorId, demoName);
         });
-      })
-      .catch(() => {
-        commitIfCurrent(() => {
-          setMe(null);
-          setDashboardIssues((prev) => ({ ...prev, me: true }));
-        });
-      });
+        if (!sessionCommitted) {
+          return;
+        }
+      } catch {
+        // Let the normal account context loader decide whether this should surface as an issue.
+      }
+    }
 
-    const projectsPromise = listProjects()
-      .then((value) => {
-        commitIfCurrent(() => {
-          setProjects(value.items);
-          setDashboardIssues((prev) => ({ ...prev, projects: false }));
-        });
-      })
-      .catch(() => {
-        commitIfCurrent(() => {
-          setProjects([]);
-          setDashboardIssues((prev) => ({ ...prev, projects: true }));
-        });
+    try {
+      const value = await getMe();
+      permissionContext = value;
+      commitIfCurrent(() => {
+        writeCachedGreetingName(value.actor.id, value.actor.displayName);
+        setMe(value);
+        setDashboardIssues((prev) => ({ ...prev, me: false }));
       });
-    const walletsPromise = listWallets()
-      .then((value) => {
-        commitIfCurrent(() => {
-          setWallets(value.items);
-          setDashboardIssues((prev) => ({ ...prev, wallets: false }));
-        });
-      })
-      .catch(() => {
-        commitIfCurrent(() => {
-          setWallets([]);
-          setDashboardIssues((prev) => ({ ...prev, wallets: true }));
-        });
+    } catch {
+      commitIfCurrent(() => {
+        setMe(null);
+        setDashboardIssues((prev) => ({ ...prev, me: true }));
       });
+    }
+
+    const useSignedOutFallback = isSignedOutDashboardContext(permissionContext);
+
+    const projectsPromise = useSignedOutFallback
+      ? Promise.resolve(
+          commitIfCurrent(() => {
+            setProjects([]);
+            setDashboardIssues((prev) => ({ ...prev, projects: false }));
+          }),
+        )
+      : listProjects()
+          .then((value) => {
+            commitIfCurrent(() => {
+              setProjects(value.items);
+              setDashboardIssues((prev) => ({ ...prev, projects: false }));
+            });
+          })
+          .catch((error) => {
+            const suppressIssue = isAuthBoundaryError(error) && !hasSessionCredentials();
+            commitIfCurrent(() => {
+              setProjects([]);
+              setDashboardIssues((prev) => ({ ...prev, projects: !suppressIssue }));
+            });
+          });
+    const walletRequest = useSignedOutFallback ? null : resolveWalletListRequest(permissionContext);
+    const walletsPromise = useSignedOutFallback || !walletRequest
+      ? Promise.resolve(
+          commitIfCurrent(() => {
+            setWallets([]);
+            setDashboardIssues((prev) => ({ ...prev, wallets: false }));
+          }),
+        )
+      : listWallets(walletRequest.ownerType, walletRequest.ownerId)
+          .then((value) => {
+            commitIfCurrent(() => {
+              setWallets(value.items);
+              setDashboardIssues((prev) => ({ ...prev, wallets: false }));
+            });
+          })
+          .catch((error) => {
+            const suppressIssue = isAuthBoundaryError(error) && !hasSessionCredentials();
+            commitIfCurrent(() => {
+              setWallets([]);
+              setDashboardIssues((prev) => ({ ...prev, wallets: !suppressIssue }));
+            });
+          });
 
     const loadToolsWithRetry = async (attempt = 0): Promise<void> => {
+      if (useSignedOutFallback) {
+        commitIfCurrent(() => {
+          setTools(applyLocalOverrides(initialTools));
+          setToolboxLoading(false);
+          setDashboardIssues((prev) => ({
+            ...prev,
+            tools: false,
+            toolsUsingCache: false,
+          }));
+        });
+        return;
+      }
+
       try {
         const value = await getToolboxCapabilities();
         const merged = applyLocalOverrides(value.items);
@@ -455,7 +581,7 @@ export default function Home() {
             toolsUsingCache: false,
           }));
         });
-      } catch {
+      } catch (error) {
         const fallbackTools = cachedTools.length
           ? cachedTools
           : readCachedToolboxCapabilities(actorId);
@@ -463,18 +589,19 @@ export default function Home() {
           fallbackTools.length ? fallbackTools : DEFAULT_TOOLBOX_CAPABILITIES,
         );
         const usingCachedTools = fallbackTools.length > 0;
+        const suppressIssue = isAuthBoundaryError(error) && !hasSessionCredentials();
 
         commitIfCurrent(() => {
           setTools(resolvedFallbackTools);
           setDashboardIssues((prev) => ({
             ...prev,
-            tools: true,
-            toolsUsingCache: usingCachedTools,
+            tools: !suppressIssue,
+            toolsUsingCache: !suppressIssue && usingCachedTools,
           }));
-          setToolboxLoading(attempt < TOOLBOX_RETRY_DELAYS_MS.length);
+          setToolboxLoading(!suppressIssue && attempt < TOOLBOX_RETRY_DELAYS_MS.length);
         });
 
-        if (attempt < TOOLBOX_RETRY_DELAYS_MS.length) {
+        if (!suppressIssue && attempt < TOOLBOX_RETRY_DELAYS_MS.length) {
           await new Promise((resolve) => window.setTimeout(resolve, TOOLBOX_RETRY_DELAYS_MS[attempt]));
           if (dashboardRequestRef.current === requestId) {
             return loadToolsWithRetry(attempt + 1);
@@ -488,7 +615,6 @@ export default function Home() {
     };
 
     await Promise.allSettled([
-      mePromise,
       projectsPromise,
       walletsPromise,
       loadToolsWithRetry(),
@@ -783,7 +909,7 @@ export default function Home() {
             </div>
 
             <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:row-start-2 lg:col-start-1">
-              {me?.actor?.displayName ? `你好，${me.actor.displayName}` : "欢迎回到小楼"}
+              {greetingName ? `你好，${greetingName}` : "欢迎回到小楼"}
             </h1>
 
             <p className="text-sm leading-7 text-muted-foreground sm:text-base lg:row-start-3 lg:col-start-1">
@@ -827,7 +953,7 @@ export default function Home() {
                     ? formatCredits(primaryWallet.creditsAvailable, primaryWallet.unlimitedCredits)
                     : "--"}
                 </span>
-                {me?.permissions.canRecharge ? (
+                {walletEntitlement.canRecharge ? (
                   <>
                     <span className="mx-1 h-3 w-px shrink-0 bg-border/80" aria-hidden />
                     <button

@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { getCurrentActorId, useActorId } from "./actor-session";
+import {
+  getCurrentActorId,
+  hasSessionCredentials,
+  useActorId,
+} from "./actor-session";
 import { createProject, getMe, listProjects } from "./api";
 
 export const DEFAULT_PROJECT_ID = "proj_demo_001";
@@ -130,6 +134,14 @@ export function useCurrentProjectId() {
 
     const syncProjectId = async () => {
       try {
+        if (!hasSessionCredentials() && DEMO_FALLBACK_ACTOR_IDS.has(normalizedActorId)) {
+          if (!active) return;
+          setCurrentProjectId(DEFAULT_PROJECT_ID, normalizedActorId);
+          setProjectIdState(DEFAULT_PROJECT_ID);
+          setIsReady(true);
+          return;
+        }
+
         const projectResponse = await listProjects();
         if (!active) return;
 

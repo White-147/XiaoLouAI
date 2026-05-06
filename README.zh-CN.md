@@ -150,6 +150,8 @@ Caddy 或 IIS 应直接服务 `XIAOLOU-main/dist`，并只把已批准的公开 
 
 `/api/internal/*`、`/api/schema/*`、`/api/providers/health` 以及未列入的
 legacy API 路径不能暴露到公开反代。
+旧 `/api/payments/{provider}/notify` 回调 alias 已退役；只暴露
+`/api/payments/callbacks/{provider}`。
 
 生产环境必须设置 `INTERNAL_API_TOKEN`，并用静态 `CLIENT_API_TOKEN` 或
 provider 签发的 client assertion 保护公开 client 路由。新的 provider 路径使用

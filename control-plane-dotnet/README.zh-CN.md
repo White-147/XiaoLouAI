@@ -1,4 +1,4 @@
-﻿# XiaoLouAI 控制面（.NET）
+# XiaoLouAI 控制面（.NET）
 
 语言：[English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -91,7 +91,7 @@ API 连接本地 PostgreSQL 测试库后，在仓库根目录运行 Windows 验�
 ```powershell
 $env:CONTROL_API_BASE_URL="http://127.0.0.1:4100"
 $env:PAYMENT_WEBHOOK_SECRET="xiaolou-test-secret"
-$env:DATABASE_URL="postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_test"
+$env:DATABASE_URL="postgres://root:root@127.0.0.1:5432/xiaolou"
 .\scripts\windows\verify-control-plane-p0.ps1
 ```
 

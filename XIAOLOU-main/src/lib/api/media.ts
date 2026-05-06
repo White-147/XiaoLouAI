@@ -1,4 +1,5 @@
 import type { UploadedFile } from "../api";
+import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -8,7 +9,7 @@ type ApiRequestErrorOptions = {
 };
 
 type ControlMediaRequestScope = {
-  accountOwnerType: "user";
+  accountOwnerType: NonNullable<ControlOwnerScope["accountOwnerType"]>;
   accountOwnerId: string;
   regionCode: "CN";
   currency: "CNY";
@@ -33,10 +34,22 @@ type ControlMediaReadResponse = {
 export type MediaServiceDeps = {
   controlApiJsonRequest: ControlApiJsonRequest;
   getCurrentActorId: () => string;
-  buildControlMediaScope: (actorId: string) => ControlMediaRequestScope;
+  resolveCurrentOwnerScope: () => ControlOwnerScope;
   createClientId: (prefix: string) => string;
   createApiRequestError: (message: string, options?: ApiRequestErrorOptions) => Error;
 };
+
+function buildControlMediaScope(
+  actorId: string,
+  ownerScope: ControlOwnerScope,
+): ControlMediaRequestScope {
+  return {
+    accountOwnerType: ownerScope.accountOwnerType ?? "user",
+    accountOwnerId: ownerScope.accountOwnerId ?? actorId,
+    regionCode: "CN",
+    currency: "CNY",
+  };
+}
 
 function toObjectKeySegment(value: string, fallback: string) {
   const normalized = String(value || "")
@@ -78,7 +91,7 @@ function fileNameForDataUrl(kind: string, nameHint: string, contentType: string)
 export function createMediaService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope,
   createClientId,
   createApiRequestError,
 }: MediaServiceDeps) {
@@ -93,7 +106,7 @@ export function createMediaService({
       toObjectKeySegment(actorId, "guest"),
       `${uploadId}-${toObjectKeySegment(file.name, "upload.bin")}`,
     ].join("/");
-    const scope = buildControlMediaScope(actorId);
+    const scope = buildControlMediaScope(actorId, resolveCurrentOwnerScope());
 
     const begin = await controlApiJsonRequest<ControlMediaBeginResponse>("/api/media/upload-begin", {
       method: "POST",

@@ -241,16 +241,34 @@ describe("api.ts compatibility wrappers", () => {
     expect(factories.createAuthAccountService.mock.calls[0][0]).toMatchObject({
       getWallet: api.getWallet,
     });
+    expect(factories.createPlaygroundService.mock.calls[0][0]).toMatchObject({
+      controlApiJsonRequest: expect.any(Function),
+      getCurrentActorId: expect.any(Function),
+      resolveCurrentOwnerScope: expect.any(Function),
+      createApiRequestError: expect.any(Function),
+      hasSessionCredentials: expect.any(Function),
+      isAuthBoundaryError: expect.any(Function),
+    });
     expect(factories.createProjectsCanvasCreateService.mock.calls[0][0]).toMatchObject({
+      controlApiJsonRequest: expect.any(Function),
+      getCurrentActorId: expect.any(Function),
+      resolveCurrentOwnerScope: expect.any(Function),
       createCanonicalJob: services.jobs.createCanonicalJob,
     });
     expect(factories.createToolboxService.mock.calls[0][0]).toMatchObject({
       mapControlJobToTask: services.jobs.mapControlJobToTask,
     });
+    expect(factories.createJobsService.mock.calls[0][0]).toMatchObject({
+      controlApiJsonRequest: expect.any(Function),
+      getCurrentActorId: expect.any(Function),
+      resolveCurrentOwnerScope: expect.any(Function),
+      createClientId: expect.any(Function),
+      isNotFoundError: expect.any(Function),
+    });
     expect(factories.createMediaService.mock.calls[0][0]).toMatchObject({
       controlApiJsonRequest: expect.any(Function),
       getCurrentActorId: expect.any(Function),
-      buildControlMediaScope: expect.any(Function),
+      resolveCurrentOwnerScope: expect.any(Function),
       createClientId: expect.any(Function),
       createApiRequestError: expect.any(Function),
     });

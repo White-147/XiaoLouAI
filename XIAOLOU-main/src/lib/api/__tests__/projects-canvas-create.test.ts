@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Task } from "../../api";
+import type { ControlOwnerScope } from "../../control-owner-scope";
+import { createJobsService } from "../jobs";
 import { createProjectsCanvasCreateService } from "../projects-canvas-create";
 import {
-  createSyntheticMediaScope,
   parseJsonBody,
   SYNTHETIC_ACTOR_ID,
   SYNTHETIC_CREATED_AT,
@@ -13,6 +14,31 @@ import {
 
 type ProjectsCanvasCreateServiceDeps = Parameters<typeof createProjectsCanvasCreateService>[0];
 type CanonicalJobInput = Parameters<ProjectsCanvasCreateServiceDeps["createCanonicalJob"]>[0];
+
+function createSyntheticOwnerScope(
+  overrides: Partial<ControlOwnerScope> = {},
+): ControlOwnerScope {
+  return {
+    accountOwnerType: "user",
+    accountOwnerId: SYNTHETIC_ACTOR_ID,
+    organizationId: null,
+    organizationRole: null,
+    source: "personal-default",
+    ...overrides,
+  };
+}
+
+function createSyntheticOrganizationOwnerScope(
+  organizationId = "synthetic-org/one",
+): ControlOwnerScope {
+  return createSyntheticOwnerScope({
+    accountOwnerType: "organization",
+    accountOwnerId: organizationId,
+    organizationId,
+    organizationRole: "enterprise_admin",
+    source: "current-organization",
+  });
+}
 
 function createSyntheticTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -39,15 +65,18 @@ function createSyntheticTask(overrides: Partial<Task> = {}): Task {
 
 function createServiceHarness({
   actorId = SYNTHETIC_ACTOR_ID,
+  ownerScope,
   handler = () => ({}),
 }: {
   actorId?: string;
+  ownerScope?: ControlOwnerScope;
   handler?: RequestHandler;
 } = {}) {
   const calls: RequestCall[] = [];
   const canonicalJobCalls: CanonicalJobInput[] = [];
-  const mediaScopeActorIds: string[] = [];
-  const scopeQueryActorIds: Array<string | undefined> = [];
+  const ownerScopeCalls: ControlOwnerScope[] = [];
+  const resolvedOwnerScope =
+    ownerScope ?? createSyntheticOwnerScope({ accountOwnerId: actorId });
 
   const deps: ProjectsCanvasCreateServiceDeps = {
     controlApiJsonRequest: async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -55,15 +84,9 @@ function createServiceHarness({
       return (await handler(path, init)) as T;
     },
     getCurrentActorId: () => actorId,
-    buildControlScopeQuery: (scopeActorId) => {
-      scopeQueryActorIds.push(scopeActorId);
-      return scopeActorId
-        ? `scopeActorId=${encodeURIComponent(scopeActorId)}`
-        : "scopeActorId=implicit-synthetic";
-    },
-    buildControlMediaScope: (scopeActorId) => {
-      mediaScopeActorIds.push(scopeActorId);
-      return createSyntheticMediaScope(scopeActorId);
+    resolveCurrentOwnerScope: () => {
+      ownerScopeCalls.push(resolvedOwnerScope);
+      return resolvedOwnerScope;
     },
     createCanonicalJob: async (input) => {
       canonicalJobCalls.push(input);
@@ -88,8 +111,7 @@ function createServiceHarness({
   return {
     calls,
     canonicalJobCalls,
-    mediaScopeActorIds,
-    scopeQueryActorIds,
+    ownerScopeCalls,
     service: createProjectsCanvasCreateService(deps),
   };
 }
@@ -141,17 +163,13 @@ describe("createProjectsCanvasCreateService", () => {
     await expect(harness.service.getProjectOverview("synthetic project/one")).resolves.toBe(project);
 
     expect(harness.calls.map((call) => call.path)).toEqual([
-      "/api/projects?scopeActorId=synthetic%20actor%2Fwith%20space",
+      "/api/projects?accountOwnerType=user&accountOwnerId=synthetic+actor%2Fwith+space",
       "/api/projects",
       "/api/projects/synthetic%20project%2Fone",
       "/api/projects/synthetic%20project%2Fone",
       "/api/projects/synthetic%20project%2Fone/overview",
     ]);
-    expect(harness.scopeQueryActorIds).toEqual(["synthetic actor/with space"]);
-    expect(harness.mediaScopeActorIds).toEqual([
-      "synthetic actor/with space",
-      "synthetic actor/with space",
-    ]);
+    expect(harness.ownerScopeCalls).toHaveLength(3);
     expect(harness.calls[1].init?.method).toBe("POST");
     expect(parseJsonBody(harness.calls[1])).toEqual({
       accountOwnerType: "user",
@@ -171,6 +189,65 @@ describe("createProjectsCanvasCreateService", () => {
       title: "Synthetic update",
       progressPercent: 42,
       id: "synthetic project/one",
+    });
+  });
+
+  it("mirrors organization owner scope into project list and write requests", async () => {
+    const organizationScope = createSyntheticOrganizationOwnerScope();
+    const project = {
+      id: "synthetic-project",
+      title: "Synthetic organization project",
+      summary: null,
+      status: "draft",
+      coverUrl: null,
+      organizationId: organizationScope.organizationId,
+      currentStep: "script",
+      progressPercent: 0,
+      budgetCredits: 0,
+      directorAgentName: "Synthetic director",
+      createdAt: SYNTHETIC_CREATED_AT,
+      updatedAt: SYNTHETIC_UPDATED_AT,
+    };
+    const harness = createServiceHarness({
+      actorId: "synthetic-org-actor",
+      ownerScope: organizationScope,
+      handler: (path) => {
+        if (path.startsWith("/api/projects?")) return { items: [project], total: 1 };
+        return project;
+      },
+    });
+
+    await harness.service.listProjects();
+    await harness.service.createProject({
+      title: "Synthetic organization create",
+      ownerType: "organization",
+      organizationId: organizationScope.organizationId ?? undefined,
+    });
+    await harness.service.updateProject("synthetic-project", {
+      title: "Synthetic organization update",
+    });
+
+    expect(harness.calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
+      ["/api/projects?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone", "GET"],
+      ["/api/projects", "POST"],
+      ["/api/projects/synthetic-project", "PUT"],
+    ]);
+    expect(parseJsonBody(harness.calls[1])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      title: "Synthetic organization create",
+      ownerType: "organization",
+      organizationId: "synthetic-org/one",
+    });
+    expect(parseJsonBody(harness.calls[2])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      title: "Synthetic organization update",
+      id: "synthetic-project",
     });
   });
 
@@ -419,7 +496,7 @@ describe("createProjectsCanvasCreateService", () => {
   });
 
   it("keeps create-domain lists, delete routes, capabilities, local quotes, and jobs synthetic", async () => {
-    const { calls, canonicalJobCalls, scopeQueryActorIds, service } = createServiceHarness({
+    const { calls, canonicalJobCalls, ownerScopeCalls, service } = createServiceHarness({
       handler: (path) => ({ items: [{ id: "synthetic-create-result", path }] }),
     });
 
@@ -481,12 +558,12 @@ describe("createProjectsCanvasCreateService", () => {
     });
 
     expect(calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
-      ["/api/create/images?scopeActorId=implicit-synthetic", "GET"],
-      ["/api/create/videos?scopeActorId=implicit-synthetic", "GET"],
-      ["/api/create/images/image%2Fone?scopeActorId=implicit-synthetic", "DELETE"],
-      ["/api/create/videos/video%2Fone?scopeActorId=implicit-synthetic", "DELETE"],
+      ["/api/create/images?accountOwnerType=user&accountOwnerId=synthetic-actor", "GET"],
+      ["/api/create/videos?accountOwnerType=user&accountOwnerId=synthetic-actor", "GET"],
+      ["/api/create/images/image%2Fone?accountOwnerType=user&accountOwnerId=synthetic-actor", "DELETE"],
+      ["/api/create/videos/video%2Fone?accountOwnerType=user&accountOwnerId=synthetic-actor", "DELETE"],
     ]);
-    expect(scopeQueryActorIds).toEqual([undefined, undefined, undefined, undefined]);
+    expect(ownerScopeCalls).toHaveLength(4);
     expect(canonicalJobCalls).toEqual([
       {
         jobType: "create_image_generate",
@@ -513,6 +590,97 @@ describe("createProjectsCanvasCreateService", () => {
         },
       },
     ]);
+  });
+
+  it("mirrors organization owner scope through create image and video request paths", async () => {
+    const organizationScope = createSyntheticOrganizationOwnerScope();
+    const harness = createServiceHarness({
+      actorId: "synthetic-org-actor",
+      ownerScope: organizationScope,
+      handler: (path) => ({ items: [{ id: "synthetic-create-result", path }] }),
+    });
+
+    await harness.service.listCreateImages();
+    await harness.service.listCreateVideos();
+    await harness.service.deleteCreateImage("image/one");
+    await harness.service.deleteCreateVideo("video/one");
+
+    expect(harness.calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
+      ["/api/create/images?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone", "GET"],
+      ["/api/create/videos?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone", "GET"],
+      ["/api/create/images/image%2Fone?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone", "DELETE"],
+      ["/api/create/videos/video%2Fone?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone", "DELETE"],
+    ]);
+
+    const calls: RequestCall[] = [];
+    const controlApiJsonRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
+      calls.push({ path, init });
+      const body = parseJsonBody<Record<string, unknown>>({ path, init });
+      return {
+        id: `synthetic-${String(body.jobType)}-job`,
+        jobType: body.jobType,
+        status: "queued",
+        payload: body.payload,
+        createdByUserId: body.createdByUserId,
+        createdAt: SYNTHETIC_CREATED_AT,
+        updatedAt: SYNTHETIC_UPDATED_AT,
+      } as T;
+    };
+    const jobsService = createJobsService({
+      controlApiJsonRequest,
+      getCurrentActorId: () => "synthetic-org-actor",
+      resolveCurrentOwnerScope: () => organizationScope,
+      createClientId: () => "synthetic-client-id",
+      isNotFoundError: () => false,
+    });
+    const service = createProjectsCanvasCreateService({
+      controlApiJsonRequest,
+      getCurrentActorId: () => "synthetic-org-actor",
+      resolveCurrentOwnerScope: () => organizationScope,
+      createCanonicalJob: jobsService.createCanonicalJob,
+    });
+
+    await service.generateCreateImages({
+      prompt: "Synthetic organization image",
+      idempotencyKey: "synthetic-image-key",
+    });
+    await service.generateCreateVideos({
+      prompt: "Synthetic organization video",
+      idempotencyKey: "synthetic-video-key",
+    });
+
+    expect(calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
+      ["/api/jobs", "POST"],
+      ["/api/jobs", "POST"],
+    ]);
+    expect(parseJsonBody(calls[0])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      jobType: "create_image_generate",
+      createdByUserId: "synthetic-org-actor",
+      idempotencyKey: "synthetic-image-key",
+      payload: {
+        prompt: "Synthetic organization image",
+        type: "create_image_generate",
+        domain: "create",
+      },
+    });
+    expect(parseJsonBody(calls[1])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      jobType: "create_video_generate",
+      createdByUserId: "synthetic-org-actor",
+      idempotencyKey: "synthetic-video-key",
+      payload: {
+        prompt: "Synthetic organization video",
+        type: "create_video_generate",
+        domain: "create",
+      },
+    });
   });
 
   it("dedupes canvas summaries and scopes canvas save/delete flows", async () => {
@@ -579,13 +747,13 @@ describe("createProjectsCanvasCreateService", () => {
     await harness.service.deleteCanvasProject("synthetic-canvas/one");
 
     expect(harness.calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
-      ["/api/canvas-projects?scopeActorId=implicit-synthetic", "GET"],
+      ["/api/canvas-projects?accountOwnerType=user&accountOwnerId=synthetic-actor", "GET"],
       ["/api/canvas-projects/synthetic-canvas%2Fone", "GET"],
       ["/api/canvas-projects", "POST"],
       ["/api/canvas-projects/synthetic-canvas%2Fone", "PUT"],
-      ["/api/canvas-projects/synthetic-canvas%2Fone?scopeActorId=implicit-synthetic", "DELETE"],
+      ["/api/canvas-projects/synthetic-canvas%2Fone?accountOwnerType=user&accountOwnerId=synthetic-actor", "DELETE"],
     ]);
-    expect(harness.mediaScopeActorIds).toEqual(["synthetic-actor", "synthetic-actor"]);
+    expect(harness.ownerScopeCalls).toHaveLength(4);
     expect(parseJsonBody(harness.calls[2])).toEqual({
       accountOwnerType: "user",
       accountOwnerId: "synthetic-actor",
@@ -602,6 +770,58 @@ describe("createProjectsCanvasCreateService", () => {
       id: "synthetic-canvas/one",
       title: "Synthetic existing canvas",
       expectedUpdatedAt: "2026-05-05T00:05:00.000Z",
+    });
+  });
+
+  it("mirrors organization owner scope into canvas list, save, and delete requests", async () => {
+    const organizationScope = createSyntheticOrganizationOwnerScope();
+    const harness = createServiceHarness({
+      actorId: "synthetic-org-actor",
+      ownerScope: organizationScope,
+      handler: () => ({
+        items: [],
+        id: "synthetic-canvas",
+        actorId: "synthetic-org-actor",
+        title: "Synthetic organization canvas",
+        thumbnailUrl: null,
+        canvasData: {},
+        createdAt: SYNTHETIC_CREATED_AT,
+        updatedAt: SYNTHETIC_UPDATED_AT,
+      }),
+    });
+
+    await harness.service.listCanvasProjects();
+    await harness.service.saveCanvasProject({
+      title: "Synthetic organization canvas",
+      canvasData: { nodes: ["synthetic-node"] },
+    });
+    await harness.service.saveCanvasProject({
+      id: "synthetic-canvas",
+      title: "Synthetic organization canvas update",
+    });
+    await harness.service.deleteCanvasProject("synthetic-canvas");
+
+    expect(harness.calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
+      ["/api/canvas-projects?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone", "GET"],
+      ["/api/canvas-projects", "POST"],
+      ["/api/canvas-projects/synthetic-canvas", "PUT"],
+      ["/api/canvas-projects/synthetic-canvas?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone", "DELETE"],
+    ]);
+    expect(parseJsonBody(harness.calls[1])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      title: "Synthetic organization canvas",
+      canvasData: { nodes: ["synthetic-node"] },
+    });
+    expect(parseJsonBody(harness.calls[2])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      id: "synthetic-canvas",
+      title: "Synthetic organization canvas update",
     });
   });
 
@@ -662,11 +882,14 @@ describe("createProjectsCanvasCreateService", () => {
     await harness.service.deleteAgentCanvasProject("synthetic-agent-canvas/one");
 
     expect(harness.calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
-      ["/api/agent-canvas/projects?scopeActorId=implicit-synthetic", "GET"],
+      ["/api/agent-canvas/projects?accountOwnerType=user&accountOwnerId=synthetic-actor", "GET"],
       ["/api/agent-canvas/projects/synthetic-agent-canvas%2Fone", "GET"],
       ["/api/agent-canvas/projects", "POST"],
       ["/api/agent-canvas/projects/synthetic-agent-canvas%2Fone", "PUT"],
-      ["/api/agent-canvas/projects/synthetic-agent-canvas%2Fone?scopeActorId=implicit-synthetic", "DELETE"],
+      [
+        "/api/agent-canvas/projects/synthetic-agent-canvas%2Fone?accountOwnerType=user&accountOwnerId=synthetic-actor",
+        "DELETE",
+      ],
     ]);
     expect(parseJsonBody(harness.calls[2])).toEqual({
       accountOwnerType: "user",
@@ -685,6 +908,68 @@ describe("createProjectsCanvasCreateService", () => {
       currency: "CNY",
       id: "synthetic-agent-canvas/one",
       title: "Synthetic existing agent canvas",
+      agentContext: { agent: "synthetic-agent" },
+      kind: "agent_canvas",
+    });
+  });
+
+  it("mirrors organization owner scope into agent canvas list, save, and delete requests", async () => {
+    const organizationScope = createSyntheticOrganizationOwnerScope();
+    const harness = createServiceHarness({
+      actorId: "synthetic-org-actor",
+      ownerScope: organizationScope,
+      handler: () => ({
+        items: [],
+        id: "synthetic-agent-canvas",
+        actorId: "synthetic-org-actor",
+        title: "Synthetic organization agent canvas",
+        thumbnailUrl: null,
+        canvasData: {},
+        kind: "agent_canvas",
+        agentContext: null,
+        createdAt: SYNTHETIC_CREATED_AT,
+        updatedAt: SYNTHETIC_UPDATED_AT,
+      }),
+    });
+
+    await harness.service.listAgentCanvasProjects();
+    await harness.service.saveAgentCanvasProject({
+      title: "Synthetic organization agent canvas",
+      canvasData: { graph: "synthetic" },
+    });
+    await harness.service.saveAgentCanvasProject({
+      id: "synthetic-agent-canvas",
+      title: "Synthetic organization agent canvas update",
+      agentContext: { agent: "synthetic-agent" },
+    });
+    await harness.service.deleteAgentCanvasProject("synthetic-agent-canvas");
+
+    expect(harness.calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
+      ["/api/agent-canvas/projects?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone", "GET"],
+      ["/api/agent-canvas/projects", "POST"],
+      ["/api/agent-canvas/projects/synthetic-agent-canvas", "PUT"],
+      [
+        "/api/agent-canvas/projects/synthetic-agent-canvas?accountOwnerType=organization&accountOwnerId=synthetic-org%2Fone",
+        "DELETE",
+      ],
+    ]);
+    expect(parseJsonBody(harness.calls[1])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      title: "Synthetic organization agent canvas",
+      canvasData: { graph: "synthetic" },
+      kind: "agent_canvas",
+      agentContext: null,
+    });
+    expect(parseJsonBody(harness.calls[2])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      id: "synthetic-agent-canvas",
+      title: "Synthetic organization agent canvas update",
       agentContext: { agent: "synthetic-agent" },
       kind: "agent_canvas",
     });

@@ -1,9 +1,10 @@
 import type { Task } from "../api";
+import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 type ControlMediaRequestScope = {
-  accountOwnerType: "user";
+  accountOwnerType: NonNullable<ControlOwnerScope["accountOwnerType"]>;
   accountOwnerId: string;
   regionCode: "CN";
   currency: "CNY";
@@ -31,10 +32,22 @@ export type TaskAccepted = {
 export type JobsServiceDeps = {
   controlApiJsonRequest: ControlApiJsonRequest;
   getCurrentActorId: () => string;
-  buildControlMediaScope: (actorId: string) => ControlMediaRequestScope;
+  resolveCurrentOwnerScope: () => ControlOwnerScope;
   createClientId: (prefix: string) => string;
   isNotFoundError: (error: unknown) => boolean;
 };
+
+function buildControlMediaScope(
+  actorId: string,
+  ownerScope: ControlOwnerScope,
+): ControlMediaRequestScope {
+  return {
+    accountOwnerType: ownerScope.accountOwnerType ?? "user",
+    accountOwnerId: ownerScope.accountOwnerId ?? actorId,
+    regionCode: "CN",
+    currency: "CNY",
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -190,7 +203,7 @@ function matchesTaskFilters(task: Task, projectId?: string, type?: string) {
 export function createJobsService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope,
   createClientId,
   isNotFoundError,
 }: JobsServiceDeps) {
@@ -203,6 +216,7 @@ export function createJobsService({
 
   const createCanonicalJob = async (input: CanonicalJobInput): Promise<TaskAccepted> => {
     const actorId = getCurrentActorId();
+    const scope = buildControlMediaScope(actorId, resolveCurrentOwnerScope());
     const payload = {
       ...(input.payload ?? {}),
       type: input.jobType,
@@ -217,7 +231,7 @@ export function createJobsService({
     const job = await controlApiJsonRequest<ControlJobRecord>("/api/jobs", {
       method: "POST",
       body: JSON.stringify({
-        ...buildControlMediaScope(actorId),
+        ...scope,
         lane: input.lane || "account-control",
         jobType: input.jobType,
         providerRoute: input.providerRoute || "closed-api",
@@ -233,8 +247,9 @@ export function createJobsService({
   const listTasks = async (projectId?: string, type?: string) => {
     const params = new URLSearchParams();
     const actorId = getCurrentActorId();
-    params.set("accountOwnerType", "user");
-    params.set("accountOwnerId", actorId);
+    const scope = buildControlMediaScope(actorId, resolveCurrentOwnerScope());
+    params.set("accountOwnerType", scope.accountOwnerType);
+    params.set("accountOwnerId", scope.accountOwnerId);
     params.set("limit", "200");
     const jobs = await controlApiJsonRequest<ControlJobRecord[]>(`/api/jobs?${params.toString()}`);
     return {

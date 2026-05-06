@@ -24,7 +24,6 @@ import {
   Mic,
   MonitorPlay,
   Moon,
-  MoreHorizontal,
   PlaySquare,
   Settings,
   ShieldCheck,
@@ -43,6 +42,7 @@ import {
   ensureJaazServices,
   listProjects,
   loginWithEmail,
+  startDemoSession,
   registerPersonalUser,
   registerEnterpriseAdmin,
   exchangeGoogleLogin,
@@ -58,6 +58,8 @@ import {
   getKnownActors,
   getKnownActorControlApiClientAssertion,
   getKnownActorToken,
+  hasSessionCredentials,
+  isLocalDemoActorId,
   rememberKnownActor,
   removeKnownActor,
   setCurrentActorId,
@@ -202,6 +204,7 @@ const navItems: NavItem[] = [
     ],
   },
   { name: "项目管理", path: "/assets", icon: FolderOpen },
+  { name: "积分统计", path: "/wallet/usage", icon: CreditCard },
 ];
 
 const demoActors = [
@@ -437,6 +440,35 @@ export default function Layout() {
     const loadContext = async () => {
       setLoadingAccount(true);
       try {
+        if (isLocalDemoActorId(actorId) && !hasSessionCredentials()) {
+          const result = await startDemoSession(actorId);
+          if (active) {
+            const demoActor = demoActors.find((actor) => actor.id === result.actorId);
+            setAuthToken(result.token);
+            setControlApiClientAssertion(result.controlApiClientAssertion);
+            rememberKnownActor({
+              id: result.actorId,
+              label: demoActor?.label ?? result.displayName,
+              detail: demoActor?.detail ?? result.email,
+              token: result.token,
+              controlApiClientAssertion: result.controlApiClientAssertion,
+            });
+            setCurrentActorId(result.actorId);
+            setPermissionContext(result.permissionContext);
+            setKnownActorsVer((value) => value + 1);
+            void listProjects()
+              .then((response) => {
+                if (!active) return;
+                const nextProjectId = response.items[0]?.id;
+                if (nextProjectId) {
+                  setCurrentProjectId(nextProjectId, result.actorId);
+                }
+              })
+              .catch(() => {});
+          }
+          return;
+        }
+
         const response = await getMe();
         if (active) {
           setPermissionContext(response);
@@ -619,23 +651,61 @@ export default function Layout() {
     }
   };
 
-  const handleSwitchActor = (nextActorId: string) => {
-    const savedToken = getKnownActorToken(nextActorId);
-    const savedControlApiClientAssertion = getKnownActorControlApiClientAssertion(nextActorId);
-    setAuthToken(savedToken);
-    setControlApiClientAssertion(savedControlApiClientAssertion);
-    setCurrentActorId(nextActorId);
-    void listProjects()
-      .then((response) => {
-        const nextProjectId = response.items[0]?.id;
-        if (nextProjectId) {
-          setCurrentProjectId(nextProjectId, nextActorId);
-        }
-      })
-      .catch(() => {});
-    setIsMoreModalOpen(false);
-    setIsAuthModalOpen(false);
-    navigate("/home");
+  const selectFirstProjectForActor = async (nextActorId: string) => {
+    try {
+      const response = await listProjects();
+      const nextProjectId = response.items[0]?.id;
+      if (nextProjectId) {
+        setCurrentProjectId(nextProjectId, nextActorId);
+      }
+    } catch {}
+  };
+
+  const handleSwitchActor = async (nextActorId: string) => {
+    setAuthError(null);
+    setAuthPending(true);
+    try {
+      if (nextActorId === "guest") {
+        setAuthToken(null);
+        setControlApiClientAssertion(null);
+        setCurrentActorId("guest");
+        setPermissionContext(null);
+      } else if (isLocalDemoActorId(nextActorId)) {
+        const result = await startDemoSession(nextActorId);
+        const demoActor = demoActors.find((actor) => actor.id === result.actorId);
+        setAuthToken(result.token);
+        setControlApiClientAssertion(result.controlApiClientAssertion);
+        rememberKnownActor({
+          id: result.actorId,
+          label: demoActor?.label ?? result.displayName,
+          detail: demoActor?.detail ?? result.email,
+          token: result.token,
+          controlApiClientAssertion: result.controlApiClientAssertion,
+        });
+        setCurrentActorId(result.actorId);
+        setPermissionContext(result.permissionContext);
+        setKnownActorsVer((value) => value + 1);
+        await selectFirstProjectForActor(result.actorId);
+      } else {
+        const savedToken = getKnownActorToken(nextActorId);
+        const savedControlApiClientAssertion = getKnownActorControlApiClientAssertion(nextActorId);
+        setAuthToken(savedToken);
+        setControlApiClientAssertion(savedControlApiClientAssertion);
+        setCurrentActorId(nextActorId);
+        await selectFirstProjectForActor(nextActorId);
+      }
+
+      setIsMoreModalOpen(false);
+      setIsAuthModalOpen(false);
+      navigate("/home");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "身份切换失败，请稍后重试。");
+      setAuthTab("login");
+      setIsMoreModalOpen(false);
+      setIsAuthModalOpen(true);
+    } finally {
+      setAuthPending(false);
+    }
   };
 
   const handleLogin = async () => {
@@ -920,6 +990,7 @@ export default function Layout() {
                     {/* Profile header */}
                     <button
                       type="button"
+                      title="账号与个人资料"
                       onClick={() => {
                         setProfileMenuOpen(false);
                         setIsProfileModalOpen(true);
@@ -935,6 +1006,7 @@ export default function Layout() {
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium text-primary">账号与个人资料</p>
                           <p className="truncate text-sm font-semibold text-foreground">
                             {permissionContext.actor.displayName}
                           </p>
@@ -962,15 +1034,6 @@ export default function Layout() {
                       <div className="my-1.5 border-t border-border/60" />
 
                       <ProfileMenuItem
-                        icon={Building2}
-                        label="管理面板"
-                        onClick={() => {
-                          setProfileMenuOpen(false);
-                          navigate("/enterprise");
-                        }}
-                      />
-
-                      <ProfileMenuItem
                         icon={CreditCard}
                         label="积分统计"
                         onClick={() => {
@@ -985,18 +1048,6 @@ export default function Layout() {
                         icon={Keyboard}
                         label="快捷键"
                         onClick={() => setProfileMenuOpen(false)}
-                      />
-
-                      <div className="my-1.5 border-t border-border/60" />
-
-                      <ProfileMenuItem
-                        icon={LogOut}
-                        label="退出登录"
-                        danger
-                        onClick={() => {
-                          setProfileMenuOpen(false);
-                          handleLogout();
-                        }}
                       />
                     </div>
                   </motion.div>
@@ -1072,12 +1123,12 @@ export default function Layout() {
                 "flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
                 isCollapsed ? "justify-center" : "justify-start",
               )}
-              title={isCollapsed ? "更多" : undefined}
+              title={isCollapsed ? "设置" : undefined}
             >
               <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                <MoreHorizontal className="h-5 w-5" />
+                <Settings className="h-5 w-5" />
               </span>
-              {!isCollapsed ? <span className="min-w-0 flex-1 text-left leading-snug">更多</span> : null}
+              {!isCollapsed ? <span className="min-w-0 flex-1 text-left leading-snug">设置</span> : null}
             </button>
           </div>
         </div>
@@ -1094,13 +1145,11 @@ export default function Layout() {
             >
               <div className="mb-6 flex items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-lg font-semibold text-foreground">
-                    {isLoopback ? "身份切换与账号入口" : "账号切换"}
-                  </h3>
+                  <h3 className="text-lg font-semibold text-foreground">设置</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {isLoopback
-                      ? "可以切换演示身份验证权限，也可以进入公开注册页体验个人用户和企业管理员注册流程。"
-                      : "快速切换到已记录的登录账号，或登录新账号。"}
+                      ? "账号资料、身份切换、管理入口和登录状态集中在这里。"
+                      : "账号资料、快速账号切换和登录状态集中在这里。"}
                   </p>
                 </div>
                 <button
@@ -1139,7 +1188,7 @@ export default function Layout() {
                           <button
                             key={actor.id}
                             type="button"
-                            onClick={() => handleSwitchActor(actor.id)}
+                            onClick={() => void handleSwitchActor(actor.id)}
                             className={cn(
                               "rounded-2xl border px-4 py-4 text-left transition-colors",
                               actorId === actor.id
@@ -1193,7 +1242,7 @@ export default function Layout() {
                                 onClick={() => {
                                   if (isActive) return;
                                   if (hasToken) {
-                                    handleSwitchActor(actor.id);
+                                    void handleSwitchActor(actor.id);
                                   } else {
                                     const emailGuess = actor.detail?.includes("@") ? actor.detail : "";
                                     setLoginForm({ email: emailGuess, password: "" });
@@ -1287,8 +1336,57 @@ export default function Layout() {
                 </div>
 
                 <aside className="rounded-2xl border border-border/70 bg-background/35 p-5">
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">当前上下文</p>
-                  <div className="mt-4 space-y-4">
+                  <div className="space-y-5">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">账号与设置</p>
+                      <div className="mt-2 space-y-1">
+                        {permissionContext && permissionContext.platformRole !== "guest" ? (
+                          <ProfileMenuItem
+                            icon={UserRound}
+                            label="账号与个人资料"
+                            onClick={() => {
+                              setIsMoreModalOpen(false);
+                              setIsProfileModalOpen(true);
+                            }}
+                          />
+                        ) : (
+                          <ProfileMenuItem
+                            icon={LogIn}
+                            label="登录 / 注册"
+                            onClick={() => {
+                              setIsMoreModalOpen(false);
+                              setAuthError(null);
+                              setIsAuthModalOpen(true);
+                            }}
+                          />
+                        )}
+
+                        {permissionContext && permissionContext.platformRole !== "guest" ? (
+                          <>
+                            <ProfileMenuItem
+                              icon={Building2}
+                              label="管理面板"
+                              onClick={() => {
+                                setIsMoreModalOpen(false);
+                                navigate("/enterprise");
+                              }}
+                            />
+                            <ProfileMenuItem
+                              icon={LogOut}
+                              label="退出登录"
+                              danger
+                              onClick={handleLogout}
+                            />
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-border/60" />
+
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">当前上下文</p>
+                      <div className="mt-4 space-y-4">
                     <div className="rounded-2xl border border-border/70 bg-secondary/20 p-4">
                       <p className="text-sm font-medium text-foreground">
                         {loadingAccount ? "同步中..." : permissionContext?.actor.displayName || "游客"}
@@ -1344,6 +1442,8 @@ export default function Layout() {
                         系统级权限已启用
                       </div>
                     ) : null}
+                      </div>
+                    </div>
                   </div>
                 </aside>
               </div>

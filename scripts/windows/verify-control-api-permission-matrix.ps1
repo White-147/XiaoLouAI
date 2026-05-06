@@ -204,9 +204,7 @@ $internalTerms = @(
 )
 
 $callbackTerms = @(
-  "/api/payments/callbacks/{provider}",
-  "/api/payments/alipay/notify",
-  "/api/payments/wechat/notify"
+  "/api/payments/callbacks/{provider}"
 )
 
 $frontendAssertionTerms = @(
@@ -250,8 +248,6 @@ $reverseProxyTerms = @(
   "/api/wallet",
   "/api/wallets",
   "/api/payments/callbacks/*",
-  "/api/payments/alipay/notify",
-  "/api/payments/wechat/notify",
   "/api/projects*",
   "/api/canvas-projects*",
   "/api/agent-canvas/projects*",
@@ -309,7 +305,7 @@ Add-TermCheck $checks $blockers "iis-permission-matrix" $iisText @(
   "api-center",
   "enterprise-applications",
   "agent-canvas/projects",
-  "payments/(callbacks/"
+  "payments/callbacks/"
 ) "IIS example blocks internal/operational/unlisted API routes and proxies explicit public routes." "IIS example is missing one or more permission matrix terms."
 
 $status = if ($blockers.Count -gt 0) {

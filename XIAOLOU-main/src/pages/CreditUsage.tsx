@@ -16,7 +16,6 @@ import {
   getMe,
   getWalletUsageStats,
   searchCreditUsageSubjects,
-  type CreditUsageMode,
   type CreditUsageSeriesPoint,
   type CreditUsageStats,
   type CreditUsageSubject,
@@ -24,6 +23,10 @@ import {
   type WalletLedgerEntry,
 } from "../lib/api";
 import { cn } from "../lib/utils";
+import {
+  resolveWalletEntitlement,
+  resolveWalletUsageRequest,
+} from "../lib/wallet-entitlements";
 
 function formatCredits(value: number | null | undefined) {
   return `${Number(value || 0).toLocaleString("zh-CN")} 积分`;
@@ -172,7 +175,6 @@ function SubjectButton(props: {
 
 export default function CreditUsage() {
   const [me, setMe] = useState<PermissionContext | null>(null);
-  const [mode, setMode] = useState<CreditUsageMode>("personal");
   const [stats, setStats] = useState<CreditUsageStats | null>(null);
   const [subjects, setSubjects] = useState<CreditUsageSubject[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<CreditUsageSubject | null>(null);
@@ -201,15 +203,10 @@ export default function CreditUsage() {
   }, []);
 
   const isPlatformAdmin = me?.platformRole === "ops_admin" || me?.platformRole === "super_admin";
-  const isEnterpriseAdmin = me?.currentOrganizationRole === "enterprise_admin";
-  const canUseOrganizationMode = Boolean(isEnterpriseAdmin && !isPlatformAdmin);
-
-  useEffect(() => {
-    if (!me || isPlatformAdmin) return;
-    if (!canUseOrganizationMode && mode === "organization") {
-      setMode("personal");
-    }
-  }, [canUseOrganizationMode, isPlatformAdmin, me, mode]);
+  const walletEntitlement = useMemo(() => resolveWalletEntitlement(me), [me]);
+  const walletUsageRequest = useMemo(() => resolveWalletUsageRequest(me), [me]);
+  const isEnterpriseWalletContext =
+    walletEntitlement.kind === "enterprise_admin" || walletEntitlement.kind === "enterprise_member";
 
   useEffect(() => {
     if (!me || !isPlatformAdmin) return;
@@ -241,12 +238,20 @@ export default function CreditUsage() {
     setLoading(true);
     setError(null);
 
+    if (!isPlatformAdmin && !walletUsageRequest) {
+      setStats(null);
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
     const request = isPlatformAdmin
       ? getAdminCreditUsageStats({
           subjectType: selectedSubject?.type || "platform",
           subjectId: selectedSubject?.type === "platform" ? null : selectedSubject?.id || null,
         })
-      : getWalletUsageStats(mode);
+      : getWalletUsageStats(walletUsageRequest.mode, walletUsageRequest.ownerId);
 
     void request
       .then((response) => {
@@ -262,7 +267,7 @@ export default function CreditUsage() {
     return () => {
       active = false;
     };
-  }, [isPlatformAdmin, me, mode, refreshKey, selectedSubject]);
+  }, [isPlatformAdmin, me, refreshKey, selectedSubject, walletUsageRequest]);
 
   const walletDescription = useMemo(() => {
     if (!stats?.wallets.length) return "暂无可统计钱包";
@@ -272,9 +277,13 @@ export default function CreditUsage() {
 
   const titleDetail = isPlatformAdmin
     ? "搜索账号或企业，查看真实结算后的积分消耗。"
-    : canUseOrganizationMode
-      ? "企业管理员可切换企业总消耗和个人消耗。"
-      : "当前账号的个人积分消耗。";
+    : walletEntitlement.kind === "enterprise_admin"
+      ? "企业管理员查看企业钱包的积分消耗。"
+      : walletEntitlement.kind === "enterprise_member"
+        ? "企业成员使用企业钱包，个人钱包不展示。"
+        : walletEntitlement.kind === "personal"
+          ? "当前账号的个人积分消耗。"
+          : "当前身份暂无可统计钱包。";
 
   return (
     <main className="h-full overflow-y-auto bg-background">
@@ -351,27 +360,12 @@ export default function CreditUsage() {
               </div>
             </div>
           </section>
-        ) : canUseOrganizationMode ? (
+        ) : isEnterpriseWalletContext ? (
           <section className="flex flex-wrap items-center gap-2">
-            {[
-              { value: "organization" as const, label: "企业总消耗", icon: Users },
-              { value: "personal" as const, label: "个人消耗", icon: UserRound },
-            ].map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => setMode(item.value)}
-                className={cn(
-                  "inline-flex min-h-10 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition",
-                  mode === item.value
-                    ? "border-primary/50 bg-primary/10 text-primary"
-                    : "border-border/70 bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </button>
-            ))}
+            <span className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-primary/50 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
+              <Users className="h-4 w-4" />
+              {walletEntitlement.kind === "enterprise_admin" ? "企业钱包" : "企业钱包（管理员管理）"}
+            </span>
           </section>
         ) : null}
 

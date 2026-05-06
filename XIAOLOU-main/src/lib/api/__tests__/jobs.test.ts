@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createJobsService } from "../jobs";
+import type { ControlOwnerScope } from "../../control-owner-scope";
 import {
-  createSyntheticMediaScope,
   parseJsonBody,
   SYNTHETIC_ACTOR_ID,
   SYNTHETIC_CREATED_AT,
@@ -32,13 +32,15 @@ function createSyntheticJob(overrides: Record<string, unknown> = {}) {
 function createServiceHarness({
   handler = () => createSyntheticJob(),
   notFoundError,
+  ownerScope = createSyntheticOwnerScope(),
 }: {
   handler?: RequestHandler;
   notFoundError?: unknown;
+  ownerScope?: ControlOwnerScope;
 } = {}) {
   const calls: RequestCall[] = [];
   const clientIdPrefixes: string[] = [];
-  const mediaScopeActorIds: string[] = [];
+  const ownerScopeCalls: ControlOwnerScope[] = [];
 
   const deps: JobsServiceDeps = {
     controlApiJsonRequest: async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -46,9 +48,9 @@ function createServiceHarness({
       return (await handler(path, init)) as T;
     },
     getCurrentActorId: () => SYNTHETIC_ACTOR_ID,
-    buildControlMediaScope: (actorId) => {
-      mediaScopeActorIds.push(actorId);
-      return createSyntheticMediaScope(actorId);
+    resolveCurrentOwnerScope: () => {
+      ownerScopeCalls.push(ownerScope);
+      return ownerScope;
     },
     createClientId: (prefix) => {
       clientIdPrefixes.push(prefix);
@@ -60,8 +62,21 @@ function createServiceHarness({
   return {
     calls,
     clientIdPrefixes,
-    mediaScopeActorIds,
+    ownerScopeCalls,
     service: createJobsService(deps),
+  };
+}
+
+function createSyntheticOwnerScope(
+  overrides: Partial<ControlOwnerScope> = {},
+): ControlOwnerScope {
+  return {
+    accountOwnerType: "user",
+    accountOwnerId: SYNTHETIC_ACTOR_ID,
+    organizationId: null,
+    organizationRole: null,
+    source: "personal-default",
+    ...overrides,
   };
 }
 
@@ -145,7 +160,7 @@ describe("createJobsService", () => {
   });
 
   it("creates canonical jobs through the stable public route and body-owned idempotency key", async () => {
-    const { calls, clientIdPrefixes, mediaScopeActorIds, service } = createServiceHarness({
+    const { calls, clientIdPrefixes, ownerScopeCalls, service } = createServiceHarness({
       handler: () =>
         createSyntheticJob({
           id: "synthetic-created-job",
@@ -203,7 +218,66 @@ describe("createJobsService", () => {
       },
     });
     expect(clientIdPrefixes).toEqual(["job"]);
-    expect(mediaScopeActorIds).toEqual(["synthetic-actor"]);
+    expect(ownerScopeCalls).toEqual([createSyntheticOwnerScope()]);
+  });
+
+  it("propagates organization owner scope through create and list job requests", async () => {
+    const organizationScope = createSyntheticOwnerScope({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
+      organizationId: "synthetic-organization",
+      organizationRole: "enterprise_admin",
+      source: "current-organization",
+    });
+    const { calls, service } = createServiceHarness({
+      ownerScope: organizationScope,
+      handler: (path) => {
+        if (path.startsWith("/api/jobs?")) {
+          return [
+            createSyntheticJob({
+              id: "synthetic-org-listed-job",
+              job_type: "image.render",
+              payload: {
+                domain: "media",
+                projectId: "synthetic-project",
+              },
+            }),
+          ];
+        }
+
+        return createSyntheticJob({
+          id: "synthetic-org-created-job",
+          job_type: "image.render",
+          status: "queued",
+          payload: {
+            domain: "media",
+            projectId: "synthetic-project",
+          },
+        });
+      },
+    });
+
+    await service.createCanonicalJob({
+      jobType: "image.render",
+      domain: "media",
+      payload: {
+        projectId: "synthetic-project",
+      },
+    });
+    await service.listTasks("synthetic-project", "image.render");
+
+    expect(calls[0].path).toBe("/api/jobs");
+    expect(parseJsonBody(calls[0])).toMatchObject({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
+      regionCode: "CN",
+      currency: "CNY",
+      createdByUserId: SYNTHETIC_ACTOR_ID,
+    });
+    expect(calls[1]).toEqual({
+      path: "/api/jobs?accountOwnerType=organization&accountOwnerId=synthetic-organization&limit=200",
+      init: undefined,
+    });
   });
 
   it("lists tasks through account-scoped public jobs and applies project/type filters", async () => {

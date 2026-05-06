@@ -141,9 +141,21 @@ public sealed class AuthHelpersTests
     }
 
     [Theory]
+    [InlineData("/api/playground", true)]
+    [InlineData("/api/media/upload-begin", true)]
+    [InlineData("/api/wallets", true)]
+    [InlineData("/api/windows-native/status", false)]
+    [InlineData("/api/internal/jobs/lease", false)]
+    public void ClientRoutePolicy_ClassifiesPublicClientApiPathsDirectly(string path, bool expected)
+    {
+        Assert.Equal(expected, ClientRoutePolicy.IsPublicClientApiRequest(new PathString(path)));
+    }
+
+    [Theory]
     [InlineData("GET", "/api/auth/providers", true)]
     [InlineData("GET", "/api/me", true)]
     [InlineData("POST", "/api/auth/login", true)]
+    [InlineData("POST", "/api/auth/demo-session", true)]
     [InlineData("POST", "/api/enterprise-applications", true)]
     [InlineData("POST", "/api/projects", false)]
     [InlineData("GET", "/api/projects", false)]
@@ -289,6 +301,19 @@ public sealed class AuthHelpersTests
         Assert.Equal(expected, AuthHelpers.GetRequiredClientPermission(context));
     }
 
+    [Theory]
+    [InlineData("GET", "/api/playground/models", "playground:read")]
+    [InlineData("POST", "/api/media/signed-read-url", "media:read")]
+    [InlineData("POST", "/api/jobs/synthetic-job/cancel", "jobs:cancel")]
+    [InlineData("GET", "/metrics", null)]
+    public void ClientRoutePolicy_MapsPermissionsDirectly(
+        string method,
+        string path,
+        string? expected)
+    {
+        Assert.Equal(expected, ClientRoutePolicy.GetRequiredClientPermission(method, new PathString(path)));
+    }
+
     [Fact]
     public void ResolvePublicOwnerScope_DefaultsToUserActorAndCnCny()
     {
@@ -424,6 +449,74 @@ public sealed class AuthHelpersTests
         Assert.Equal(
             """{"error":"account scope is not authorized for this client token"}""",
             denied.Body);
+    }
+
+    [Fact]
+    public void AccountScopeAuthorizer_AllowsConfiguredOwnerWildcardDirectly()
+    {
+        Assert.True(AccountScopeAuthorizer.IsAccountScopeAllowed(
+            principal: null,
+            configuredAllowedAccountIds: null,
+            configuredAllowedAccountOwnerIds: "organization:*",
+            requireConfiguredAccountGrant: true,
+            shouldRequireConfiguredAccountGrant: true,
+            headerAccountId: null,
+            accountId: null,
+            headerOwnerType: null,
+            headerOwnerId: null,
+            ownerType: "organization",
+            ownerTypeWasSpecified: true,
+            ownerId: "tenant-1"));
+    }
+
+    [Fact]
+    public void AccountScopeAuthorizer_AllowsHeaderAccountIdWhenConfiguredGrantNotRequired()
+    {
+        Assert.True(AccountScopeAuthorizer.IsAccountScopeAllowed(
+            principal: null,
+            configuredAllowedAccountIds: null,
+            configuredAllowedAccountOwnerIds: null,
+            requireConfiguredAccountGrant: false,
+            shouldRequireConfiguredAccountGrant: true,
+            headerAccountId: "account-1",
+            accountId: "account-1",
+            headerOwnerType: null,
+            headerOwnerId: null,
+            ownerType: "user",
+            ownerTypeWasSpecified: false,
+            ownerId: null));
+    }
+
+    [Fact]
+    public void AccountScopeAuthorizer_PreservesUnspecifiedOwnerTypeHeaderCompatibility()
+    {
+        Assert.True(AccountScopeAuthorizer.IsAccountScopeAllowed(
+            principal: null,
+            configuredAllowedAccountIds: null,
+            configuredAllowedAccountOwnerIds: null,
+            requireConfiguredAccountGrant: false,
+            shouldRequireConfiguredAccountGrant: true,
+            headerAccountId: null,
+            accountId: null,
+            headerOwnerType: "organization",
+            headerOwnerId: "owner-1",
+            ownerType: "user",
+            ownerTypeWasSpecified: false,
+            ownerId: "owner-1"));
+
+        Assert.False(AccountScopeAuthorizer.IsAccountScopeAllowed(
+            principal: null,
+            configuredAllowedAccountIds: null,
+            configuredAllowedAccountOwnerIds: null,
+            requireConfiguredAccountGrant: false,
+            shouldRequireConfiguredAccountGrant: true,
+            headerAccountId: null,
+            accountId: null,
+            headerOwnerType: "organization",
+            headerOwnerId: "owner-1",
+            ownerType: "user",
+            ownerTypeWasSpecified: true,
+            ownerId: "owner-1"));
     }
 
     [Theory]

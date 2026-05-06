@@ -161,6 +161,8 @@ only the approved public Control API routes to `127.0.0.1:4100`:
 
 `/api/internal/*`, `/api/schema/*`, `/api/providers/health`, and unlisted
 legacy API paths must not be exposed through the public reverse proxy.
+Legacy `/api/payments/{provider}/notify` callback aliases are retired; expose
+only `/api/payments/callbacks/{provider}`.
 
 For production, set `INTERNAL_API_TOKEN` and protect public client routes with
 either a static `CLIENT_API_TOKEN` or provider-signed client assertions. The

@@ -1,7 +1,16 @@
-import { getControlApiClientAssertion, getCurrentActorId, getAuthToken } from "./actor-session";
+import {
+  getAuthToken,
+  getCurrentActorId,
+  hasSessionCredentials,
+} from "./actor-session";
 import { isLocalLoopbackAccess, SUPER_ADMIN_DEMO_ACTOR_ID } from "./local-loopback";
-import { isRetiredLegacyMediaPath } from "./media-url-policy";
 import { createAdminEnterpriseService } from "./api/admin-enterprise";
+import {
+  API_BASE_URL,
+  ApiRequestError,
+  assertNoLegacyMutatingRequest,
+  controlApiJsonRequest,
+} from "./api/control-api-client";
 import { createAuthAccountService } from "./api/auth-account";
 import { createJobsService } from "./api/jobs";
 import { createMediaService } from "./api/media";
@@ -9,6 +18,10 @@ import { createPlaygroundService } from "./api/playground";
 import { createProjectsCanvasCreateService } from "./api/projects-canvas-create";
 import { createToolboxService } from "./api/toolbox";
 import { createWalletPaymentService } from "./api/wallet-payment";
+import {
+  resolveCurrentOwnerScope,
+  type ControlOwnerScope,
+} from "./control-owner-scope";
 import type {
   VideoInputMode,
   VideoGenerationMode,
@@ -27,114 +40,7 @@ export type {
   MediaCapabilitiesResponse,
 } from "./create-capabilities";
 export { normalizeVideoMode, VIDEO_MODE_ALIASES } from "./create-capabilities";
-
-export const API_BASE_URL =
-  import.meta.env.VITE_CORE_API_BASE_URL ?? "";
-
-const CONTROL_API_CLIENT_EXACT_PATHS = new Set([
-  "/api/accounts/ensure",
-  "/api/capabilities",
-  "/api/jobs",
-  "/api/wallet",
-  "/api/wallets",
-  "/api/wallet/usage-stats",
-  "/api/media/upload-begin",
-  "/api/media/upload-complete",
-  "/api/media/move-temp-to-permanent",
-  "/api/media/signed-read-url",
-  "/api/auth/providers",
-  "/api/auth/google/exchange",
-  "/api/auth/login",
-  "/api/auth/admin/login",
-  "/api/auth/register/personal",
-  "/api/auth/register/enterprise-admin",
-  "/api/me",
-  "/api/api-center",
-  "/api/api-center/defaults",
-  "/api/admin/pricing-rules",
-  "/api/admin/orders",
-  "/api/enterprise-applications",
-  "/api/playground/config",
-  "/api/playground/models",
-  "/api/playground/conversations",
-  "/api/playground/chat-jobs",
-  "/api/playground/memories",
-  "/api/playground/memories/preference",
-  "/api/toolbox",
-  "/api/toolbox/capabilities",
-  "/api/toolbox/character-replace",
-  "/api/toolbox/motion-transfer",
-  "/api/toolbox/upscale-restore",
-  "/api/toolbox/video-reverse-prompt",
-  "/api/toolbox/storyboard-grid25",
-  "/api/toolbox/translate-text",
-  "/api/projects",
-  "/api/canvas-projects",
-  "/api/agent-canvas/projects",
-  "/api/create/images",
-  "/api/create/videos",
-]);
-const LEGACY_MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const ALLOW_LEGACY_MUTATIONS = ["1", "true", "yes", "on"].includes(
-  String(import.meta.env.VITE_ALLOW_LEGACY_MUTATIONS ?? "").trim().toLowerCase(),
-);
-
-function isControlApiClientPath(path: string) {
-  const normalizedPath = path.split("?")[0];
-  return (
-    CONTROL_API_CLIENT_EXACT_PATHS.has(normalizedPath) ||
-    normalizedPath.startsWith("/api/jobs/") ||
-    normalizedPath.startsWith("/api/wallets/") ||
-    normalizedPath.startsWith("/api/organizations/") ||
-    normalizedPath.startsWith("/api/api-center/") ||
-    normalizedPath.startsWith("/api/admin/") ||
-    normalizedPath.startsWith("/api/enterprise-applications/") ||
-    normalizedPath.startsWith("/api/playground/") ||
-    normalizedPath.startsWith("/api/toolbox/") ||
-    normalizedPath.startsWith("/api/projects/") ||
-    normalizedPath.startsWith("/api/canvas-projects/") ||
-    normalizedPath.startsWith("/api/agent-canvas/projects/") ||
-    normalizedPath.startsWith("/api/create/images/") ||
-    normalizedPath.startsWith("/api/create/videos/")
-  );
-}
-
-function getRequestMethod(init?: RequestInit) {
-  return String(init?.method ?? "GET").trim().toUpperCase();
-}
-
-function isLegacySurfacePath(path: string) {
-  const normalizedPath = path.split("?")[0];
-  return (
-    normalizedPath === "/api" ||
-    normalizedPath.startsWith("/api/") ||
-    isRetiredLegacyMediaPath(normalizedPath) ||
-    normalizedPath === "/jaaz" ||
-    normalizedPath.startsWith("/jaaz/") ||
-    normalizedPath === "/jaaz-api" ||
-    normalizedPath.startsWith("/jaaz-api/")
-  );
-}
-
-function assertNoLegacyMutatingRequest(path: string, init?: RequestInit) {
-  const method = getRequestMethod(init);
-  if (
-    ALLOW_LEGACY_MUTATIONS ||
-    !LEGACY_MUTATING_METHODS.has(method) ||
-    isControlApiClientPath(path) ||
-    !isLegacySurfacePath(path)
-  ) {
-    return;
-  }
-
-  throw new ApiRequestError(
-    "Legacy mutating API routes are disabled in the Windows-native runtime. Use the .NET Control API or retire this flow.",
-    {
-      code: "LEGACY_WRITE_DISABLED",
-      status: 410,
-    },
-  );
-}
+export { API_BASE_URL, ApiRequestError } from "./api/control-api-client";
 
 export type ProjectStep =
   | "global"
@@ -985,18 +891,6 @@ type ApiEnvelope<T> = {
   };
 };
 
-export class ApiRequestError extends Error {
-  code: string;
-  status: number;
-
-  constructor(message: string, options?: { code?: string; status?: number }) {
-    super(message);
-    this.name = "ApiRequestError";
-    this.code = options?.code || "API_REQUEST_FAILED";
-    this.status = options?.status || 500;
-  }
-}
-
 function isRouteNotFoundError(error: unknown) {
   return (
     (error instanceof ApiRequestError && error.status === 404) ||
@@ -1221,118 +1115,6 @@ function retiredRechargeError(flow: string): never {
   );
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  assertNoLegacyMutatingRequest(path, init);
-
-  const actorId = getCurrentActorId();
-  const token = getAuthToken();
-  const controlApiClientAssertion = getControlApiClientAssertion();
-  const headers = new Headers(init?.headers);
-  if (!headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-  headers.set("X-Actor-Id", actorId);
-  if (controlApiClientAssertion && isControlApiClientPath(path)) {
-    headers.set("Authorization", `Bearer ${controlApiClientAssertion}`);
-  } else if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  });
-
-  const responseText = await response.text();
-  let payload: ApiEnvelope<T> | null = null;
-
-  if (responseText) {
-    try {
-      payload = JSON.parse(responseText) as ApiEnvelope<T>;
-    } catch {
-      throw new ApiRequestError(
-        response.ok
-          ? "接口返回格式无效"
-          : `接口请求失败（${response.status || "NETWORK"}）`,
-        {
-          code: "INVALID_API_RESPONSE",
-          status: response.status || 500,
-        },
-      );
-    }
-  }
-
-  if (!payload) {
-    throw new ApiRequestError(
-      response.ok
-        ? "接口返回为空"
-        : `接口请求失败（${response.status || "NETWORK"}）`,
-      {
-        code: "EMPTY_API_RESPONSE",
-        status: response.status || 500,
-      },
-    );
-  }
-
-  if (!response.ok || !payload.success) {
-    throw new ApiRequestError(payload.error?.message ?? "接口请求失败", {
-      code: payload.error?.code,
-      status: response.status,
-    });
-  }
-
-  return payload.data;
-}
-
-async function controlApiJsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  assertNoLegacyMutatingRequest(path, init);
-
-  const actorId = getCurrentActorId();
-  const token = getAuthToken();
-  const controlApiClientAssertion = getControlApiClientAssertion();
-  const headers = new Headers(init?.headers);
-  const isFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
-  if (init?.body && !isFormDataBody && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-  headers.set("X-Actor-Id", actorId);
-  if (controlApiClientAssertion && isControlApiClientPath(path)) {
-    headers.set("Authorization", `Bearer ${controlApiClientAssertion}`);
-  } else if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  });
-
-  const text = await response.text();
-  let payload: unknown = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      throw new ApiRequestError("Control API returned an invalid JSON response", {
-        code: "CONTROL_API_INVALID_RESPONSE",
-        status: response.status || 500,
-      });
-    }
-  }
-
-  if (!response.ok) {
-    const errorPayload = payload as { error?: { message?: string; code?: string }; title?: string; detail?: string } | null;
-    throw new ApiRequestError(
-      errorPayload?.error?.message || errorPayload?.detail || errorPayload?.title || "Control API request failed",
-      {
-        code: errorPayload?.error?.code,
-        status: response.status,
-      },
-    );
-  }
-
-  return payload as T;
-}
-
 function buildControlMediaScope(actorId: string): ControlMediaRequestScope {
   return {
     accountOwnerType: "user",
@@ -1344,6 +1126,23 @@ function buildControlMediaScope(actorId: string): ControlMediaRequestScope {
 
 function buildControlScopeQuery(actorId = getCurrentActorId()) {
   return `accountOwnerType=user&accountOwnerId=${encodeURIComponent(actorId)}`;
+}
+
+function buildPersonalOwnerFallback(actorId: string): ControlOwnerScope {
+  return {
+    accountOwnerType: "user",
+    accountOwnerId: actorId,
+    organizationId: null,
+    organizationRole: null,
+    source: "explicit-fallback",
+  };
+}
+
+function resolveCurrentControlOwnerScope() {
+  const actorId = getCurrentActorId();
+  return resolveCurrentOwnerScope(buildFallbackPermissionContext(actorId), {
+    explicitFallback: buildPersonalOwnerFallback(actorId),
+  });
 }
 
 const walletPaymentService = createWalletPaymentService({
@@ -1368,7 +1167,7 @@ const authAccountService = createAuthAccountService({
 const mediaService = createMediaService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope: resolveCurrentControlOwnerScope,
   createClientId,
   createApiRequestError: (message, options) => new ApiRequestError(message, options),
 });
@@ -1376,15 +1175,17 @@ const mediaService = createMediaService({
 const playgroundService = createPlaygroundService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlScopeQuery,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope: resolveCurrentControlOwnerScope,
   createApiRequestError: (message, options) => new ApiRequestError(message, options),
+  hasSessionCredentials,
+  isAuthBoundaryError: (error) =>
+    error instanceof ApiRequestError && (error.status === 401 || error.status === 403),
 });
 
 const jobsService = createJobsService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope: resolveCurrentControlOwnerScope,
   createClientId,
   isNotFoundError: (error) => error instanceof ApiRequestError && error.status === 404,
 });
@@ -1392,8 +1193,7 @@ const jobsService = createJobsService({
 const projectsCanvasCreateService = createProjectsCanvasCreateService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlScopeQuery,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope: resolveCurrentControlOwnerScope,
   createCanonicalJob: jobsService.createCanonicalJob,
 });
 
@@ -2169,8 +1969,8 @@ export async function listWalletLedger(walletId: string) {
   return walletPaymentService.listWalletLedger(walletId);
 }
 
-export async function getWalletUsageStats(mode: CreditUsageMode = "personal") {
-  return walletPaymentService.getWalletUsageStats(mode);
+export async function getWalletUsageStats(mode: CreditUsageMode = "personal", ownerId?: string) {
+  return walletPaymentService.getWalletUsageStats(mode, ownerId);
 }
 
 export async function searchCreditUsageSubjects(search?: string) {
@@ -2328,6 +2128,10 @@ export async function loginWithEmail(input: LoginInput) {
 
 export async function loginAdminWithEmail(input: LoginInput) {
   return authAccountService.loginAdminWithEmail(input);
+}
+
+export async function startDemoSession(actorId: string): Promise<LoginResult> {
+  return authAccountService.startDemoSession(actorId);
 }
 
 export async function getAuthProviders() {

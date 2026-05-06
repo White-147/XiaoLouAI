@@ -129,6 +129,13 @@ export function createAuthAccountService({
       });
     },
 
+    startDemoSession(actorId: string) {
+      return controlApiJsonRequest<LoginResult>("/api/auth/demo-session", {
+        method: "POST",
+        body: JSON.stringify({ actorId }),
+      });
+    },
+
     getAuthProviders() {
       return controlApiJsonRequest<AuthProvidersResponse>("/api/auth/providers");
     },

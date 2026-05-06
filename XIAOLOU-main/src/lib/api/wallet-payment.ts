@@ -162,20 +162,21 @@ export function createWalletPaymentService({
       }
     },
 
-    async getWalletUsageStats(mode: CreditUsageMode = "personal") {
+    async getWalletUsageStats(mode: CreditUsageMode = "personal", ownerId = getCurrentActorId()) {
       const actorId = getCurrentActorId();
       const ownerType: WalletOwnerType = mode === "organization" ? "organization" : "user";
-      const query = buildWalletQuery(ownerType, actorId, { mode });
+      const effectiveOwnerId = ownerId || actorId;
+      const query = buildWalletQuery(ownerType, effectiveOwnerId, { mode });
       try {
         return await controlApiJsonRequest<CreditUsageStats>(`/api/wallet/usage-stats?${query}`);
       } catch (error) {
         if (!isRouteNotFoundError(error)) throw error;
-        const wallet = createEmptyWallet(ownerType, actorId);
+        const wallet = createEmptyWallet(ownerType, effectiveOwnerId);
         return emptyCreditUsageStats(
           {
             type: ownerType,
-            id: actorId,
-            label: ownerType === "organization" ? `Organization ${actorId}` : `User ${actorId}`,
+            id: effectiveOwnerId,
+            label: ownerType === "organization" ? `Organization ${effectiveOwnerId}` : `User ${effectiveOwnerId}`,
             detail: "canonical wallet read surface",
           },
           mode,

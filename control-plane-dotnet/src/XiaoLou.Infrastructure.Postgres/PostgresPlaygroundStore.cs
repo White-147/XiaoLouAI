@@ -81,7 +81,13 @@ public sealed class PostgresPlaygroundStore(
                 OR pc.title ILIKE '%' || @search || '%'
                 OR pc.model ILIKE '%' || @search || '%'
               )
-            ORDER BY COALESCE(pc.last_message_at, pc.updated_at, pc.created_at) DESC, pc.created_at DESC
+            ORDER BY COALESCE(
+              CASE WHEN pc.last_message_at::text ~ '^\d{4}-\d{2}-\d{2}' THEN pc.last_message_at::text::timestamptz END,
+              CASE WHEN pc.updated_at::text ~ '^\d{4}-\d{2}-\d{2}' THEN pc.updated_at::text::timestamptz END,
+              CASE WHEN pc.created_at::text ~ '^\d{4}-\d{2}-\d{2}' THEN pc.created_at::text::timestamptz END,
+              '-infinity'::timestamptz
+            ) DESC,
+            CASE WHEN pc.created_at::text ~ '^\d{4}-\d{2}-\d{2}' THEN pc.created_at::text::timestamptz END DESC NULLS LAST
             LIMIT @limit
             """,
             connection);

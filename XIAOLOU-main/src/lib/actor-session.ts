@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 
 export const DEFAULT_ACTOR_ID = "guest";
+const LOCAL_DEMO_ACTOR_IDS = new Set([
+  "user_personal_001",
+  "user_demo_001",
+  "user_member_001",
+  "ops_demo_001",
+  "root_demo_001",
+]);
 const ACTOR_STORAGE_KEY = "xiaolou-current-actor-id";
 const KNOWN_ACTORS_STORAGE_KEY = "xiaolou-known-actors";
 const AUTH_TOKEN_KEY = "xiaolou-auth-token";
@@ -150,6 +157,14 @@ export function getControlApiClientAssertion(): string | null {
   return window.localStorage.getItem(CONTROL_API_ASSERTION_KEY) || null;
 }
 
+export function hasSessionCredentials() {
+  return Boolean(getAuthToken() || getControlApiClientAssertion());
+}
+
+export function isLocalDemoActorId(actorId = getCurrentActorId()) {
+  return LOCAL_DEMO_ACTOR_IDS.has(normalizeActorId(actorId));
+}
+
 export function setControlApiClientAssertion(assertion: string | null | undefined) {
   if (typeof window === "undefined") return;
   if (assertion) {
@@ -181,7 +196,7 @@ export function logout() {
 }
 
 export function useActorId() {
-  const [actorId, setActorId] = useState(DEFAULT_ACTOR_ID);
+  const [actorId, setActorId] = useState(() => getCurrentActorId());
 
   useEffect(() => {
     setActorId(getCurrentActorId());

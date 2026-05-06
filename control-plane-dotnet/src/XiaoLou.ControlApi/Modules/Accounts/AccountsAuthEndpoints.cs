@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -12,6 +13,15 @@ namespace XiaoLou.ControlApi.Modules.Accounts;
 
 internal static class AccountsAuthEndpoints
 {
+    private static readonly HashSet<string> DemoActorIds = new(StringComparer.Ordinal)
+    {
+        "user_personal_001",
+        "user_member_001",
+        "user_demo_001",
+        "ops_demo_001",
+        "root_demo_001",
+    };
+
     public static IEndpointRouteBuilder MapAccountsAuthEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost("/api/accounts/ensure", async (
@@ -64,6 +74,42 @@ internal static class AccountsAuthEndpoints
             CancellationToken ct) =>
         {
             var permissionContext = await identity.LoginWithEmailAsync(request, "ops_admin", ct);
+            return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
+        });
+
+        endpoints.MapPost("/api/auth/demo-session", async (
+            DemoSessionRequest request,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (!IsLocalDemoSessionRequest(httpContext))
+            {
+                return Results.Json(new
+                {
+                    error = new
+                    {
+                        code = "DEMO_SESSION_LOCAL_ONLY",
+                        message = "Demo sessions are available only from local loopback access.",
+                    },
+                }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var actorId = NormalizeBlank(request.ActorId);
+            if (actorId is null || !DemoActorIds.Contains(actorId))
+            {
+                return Results.Json(new
+                {
+                    error = new
+                    {
+                        code = "DEMO_ACTOR_NOT_FOUND",
+                        message = "Demo actor is not available.",
+                    },
+                }, statusCode: StatusCodes.Status404NotFound);
+            }
+
+            var permissionContext = await identity.GetPermissionContextAsync(actorId, ct);
             return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
         });
 
@@ -302,4 +348,43 @@ internal static class AccountsAuthEndpoints
             : CreateControlApiClientAssertion(permissionContext, options);
         return next;
     }
+
+    private static bool IsLocalDemoSessionRequest(HttpContext context)
+    {
+        if (HasExternalForwardedAddress(context))
+        {
+            return false;
+        }
+
+        var remoteIp = context.Connection.RemoteIpAddress;
+        if (remoteIp is not null && !IPAddress.IsLoopback(remoteIp))
+        {
+            return false;
+        }
+
+        return IsLocalOriginHeader(context, "Origin")
+            && IsLocalOriginHeader(context, "Referer");
+    }
+
+    private static bool IsLocalOriginHeader(HttpContext context, string headerName)
+    {
+        var headerValue = ReadHeader(context, headerName);
+        if (string.IsNullOrWhiteSpace(headerValue))
+        {
+            return true;
+        }
+
+        return Uri.TryCreate(headerValue, UriKind.Absolute, out var uri)
+            && IsLocalHost(uri.Host);
+    }
+
+    private static bool IsLocalHost(string host)
+    {
+        return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(host, "::1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(host, "[::1]", StringComparison.OrdinalIgnoreCase);
+    }
 }
+
+internal sealed record DemoSessionRequest(string ActorId);

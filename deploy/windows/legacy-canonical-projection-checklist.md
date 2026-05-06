@@ -130,7 +130,7 @@ If the verifier reports missing account/job/ledger projection, generate a
 dry-run projection plan against an isolated staging schema first:
 
 ```powershell
-$db = "postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_test?options=-c%20search_path%3Dlegacy_projection_staging_YYYYMMDD_HHMMSS"
+$db = "postgres://root:root@127.0.0.1:5432/xiaolou?options=-c%20search_path%3Dlegacy_projection_staging_YYYYMMDD_HHMMSS"
 D:\code\XiaoLouAI\scripts\windows\project-legacy-to-canonical.ps1 -DatabaseUrl $db
 ```
 

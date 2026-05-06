@@ -43,6 +43,14 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         Assert.Contains(method, methodMetadata.HttpMethods, StringComparer.Ordinal);
     }
 
+    [Theory]
+    [InlineData("/api/payments/alipay/notify")]
+    [InlineData("/api/payments/wechat/notify")]
+    public void OldPaymentNotifyAlias_IsNotMapped(string path)
+    {
+        Assert.Empty(FindRoutes(HttpMethods.Post, path));
+    }
+
     public async ValueTask DisposeAsync()
     {
         await app.DisposeAsync();
@@ -74,8 +82,6 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         yield return Route(HttpMethods.Get, "/api/wallets/{walletId:guid}/ledger");
         yield return Route(HttpMethods.Get, "/api/wallet/usage-stats");
         yield return Route(HttpMethods.Post, "/api/payments/callbacks/{provider}");
-        yield return Route(HttpMethods.Post, "/api/payments/alipay/notify");
-        yield return Route(HttpMethods.Post, "/api/payments/wechat/notify");
 
         yield return Route(HttpMethods.Post, "/api/media/upload-begin");
         yield return Route(HttpMethods.Post, "/api/media/upload-complete");
@@ -170,7 +176,12 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
 
     private RouteEndpoint FindRoute(string method, string path)
     {
-        var matching = ((IEndpointRouteBuilder)app).DataSources
+        return Assert.Single(FindRoutes(method, path));
+    }
+
+    private RouteEndpoint[] FindRoutes(string method, string path)
+    {
+        return ((IEndpointRouteBuilder)app).DataSources
             .SelectMany(source => source.Endpoints)
             .OfType<RouteEndpoint>()
             .Where(endpoint => string.Equals(endpoint.RoutePattern.RawText, path, StringComparison.Ordinal))
@@ -179,8 +190,6 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
                     method,
                     StringComparer.Ordinal) == true)
             .ToArray();
-
-        return Assert.Single(matching);
     }
 
     private static object[] Route(string method, string path)

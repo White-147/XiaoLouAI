@@ -331,6 +331,29 @@ describe("createWalletPaymentService", () => {
     ]);
   });
 
+  it("reads organization usage stats with an explicit owner id", async () => {
+    const stats = createSyntheticUsageStats({
+      mode: "organization",
+      subject: {
+        type: "organization",
+        id: "synthetic-organization",
+        label: "Organization synthetic-organization",
+        detail: "synthetic fixture",
+      },
+    });
+    const { calls, service } = createServiceHarness({
+      handler: () => stats,
+    });
+
+    await expect(service.getWalletUsageStats("organization", "synthetic-organization")).resolves.toBe(stats);
+    expect(calls).toEqual([
+      {
+        path: "/api/wallet/usage-stats?accountOwnerType=organization&accountOwnerId=synthetic-organization&mode=organization",
+        init: undefined,
+      },
+    ]);
+  });
+
   it("keeps local credit usage subject searches and admin stats network-free", async () => {
     const { calls, service } = createServiceHarness();
 

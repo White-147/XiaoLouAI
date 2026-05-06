@@ -22,7 +22,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -46,7 +46,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -72,7 +72,7 @@ internal static class PlaygroundEndpoints
                 RegionCode = scope.RegionCode,
                 Currency = scope.Currency,
             };
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -99,7 +99,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -124,7 +124,7 @@ internal static class PlaygroundEndpoints
                 RegionCode = scope.RegionCode,
                 Currency = scope.Currency,
             };
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -143,7 +143,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -162,7 +162,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -183,7 +183,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -209,7 +209,7 @@ internal static class PlaygroundEndpoints
                 RegionCode = scope.RegionCode,
                 Currency = scope.Currency,
             };
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -240,7 +240,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -258,7 +258,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -281,7 +281,7 @@ internal static class PlaygroundEndpoints
                 RegionCode = scope.RegionCode,
                 Currency = scope.Currency,
             };
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -305,7 +305,7 @@ internal static class PlaygroundEndpoints
                 RegionCode = scope.RegionCode,
                 Currency = scope.Currency,
             };
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -330,7 +330,7 @@ internal static class PlaygroundEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }

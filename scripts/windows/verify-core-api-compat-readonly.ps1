@@ -316,7 +316,7 @@ if (-not $DatabaseUrl) {
   $DatabaseUrl = [Environment]::GetEnvironmentVariable("DATABASE_URL", "Process")
 }
 if (-not $DatabaseUrl -or $DatabaseUrl.Contains("change-me")) {
-  $DatabaseUrl = "postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_test"
+  $DatabaseUrl = "postgres://root:root@127.0.0.1:5432/xiaolou"
 }
 
 if (Test-PortOpen "127.0.0.1" $Port) {

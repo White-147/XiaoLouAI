@@ -1,6 +1,7 @@
 import { Camera, LoaderCircle, User as UserIcon, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { uploadFile, type PermissionContext, updateMe } from "../../lib/api";
+import { mergeProfileUpdateContext, resolveAvatarUploadUrl } from "../../lib/api/profile-avatar";
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -26,14 +27,15 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
   if (!isOpen || !context) return null;
 
   const handleSave = async () => {
-    if (!displayName.trim()) return;
+    if (!displayName.trim() || isUploading) return;
     setIsSaving(true);
     try {
-      const updatedContext = await updateMe({
+      const profilePatch = {
         displayName: displayName.trim(),
         avatar,
-      });
-      onUpdateContext(updatedContext);
+      };
+      const updatedContext = await updateMe(profilePatch);
+      onUpdateContext(mergeProfileUpdateContext(updatedContext, profilePatch));
       onClose();
     } catch (error) {
       console.error("Failed to update profile:", error);
@@ -53,10 +55,10 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
 
     try {
       const uploaded = await uploadFile(file, "avatar");
-      setAvatar(uploaded.urlPath || uploaded.url);
+      setAvatar(resolveAvatarUploadUrl(uploaded));
     } catch (error) {
       console.error("Avatar upload failed:", error);
-      setAvatar(null);
+      setAvatar(context.actor.avatar || null);
       alert("头像上传失败，请重试");
     } finally {
       URL.revokeObjectURL(localPreview);
@@ -161,7 +163,7 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving || !displayName.trim()}
+            disabled={isSaving || isUploading || !displayName.trim()}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {isSaving && <LoaderCircle className="h-4 w-4 animate-spin" />}

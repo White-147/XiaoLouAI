@@ -1,4 +1,4 @@
-﻿# XiaoLouAI Control Plane (.NET)
+# XiaoLouAI Control Plane (.NET)
 
 Language: [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -97,7 +97,7 @@ Windows verification script from the repository root:
 ```powershell
 $env:CONTROL_API_BASE_URL="http://127.0.0.1:4100"
 $env:PAYMENT_WEBHOOK_SECRET="xiaolou-test-secret"
-$env:DATABASE_URL="postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_test"
+$env:DATABASE_URL="postgres://root:root@127.0.0.1:5432/xiaolou"
 .\scripts\windows\verify-control-plane-p0.ps1
 ```
 

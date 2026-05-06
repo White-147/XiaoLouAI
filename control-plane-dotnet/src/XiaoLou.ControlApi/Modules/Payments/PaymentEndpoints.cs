@@ -29,7 +29,7 @@ internal static class PaymentEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -49,7 +49,7 @@ internal static class PaymentEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -95,7 +95,7 @@ internal static class PaymentEndpoints
             CancellationToken ct) =>
         {
             var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId, mode);
-            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope) is { } denied)
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
             {
                 return denied;
             }
@@ -117,38 +117,6 @@ internal static class PaymentEndpoints
         {
             return await HandlePaymentCallbackAsync(
                 provider,
-                http,
-                paymentCallbackOptions.Value,
-                ledger,
-                verifier,
-                ct);
-        });
-
-        endpoints.MapPost("/api/payments/alipay/notify", async (
-            HttpRequest http,
-            IOptions<PaymentCallbackOptions> paymentCallbackOptions,
-            PostgresPaymentLedger ledger,
-            IPaymentSignatureVerifier verifier,
-            CancellationToken ct) =>
-        {
-            return await HandlePaymentCallbackAsync(
-                "alipay",
-                http,
-                paymentCallbackOptions.Value,
-                ledger,
-                verifier,
-                ct);
-        });
-
-        endpoints.MapPost("/api/payments/wechat/notify", async (
-            HttpRequest http,
-            IOptions<PaymentCallbackOptions> paymentCallbackOptions,
-            PostgresPaymentLedger ledger,
-            IPaymentSignatureVerifier verifier,
-            CancellationToken ct) =>
-        {
-            return await HandlePaymentCallbackAsync(
-                "wechat",
                 http,
                 paymentCallbackOptions.Value,
                 ledger,

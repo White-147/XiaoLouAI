@@ -6,6 +6,7 @@ import type {
   MediaModelStatus,
   VideoGenerationMode,
 } from "../create-capabilities";
+import type { ControlOwnerScope } from "../control-owner-scope";
 import type {
   AgentCanvasProject,
   AgentCanvasProjectSummary,
@@ -35,7 +36,7 @@ import type { CanonicalJobInput, TaskAccepted } from "./jobs";
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 type ControlMediaRequestScope = {
-  accountOwnerType: "user";
+  accountOwnerType: NonNullable<ControlOwnerScope["accountOwnerType"]>;
   accountOwnerId: string;
   regionCode: "CN";
   currency: "CNY";
@@ -100,8 +101,7 @@ type AgentCanvasProjectSaveInput = CanvasProjectSaveInput & {
 export type ProjectsCanvasCreateServiceDeps = {
   controlApiJsonRequest: ControlApiJsonRequest;
   getCurrentActorId: () => string;
-  buildControlScopeQuery: (actorId?: string) => string;
-  buildControlMediaScope: (actorId: string) => ControlMediaRequestScope;
+  resolveCurrentOwnerScope: () => ControlOwnerScope;
   createCanonicalJob: (input: CanonicalJobInput) => Promise<TaskAccepted>;
 };
 
@@ -234,11 +234,30 @@ function buildLocalCreditQuote(
   } satisfies CreditQuote;
 }
 
+function buildControlMediaScope(
+  actorId: string,
+  ownerScope: ControlOwnerScope,
+): ControlMediaRequestScope {
+  return {
+    accountOwnerType: ownerScope.accountOwnerType ?? "user",
+    accountOwnerId: ownerScope.accountOwnerId ?? actorId,
+    regionCode: "CN",
+    currency: "CNY",
+  };
+}
+
+function buildControlScopeQuery(actorId: string, ownerScope: ControlOwnerScope) {
+  const scope = buildControlMediaScope(actorId, ownerScope);
+  const params = new URLSearchParams();
+  params.set("accountOwnerType", scope.accountOwnerType);
+  params.set("accountOwnerId", scope.accountOwnerId);
+  return params.toString();
+}
+
 export function createProjectsCanvasCreateService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlScopeQuery,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope,
   createCanonicalJob,
 }: ProjectsCanvasCreateServiceDeps) {
   const createAsset = (
@@ -265,14 +284,17 @@ export function createProjectsCanvasCreateService({
   return {
     listProjects() {
       const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<{ items: Project[]; total: number; page?: number; pageSize?: number }>(
-        `/api/projects?${buildControlScopeQuery(actorId)}`,
+        `/api/projects?${buildControlScopeQuery(actorId, ownerScope)}`,
       );
     },
 
     listCreateImages() {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<{ items: CreateImageResult[] }>(
-        `/api/create/images?${buildControlScopeQuery()}`,
+        `/api/create/images?${buildControlScopeQuery(actorId, ownerScope)}`,
       );
     },
 
@@ -289,8 +311,10 @@ export function createProjectsCanvasCreateService({
     },
 
     listCreateVideos() {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<{ items: CreateVideoResult[] }>(
-        `/api/create/videos?${buildControlScopeQuery()}`,
+        `/api/create/videos?${buildControlScopeQuery(actorId, ownerScope)}`,
       );
     },
 
@@ -325,15 +349,19 @@ export function createProjectsCanvasCreateService({
     },
 
     deleteCreateImage(imageId: string) {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<{ deleted: boolean; id: string }>(
-        `/api/create/images/${encodeURIComponent(imageId)}?${buildControlScopeQuery()}`,
+        `/api/create/images/${encodeURIComponent(imageId)}?${buildControlScopeQuery(actorId, ownerScope)}`,
         { method: "DELETE" },
       );
     },
 
     deleteCreateVideo(videoId: string) {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<{ deleted: boolean; id: string }>(
-        `/api/create/videos/${encodeURIComponent(videoId)}?${buildControlScopeQuery()}`,
+        `/api/create/videos/${encodeURIComponent(videoId)}?${buildControlScopeQuery(actorId, ownerScope)}`,
         { method: "DELETE" },
       );
     },
@@ -345,10 +373,11 @@ export function createProjectsCanvasCreateService({
       organizationId?: string;
     }) {
       const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<Project>("/api/projects", {
         method: "POST",
         body: JSON.stringify({
-          ...buildControlMediaScope(actorId),
+          ...buildControlMediaScope(actorId, ownerScope),
           ...input,
         }),
       });
@@ -356,10 +385,11 @@ export function createProjectsCanvasCreateService({
 
     updateProject(projectId: string, input: Partial<Project>) {
       const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
         method: "PUT",
         body: JSON.stringify({
-          ...buildControlMediaScope(actorId),
+          ...buildControlMediaScope(actorId, ownerScope),
           ...input,
           id: projectId,
         }),
@@ -635,8 +665,10 @@ export function createProjectsCanvasCreateService({
     },
 
     async listCanvasProjects() {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       const response = await controlApiJsonRequest<{ items: CanvasProjectSummary[] }>(
-        `/api/canvas-projects?${buildControlScopeQuery()}`,
+        `/api/canvas-projects?${buildControlScopeQuery(actorId, ownerScope)}`,
       );
       return {
         ...response,
@@ -650,28 +682,33 @@ export function createProjectsCanvasCreateService({
 
     saveCanvasProject(input: CanvasProjectSaveInput) {
       const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       const path = input.id
         ? `/api/canvas-projects/${encodeURIComponent(input.id)}`
         : "/api/canvas-projects";
       return controlApiJsonRequest<CanvasProject>(path, {
         method: input.id ? "PUT" : "POST",
         body: JSON.stringify({
-          ...buildControlMediaScope(actorId),
+          ...buildControlMediaScope(actorId, ownerScope),
           ...input,
         }),
       });
     },
 
     deleteCanvasProject(projectId: string) {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<{ deleted: boolean; projectId: string }>(
-        `/api/canvas-projects/${encodeURIComponent(projectId)}?${buildControlScopeQuery()}`,
+        `/api/canvas-projects/${encodeURIComponent(projectId)}?${buildControlScopeQuery(actorId, ownerScope)}`,
         { method: "DELETE" },
       );
     },
 
     async listAgentCanvasProjects() {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       const response = await controlApiJsonRequest<{ items: AgentCanvasProjectSummary[] }>(
-        `/api/agent-canvas/projects?${buildControlScopeQuery()}`,
+        `/api/agent-canvas/projects?${buildControlScopeQuery(actorId, ownerScope)}`,
       );
       return {
         ...response,
@@ -689,13 +726,14 @@ export function createProjectsCanvasCreateService({
 
     saveAgentCanvasProject(input: AgentCanvasProjectSaveInput) {
       const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       const path = input.id
         ? `/api/agent-canvas/projects/${encodeURIComponent(input.id)}`
         : "/api/agent-canvas/projects";
       return controlApiJsonRequest<AgentCanvasProject>(path, {
         method: input.id ? "PUT" : "POST",
         body: JSON.stringify({
-          ...buildControlMediaScope(actorId),
+          ...buildControlMediaScope(actorId, ownerScope),
           ...input,
           kind: "agent_canvas",
           agentContext: input.agentContext ?? null,
@@ -704,8 +742,10 @@ export function createProjectsCanvasCreateService({
     },
 
     deleteAgentCanvasProject(projectId: string) {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
       return controlApiJsonRequest<{ deleted: boolean; projectId: string }>(
-        `/api/agent-canvas/projects/${encodeURIComponent(projectId)}?${buildControlScopeQuery()}`,
+        `/api/agent-canvas/projects/${encodeURIComponent(projectId)}?${buildControlScopeQuery(actorId, ownerScope)}`,
         { method: "DELETE" },
       );
     },

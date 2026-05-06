@@ -116,41 +116,12 @@ internal static class AuthHelpers
 
     internal static bool IsPublicClientApiRequest(HttpContext context)
     {
-        var path = context.Request.Path;
-        return path.StartsWithSegments("/api/accounts/ensure")
-            || path.StartsWithSegments("/api/auth")
-            || string.Equals(path.Value, "/api/me", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWithSegments("/api/organizations")
-            || path.StartsWithSegments("/api/api-center")
-            || path.StartsWithSegments("/api/admin")
-            || path.StartsWithSegments("/api/enterprise-applications")
-            || path.StartsWithSegments("/api/playground")
-            || string.Equals(path.Value, "/api/capabilities", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWithSegments("/api/toolbox")
-            || path.StartsWithSegments("/api/jobs")
-            || path.StartsWithSegments("/api/media")
-            || path.StartsWithSegments("/api/projects")
-            || path.StartsWithSegments("/api/canvas-projects")
-            || path.StartsWithSegments("/api/agent-canvas/projects")
-            || path.StartsWithSegments("/api/create")
-            || string.Equals(path.Value, "/api/wallet", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(path.Value, "/api/wallet/usage-stats", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWithSegments("/api/wallets");
+        return ClientRoutePolicy.IsPublicClientApiRequest(context.Request.Path);
     }
 
     internal static bool IsAnonymousIdentityRequest(HttpContext context)
     {
-        var path = context.Request.Path;
-        var method = context.Request.Method;
-        return (HttpMethods.IsGet(method) && string.Equals(path.Value, "/api/auth/providers", StringComparison.OrdinalIgnoreCase))
-            || (HttpMethods.IsGet(method) && string.Equals(path.Value, "/api/me", StringComparison.OrdinalIgnoreCase))
-            || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/google/exchange", StringComparison.OrdinalIgnoreCase))
-            || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/login", StringComparison.OrdinalIgnoreCase))
-            || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/admin/login", StringComparison.OrdinalIgnoreCase))
-            || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/register/personal", StringComparison.OrdinalIgnoreCase))
-            || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/auth/register/enterprise-admin", StringComparison.OrdinalIgnoreCase))
-            || (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/enterprise-applications", StringComparison.OrdinalIgnoreCase));
+        return ClientRoutePolicy.IsAnonymousIdentityRequest(context.Request.Method, context.Request.Path);
     }
 
     internal static AccountScope ResolvePublicOwnerScope(
@@ -308,110 +279,7 @@ internal static class AuthHelpers
 
     internal static string? GetRequiredClientPermission(HttpContext context)
     {
-        var path = context.Request.Path;
-        var method = context.Request.Method;
-
-        if (HttpMethods.IsPost(method)
-            && string.Equals(path.Value, "/api/accounts/ensure", StringComparison.OrdinalIgnoreCase))
-        {
-            return "accounts:ensure";
-        }
-
-        if (path.StartsWithSegments("/api/auth")
-            || string.Equals(path.Value, "/api/me", StringComparison.OrdinalIgnoreCase))
-        {
-            return HttpMethods.IsGet(method) ? "identity:read" : "identity:write";
-        }
-
-        if (path.StartsWithSegments("/api/organizations"))
-        {
-            return HttpMethods.IsGet(method) ? "organization:read" : "organization:write";
-        }
-
-        if (path.StartsWithSegments("/api/api-center"))
-        {
-            return HttpMethods.IsGet(method) ? "api-center:read" : "api-center:write";
-        }
-
-        if (path.StartsWithSegments("/api/admin"))
-        {
-            return HttpMethods.IsGet(method) ? "admin:read" : "admin:write";
-        }
-
-        if (path.StartsWithSegments("/api/enterprise-applications"))
-        {
-            return HttpMethods.IsGet(method) ? "enterprise-applications:read" : "enterprise-applications:write";
-        }
-
-        if (path.StartsWithSegments("/api/playground"))
-        {
-            return HttpMethods.IsGet(method) ? "playground:read" : "playground:write";
-        }
-
-        if (string.Equals(path.Value, "/api/capabilities", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWithSegments("/api/toolbox"))
-        {
-            return HttpMethods.IsGet(method) ? "toolbox:read" : "toolbox:write";
-        }
-
-        if (path.StartsWithSegments("/api/jobs"))
-        {
-            if (HttpMethods.IsGet(method))
-            {
-                return "jobs:read";
-            }
-
-            if (HttpMethods.IsPost(method) && string.Equals(path.Value, "/api/jobs", StringComparison.OrdinalIgnoreCase))
-            {
-                return "jobs:create";
-            }
-
-            if (HttpMethods.IsPost(method) && path.Value?.EndsWith("/cancel", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                return "jobs:cancel";
-            }
-        }
-
-        if (HttpMethods.IsGet(method)
-            && (string.Equals(path.Value, "/api/wallet", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(path.Value, "/api/wallet/usage-stats", StringComparison.OrdinalIgnoreCase)
-                || path.StartsWithSegments("/api/wallets")))
-        {
-            return "wallet:read";
-        }
-
-        if (path.StartsWithSegments("/api/media"))
-        {
-            if (HttpMethods.IsPost(method)
-                && string.Equals(path.Value, "/api/media/signed-read-url", StringComparison.OrdinalIgnoreCase))
-            {
-                return "media:read";
-            }
-
-            if (HttpMethods.IsPost(method))
-            {
-                return "media:write";
-            }
-        }
-
-        if (path.StartsWithSegments("/api/projects"))
-        {
-            return HttpMethods.IsGet(method) ? "projects:read" : "projects:write";
-        }
-
-        if (path.StartsWithSegments("/api/canvas-projects")
-            || path.StartsWithSegments("/api/agent-canvas/projects"))
-        {
-            return HttpMethods.IsGet(method) ? "canvas:read" : "canvas:write";
-        }
-
-        if (path.StartsWithSegments("/api/create"))
-        {
-            return HttpMethods.IsGet(method) ? "create:read" : "create:write";
-        }
-
-        return null;
+        return ClientRoutePolicy.GetRequiredClientPermission(context.Request.Method, context.Request.Path);
     }
 
     internal static bool IsClientAuthModeEnabled(ClientApiOptions options)
@@ -541,17 +409,7 @@ internal static class AuthHelpers
 
     internal static bool ContainsCsvGrant(string? csv, string value)
     {
-        if (string.IsNullOrWhiteSpace(csv))
-        {
-            return false;
-        }
-
-        return csv.Split(
-                new[] { ',', ';', ' ', '\r', '\n', '\t' },
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Any(item => item == "*"
-                || string.Equals(item, value, StringComparison.OrdinalIgnoreCase)
-                || IsPrefixGrantMatch(item, value));
+        return AccountScopeAuthorizer.ContainsCsvGrant(csv, value);
     }
 
     internal static bool HasExternalForwardedAddress(HttpContext context)
@@ -813,87 +671,19 @@ internal static class AuthHelpers
         var headerOwnerId = NormalizeBlank(ReadHeader(context, "X-XiaoLou-Account-Owner-Id"));
         var headerOwnerType = NormalizeOwnerType(ReadHeader(context, "X-XiaoLou-Account-Owner-Type"));
         var normalizedOwnerType = ownerType ?? "user";
-        var principal = GetClientPrincipal(context);
-        if (principal?.FromAuthProvider == true)
-        {
-            if (!IsPrincipalAccountGrantAllowed(principal, normalizedAccountId, normalizedOwnerType, ownerId))
-            {
-                return false;
-            }
-
-            return !requireConfiguredAccountGrant
-                || !ShouldRequireConfiguredAccountGrant(options)
-                || IsConfiguredAccountGrantAllowed(options, normalizedAccountId, normalizedOwnerType, ownerId);
-        }
-
-        var configuredGrantAllowed = IsConfiguredAccountGrantAllowed(options, normalizedAccountId, normalizedOwnerType, ownerId);
-        if (requireConfiguredAccountGrant && ShouldRequireConfiguredAccountGrant(options))
-        {
-            return configuredGrantAllowed;
-        }
-
-        if (headerAccountId is not null && normalizedAccountId is not null)
-        {
-            return string.Equals(headerAccountId, normalizedAccountId, StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (configuredGrantAllowed)
-        {
-            return true;
-        }
-
-        if (headerOwnerId is not null && ownerId is not null)
-        {
-            return string.Equals(headerOwnerId, ownerId, StringComparison.Ordinal)
-                && (ownerType is null || headerOwnerType is null || string.Equals(headerOwnerType, ownerType, StringComparison.Ordinal));
-        }
-
-        return false;
-    }
-
-    private static bool IsPrincipalAccountGrantAllowed(
-        ClientPrincipal principal,
-        string? accountId,
-        string ownerType,
-        string? ownerId)
-    {
-        if (accountId is not null && ContainsCsvGrant(principal.AllowedAccountIds, accountId))
-        {
-            return true;
-        }
-
-        if (ownerId is not null
-            && (ContainsCsvGrant(principal.AllowedAccountOwnerIds, ownerId)
-                || ContainsCsvGrant(principal.AllowedAccountOwnerIds, $"{ownerType}:{ownerId}")
-                || ContainsCsvGrant(principal.AllowedAccountOwnerIds, $"{ownerType}:*")))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsConfiguredAccountGrantAllowed(
-        ClientApiOptions options,
-        string? accountId,
-        string ownerType,
-        string? ownerId)
-    {
-        if (accountId is not null && ContainsCsvGrant(GetConfiguredAllowedAccountIds(options), accountId))
-        {
-            return true;
-        }
-
-        var allowedOwnerIds = GetConfiguredAllowedAccountOwnerIds(options);
-        if (ownerId is not null
-            && (ContainsCsvGrant(allowedOwnerIds, ownerId)
-                || ContainsCsvGrant(allowedOwnerIds, $"{ownerType}:{ownerId}")
-                || ContainsCsvGrant(allowedOwnerIds, $"{ownerType}:*")))
-        {
-            return true;
-        }
-
-        return false;
+        return AccountScopeAuthorizer.IsAccountScopeAllowed(
+            GetClientPrincipal(context),
+            GetConfiguredAllowedAccountIds(options),
+            GetConfiguredAllowedAccountOwnerIds(options),
+            requireConfiguredAccountGrant,
+            ShouldRequireConfiguredAccountGrant(options),
+            headerAccountId,
+            normalizedAccountId,
+            headerOwnerType,
+            headerOwnerId,
+            normalizedOwnerType,
+            ownerType is not null,
+            ownerId);
     }
 
     private static int GetClientAuthProviderClockSkewSeconds(ClientApiOptions options)
@@ -1141,16 +931,6 @@ internal static class AuthHelpers
         return Convert.FromBase64String(padded);
     }
 
-    private static bool IsPrefixGrantMatch(string grant, string value)
-    {
-        if (!grant.EndsWith(":*", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var prefix = grant[..^1];
-        return value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
-    }
 }
 
 internal sealed class ClientApiOptions

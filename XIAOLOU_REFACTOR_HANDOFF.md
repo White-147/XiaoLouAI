@@ -1,6 +1,6 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-06 10:52 +08
+更新时间：2026-05-06 17:41 +08
 工作目录：`D:\code\XiaoLouAI`
 
 本文件是后续每一棒的第一读取文件。根短棒只保留总进度、固定边界、当前 owner/队列提示词和验证入口；历史细节见 docs handoff：
@@ -9,6 +9,7 @@
 docs\xiaolouai-finalization-handoff.md
 docs\xiaolouai-deep-research-structured.md
 docs\xiaolouai-legacy-physical-archive-contract.md
+docs\xiaolouai-refactor-gap-verification.md
 ```
 
 ## PowerShell 读取
@@ -19,6 +20,16 @@ Get-Content .\XIAOLOU_REFACTOR_HANDOFF.md -Encoding UTF8
 Get-Content .\docs\xiaolouai-finalization-handoff.md -Encoding UTF8
 Get-Content .\docs\xiaolouai-deep-research-structured.md -Encoding UTF8
 Get-Content .\docs\xiaolouai-legacy-physical-archive-contract.md -Encoding UTF8
+Get-Content .\docs\xiaolouai-refactor-gap-verification.md -Encoding UTF8
+```
+
+## PowerShell 友好格式
+
+```text
+后续修改 handoff/docs 时保持 UTF-8 Markdown。
+优先使用短行、普通标题、普通列表和 text 代码块。
+避免宽表格、超长单行、隐藏折叠格式和依赖特殊渲染的内容。
+关键 owner、决策、验证入口尽量一事一行，便于 PowerShell Get-Content/Select-String 阅读。
 ```
 
 ## 固定路线
@@ -38,7 +49,7 @@ Get-Content .\docs\xiaolouai-legacy-physical-archive-contract.md -Encoding UTF8
 ```text
 禁止恢复 legacy deploy_aliases 到生产路径。
 禁止让 tasks stream 默认开启。
-禁止让 legacy payment notify 默认开启。
+禁止恢复旧支付 notify alias 为默认公开入口；支付回调以 canonical `/api/payments/callbacks/{provider}` 为统一目标。
 禁止在 legacy/services-api README 或脚本中重新出现 production API wording。
 禁止恢复 legacy 为生产入口，或重新新增 live legacy source root 作为默认工作目录。
 历史 legacy 对照只能显式恢复到单独本地副本，并使用 retained manifest 或 live-source gate 受控验证。
@@ -59,50 +70,431 @@ G8 handoff-sync: done
 G9 operations-evidence-and-acceptance: done
 G10 postgres-performance-inventory-and-tuning: done
 G11 final-legacy-surface-and-physical-cleanup: done
-G12 canonical module/service/test-harness refactor: done; detailed G12a-G12f task history is archived in docs\xiaolouai-finalization-handoff.md
-G13 CI/static/test-gate hardening through required synthetic E2E: done; detailed G13 and G13-post task history is archived in docs\xiaolouai-finalization-handoff.md
-Post-G13 advisory/monitor follow-ups: active queue remains split by owner; latest completed passes are required-synthetic-e2e-stability-monitor, backend-advisory-coverage-expansion, frontend-advisory-coverage-expansion, a second required-synthetic-e2e-stability-monitor pass, coverage-threshold-preflight, security-required-gate-preflight, branch-protection-hardening-review, a 5fac8ca required-synthetic-e2e-stability-monitor pass, backend-advisory response-shape expansion, and frontend auth-account service coverage expansion through 2026-05-06 10:52 +08. Coverage/security gates and branch-protection hardening remain advisory/preflight only; no threshold, security failure gate, workflow, required check, or branch-protection expansion was added.
+G12 canonical module/service/test-harness refactor: done
+G12 detail archive: docs\xiaolouai-finalization-handoff.md
+G13 CI/static/test-gate hardening through required synthetic E2E: done
+G13 detail archive: docs\xiaolouai-finalization-handoff.md
+Post-G13 advisory/monitor follow-ups: active queue remains split by owner
+Post-G13 latest completed through: 2026-05-06 10:52 +08 frontend auth-account service coverage expansion
+Post-G13 gates: coverage/security/branch-protection hardening remain advisory/preflight only
+Post-G13 no-change: no threshold, security failure gate, workflow, required check, or branch-protection expansion added
+G14 refactor-gap closure: active
+G14 source: 2026-05-06 uploaded gap report plus 2026-05-06 14:19 +08 user decisions
+G14 fact: G12/G13 file split, tests, and required synthetic E2E remain valid
+G14 gap: low-coupling closure is not complete
+G14 latest completed: 2026-05-06 17:41 +08 G14q project endpoint authorize helper
 ```
 
 ## 当前模块
 
 ```text
-Owner: next-owner-selection-pending（执行前先从当前可继续队列选择一个 owner）
-当前: G12/G13 已完成的详细阶段记录已归档到 docs\xiaolouai-finalization-handoff.md；根 handoff 只保留当前事实和可继续任务。当前默认下一棒是 required-synthetic-e2e-stability-monitor，但只在本地 advisory 变更 push/开 PR 后、新 required check 不稳定时、或任何 required-gate/branch-protection mutation 前执行；若没有这些触发条件，则不要空跑 monitor，改按显式用户指定 owner。当前 `main` branch protection 要求两个 GitHub Actions required checks：`Build and static gates` 与 `Synthetic browser E2E advisory`，二者均来自 app id 15368。最新 main commit 5fac8ca 的 CI run 25412556135 与 Synthetic E2E Advisory run 25412556150 均 success；branch protection readback 仍只要求这两个 contexts，strict=false、enforce_admins=false、required PR reviews=false、restrictions=false、force pushes=false、deletions=false。2026-05-06 10:24 +08 required-synthetic-e2e-stability-monitor 通过：本机 `npm --prefix .\XIAOLOU-main run test:e2e:synthetic` 13/13 通过，Playwright 37.3s、外层 39.48s，低于 60s 调查阈值，未触发 rollback。2026-05-06 10:38 +08 backend-advisory-coverage-expansion 第二轮完成：新增 `BackendAdvisoryEndpointResponseShapeTests`，直接调用 mapped Minimal API route delegate，覆盖 media upload-begin、jobs create、toolbox translate-text 的 account-scope 403 短路，以及 payment callback invalid JSON、provider mismatch、disabled provider envelopes；harness 使用 synthetic unreachable Npgsql data source 与 throw-on-use storage signer/payment verifier，未进入 stores、ledger、signature verifier、真实 DB、provider、payment、object storage 或 production dump；`dotnet test` 190/190 通过，solution build 0 warnings/0 errors，frontend legacy dependency gate status ok，当前 CI/branch-protection readback 未变化。2026-05-06 10:52 +08 frontend-advisory-coverage-expansion 第二轮完成：只新增 `auth-account.test.ts` synthetic mock tests，覆盖 API-center vendor/api-key/test/model scoped encoded routes、稳定 JSON bodies、组织钱包成功路径和非 404 wallet error 透传；未改实现、frontend exported API names、route/status/response/auth/account-scope 行为，未使用真实 provider material、object storage、payment capture、production dump 或真实后端 fixture。验证通过：目标 auth-account 8/8，全量 frontend unit 59/59，coverage advisory 59/59 with All files statements/lines 98.01%、functions 97.94%、branches 72.92%，`auth-account.ts` 100%；frontend lint/build 通过，frontend legacy dependency gate status ok，trailing whitespace clean，`git diff --check` 仅 CRLF warnings。当前未启用 coverage threshold、CodeQL required gate、npm audit failure gate、dotnet vulnerability failure gate、branch-up-to-date strict mode、enforce admins 或 required PR review。真实 auth/provider/payment/storage/operator material、production dump/snapshot、真实 DB fixture、真实 object storage 仍只作为最终验收或运营侧 evidence，不计入日常工程 blocker。
-规则: inventory first; 每轮只处理一个 owner；保留现有 route path、exported API names、response shapes、auth/permission/account-scope 行为；不在同轮引入 backend/frontend behavior、polling/transport/DB/DTO owner 变更。
-详细记录: docs\xiaolouai-finalization-handoff.md 和 docs\xiaolouai-deep-research-structured.md
+Owner: G14-refactor-gap-closure（下一棒默认从 playground-transport-semantics 开始）
+
+Current facts:
+- G12/G13 详细阶段记录已归档到 docs\xiaolouai-finalization-handoff.md。
+- 2026-05-06 13:34 +08 已研读上传报告并完成本地只读复核。
+- 2026-05-06 14:19 +08 已合并用户确认的产品路线。
+- 2026-05-06 14:39 +08 已完成 G14a 支付回调 canonical 收口。
+- 2026-05-06 14:55 +08 已完成 G14b 账号/设置/钱包入口盘点，无 runtime 行为变化。
+- 2026-05-06 15:01 +08 已完成 G14c 账号资料 contract/password baseline，无 runtime 行为变化。
+- 2026-05-06 15:06 +08 已完成 G14d 设置导航壳 runtime 收口。
+- 2026-05-06 15:16 +08 已完成 G14e 头像媒体上传/资料渲染链路收口。
+- 2026-05-06 15:26 +08 已完成 G14f 钱包额度侧边栏入口与前端 entitlement 收口。
+- 2026-05-06 15:34 +08 已完成 G14g 组织上下文来源 inventory/计划，无 runtime 行为变化。
+- 2026-05-06 15:46 +08 已完成 G14h 前端 owner-scope contract inventory，无 runtime 行为变化。
+- 2026-05-06 15:55 +08 已完成 G14i 前端 owner-scope 纯 resolver 收口。
+- 2026-05-06 16:05 +08 已完成 G14j jobs/media owner-scope 迁移。
+- 2026-05-06 16:17 +08 已完成 G14k projects/canvas/create owner-scope 迁移。
+- 2026-05-06 16:28 +08 已完成 G14l playground owner-scope 迁移。
+- 2026-05-06 16:36 +08 已完成 G14m api.ts facade split 盘点和 G14n wave-1 计划，无 runtime 行为变化。
+- 2026-05-06 16:55 +08 已完成 G14n api.ts route-policy/control-api-client wave-1 拆分。
+- 2026-05-06 17:09 +08 已完成 G14o AuthHelpers boundary split 计划，无 runtime 行为变化。
+- 2026-05-06 17:28 +08 已完成 G14p AuthHelpers route-policy/grant helper wave-1 拆分。
+- 2026-05-06 17:41 +08 已完成 G14q ProjectEndpoints load/404/authorize helper 收敛。
+- active backend/proxy/matrix 只保留 `/api/payments/callbacks/{provider}`。
+- 旧 `/api/payments/{provider}/notify` 只保留在 legacy verifier/evidence 历史记录中。
+- “后端模块和前端服务拆分已完成”仍成立。
+- “低耦合已完成”降级为“拆文件完成，边界收口未完成”。
+
+User-confirmed decisions:
+- 旧 `/api/payments/{provider}/notify` alias 是老路径兼容。
+- 真实支付商户后台未正式上线，可统一成一个 canonical callback。
+- 账号资料入口由用户头像和设置二级菜单共同进入。
+- 左下角“更多”改为“设置”。
+- 身份切换、管理面板、退出登录进入设置二级菜单。
+- 用户名是首页显示名。
+- 头像走现有媒体上传流程。
+- 邮箱必填，手机号可选。
+- 默认组织仅企业管理员/企业员工需要编辑。
+- 企业管理员管理企业钱包。
+- 企业员工无个人钱包。
+- 个人账号只有个人钱包。
+- 积分统计常驻侧边栏资产库下方。
+
+Password baseline:
+- 密码当前只在登录/注册 DTO 接收。
+- PostgreSQL users 表未发现 password_hash。
+- PostgresIdentityConfigStore 注册/登录未存储也未校验密码。
+- Login/Register/CreateOrganizationMember 后端路径当前未读取 request.Password。
+- 密码持久化、哈希、验证、重置后续单独 owner 处理。
+
+Cleanup baseline:
+- `xiaolou` 数据库名称变更是用户修改，后续清理/复核不再检查该项。
+- 临时残留只读扫描已排除 .git/node_modules/dist/bin/obj/coverage/.runtime。
+- .tmp/.bak/.orig/.log 未发现可删文件。
+- 本轮未删除任何文件。
+
+Still-open structural lines:
+- 账号/设置/头像/钱包额度与组织作用域操作逻辑。
+- 前端 owner scope 统一。
+- api.ts facade wave-1 runtime 拆分。
+- AuthHelpers 后续 assertion/header/env/error envelope 边界（wave-1 纯 route/grant helper 已完成）。
+- ProjectEndpoints 后续更深 endpoint filter/MapGroup 收敛（G14q load/404/authorize helper 已完成）。
+- Playground transport/stream 命名语义。
+- jobs delete/cancel 语义。
+- 穿插清理无关测试数据/配置。
+
+Rules:
+- inventory first。
+- 每轮只处理一个 owner。
+- 保留现有 route path、exported API names、response shapes。
+- 保留 auth/permission/account-scope 行为，除非当前 owner 明确签收该边界且测试先行。
+- 不在同轮混入 backend/frontend behavior、polling/transport/DB/DTO 多边界变更。
+- required-synthetic-e2e-stability-monitor 只在 push/PR、required check 不稳定、required-gate/branch-protection mutation 前插队。
+
+Detailed records:
+- docs\xiaolouai-refactor-gap-verification.md
+- docs\xiaolouai-finalization-handoff.md
+- docs\xiaolouai-deep-research-structured.md
 ```
 
 ### 当前可继续队列
 
 ```text
-NEXT required-synthetic-e2e-stability-monitor: default next owner only after the current local advisory changes are pushed/opened as a PR, if a required check becomes unstable, or before any required-gate/branch-protection mutation. If the required synthetic check flakes, times out, or blocks routine work without a product regression, rollback branch protection to only `Build and static gates`, reread protection/check state, and record the rollback.
-DONE backend-advisory-coverage-expansion: route/method metadata plus account-scope/auth-provider grant pass and the mapped route-delegate response-shape pass are done. Continue this owner only if a user explicitly wants more backend synthetic mock coverage; no real DB fixture, provider material, object storage, payment capture, or production dump.
-DONE frontend-advisory-coverage-expansion: browser fetch/download/cache/service-worker boundary pass and auth-account service route/error pass are done. Continue this owner only if a user explicitly wants deeper frontend synthetic mock coverage; no real provider material, object storage, payment capture, production dump, or real backend fixture.
-DONE coverage-threshold-preflight: preflight completed. Do not add thresholds directly. Future coverage work must be a separate owner: either non-required frontend aggregate advisory floor proposal or backend coverage collector baseline, with rollback/signoff and no branch-protection mutation until stable evidence exists.
-DONE security-required-gate-preflight: plan/preflight completed. npm audit and dotnet vulnerable scans are currently clean, local CodeQL CLI is unavailable, latest main CI/synthetic required checks are green, and branch protection stayed unchanged. Keep npm audit failure, dotnet vulnerable failure, and CodeQL non-required until explicit security-gate owner signoff, noise policy, allowlist, remote runner evidence, exact check context, rollback, and baseline-reset conditions exist.
-DONE branch-protection-hardening-review: policy review/preflight completed. Current protection keeps required CI + synthetic E2E contexts from GitHub Actions app id 15368 and disables force pushes/deletions, but strict up-to-date, enforce admins, required PR reviews, restrictions, conversation resolution, signatures, and linear history remain off. No mutation was made; any future hardening follow-up must be explicit and signed.
+DONE G14a payment-notify-canonical-callback-unification
+- removed old `/api/payments/{provider}/notify` compatibility aliases from active backend routes
+- kept `/api/payments/callbacks/{provider}` as the single callback path
+- synced Caddy/IIS examples, permission matrix, README/handoff, and callback route tests
+- preserved legacy verifier/evidence records for the old closed aliases
+
+DONE G14b account-settings-navigation-inventory
+- inventory-only; changed only handoff/docs
+- scanned App routes, Layout shell, ProfileModal, Home, WalletRecharge, CreditUsage
+- scanned auth-account, wallet-payment, api.ts types/wrappers, current tests
+- current route state: no /settings, /profile, or /account route
+- current avatar state: sidebar avatar menu opens ProfileModal directly
+- current ProfileModal title is 个人中心, not 账号与个人资料
+- current ProfileModal edits displayName/avatar only
+- current avatar upload already calls uploadFile(file, "avatar")
+- current left-bottom state: button label/title is 更多
+- current settings state: profile menu 设置 opens the existing More modal
+- current identity switch state: demo/recent account switch lives in the More modal
+- current management state: nav has 订单审核 or 管理员登录; profile menu 管理面板 goes /enterprise
+- current logout state: profile menu 退出登录 calls handleLogout
+- current wallet state: Home and WalletRecharge prefer organization wallet for enterprise roles
+- current wallet state: personal paths filter out organization wallets, but final entitlement rules are not centralized
+- current credits state: /wallet/usage exists and profile menu links 积分统计
+- current credits state: no persistent sidebar credits/statistics item below /assets
+- current test candidates recorded in docs before runtime changes
+
+DONE G14c account-profile-contract-and-password-baseline
+- docs-only contract/baseline; no runtime behavior change
+- UI/product field 用户名 maps to existing displayName
+- UI/product field avatarUrl maps to existing avatar
+- API/exported names stay getMe, updateMe, PermissionContext, displayName, avatar
+- current PUT /api/me body remains displayName/avatar only
+- current PUT /api/me response remains PermissionContext
+- current ProfileModal edits displayName/avatar only
+- current email is read-only in ProfileModal and typed as string|null in User
+- target contract: registered account email is required; guest/system can stay null
+- target contract: phone is optional
+- target contract: defaultOrganizationId/default organization is enterprise-admin/member only
+- current defaultOrganizationId remains string|null in User and is not editable through updateMe
+- current users table has email, phone_hash, display_name, data; no password_hash
+- current backend login/register/member-create DTOs include password but do not read it
+- password persistence/hash/verification/reset stays future password-auth-owner
+
+DONE G14d settings-navigation-shell
+- changed left-bottom button label/title from 更多 to 设置
+- changed left-bottom icon from MoreHorizontal to Settings
+- settings modal now exposes 账号与个人资料, 管理面板, and 退出登录
+- identity switch remains inside the settings modal
+- avatar/profile menu keeps a direct 账号与个人资料 header entry
+- preserved route path, status code, response shape, exported API names, DTOs, transport, DB, owner-scope, avatar upload, wallet entitlement, and password-auth boundaries
+
+DONE G14e avatar-media-upload-profile
+- kept avatar local file upload on existing uploadFile(file, "avatar") media flow
+- save is disabled while upload is in progress so blob preview URLs are not persisted
+- avatar upload failure restores the previous actor avatar in ProfileModal
+- profile save merges updated displayName/avatar into returned PermissionContext
+- Layout sidebar/profile menu continue to render permissionContext.actor.avatar directly
+- added synthetic media upload and profile context merge tests
+- preserved route path, status code, response shape, exported API names, uploadFile/updateMe compatibility, DTOs, transport, DB, owner-scope, wallet entitlement, and password-auth boundaries
+
+DONE G14f wallet-credit-sidebar-and-entitlements
+- added a persistent sidebar 积分统计 item directly below /assets
+- centralized frontend wallet entitlement rules in wallet-entitlements helper
+- Home wallet display now uses organization wallet for enterprise roles and user wallet for personal accounts
+- WalletRecharge exposes rechargeable wallets only to enterprise admins and personal accounts
+- enterprise members no longer get a personal/recharge wallet fallback
+- CreditUsage reads organization stats for enterprise roles and personal stats for personal accounts
+- preserved route paths, status codes, response shapes, exported API names, api.ts wrappers, DTOs, backend, transport, DB, owner-scope migration, avatar upload, and password-auth boundaries
+- required gate/branch protection: no workflow/check context/check-run source/branch-protection mutation in this owner
+- readback evidence: main still requires `Build and static gates` and `Synthetic browser E2E advisory`, both GitHub Actions app id 15368
+- readback evidence: latest origin/main 5fac8ca check-runs for both required contexts were completed/success
+- readback evidence: strict=false, enforce_admins=false, required_pull_request_reviews=null, restrictions=null, allow_force_pushes=false, allow_deletions=false
+- any future required-gate change still needs separate signoff and before/after/rollback evidence
+
+DONE G14g organization-scope-ui-account-context-plan
+- inventoried currentOrganizationId/defaultOrganizationId/currentOrganizationRole usage after G14b-G14f
+- current backend source: PostgresIdentityConfigStore BuildPermissionContext derives currentOrganizationId from actor defaultOrganizationId or first organization membership
+- current frontend source: account/settings/profile/enterprise/wallet/statistics UI reads getMe PermissionContext and page-local currentOrganizationId lookups
+- current compatibility source: wallet-entitlements resolves currentOrganizationId, then actor.defaultOrganizationId, then first enterprise admin/member organization
+- service input parameters remain transitional compatibility only: buildControlScopeQuery, buildControlMediaScope, wallet ownerType/ownerId, and accountOwnerType/accountOwnerId query/body fields
+- target rule: explicit UI/account context owns current organization selection; service params mirror that context but are not the long-term source of truth
+- target rule: defaultOrganizationId is enterprise admin/member only, and personal/guest/ops/super contexts keep organization fields null/empty
+- test/migration boundary recorded for G14h/G14i before implementation
+- preserved route path, status code, response shape, exported API names, DTOs, runtime behavior, owner-scope migration, wallet entitlement behavior, avatar upload, password-auth, transport, DB, api.ts wrappers, and legacy/deploy evidence
+- required gate/branch protection: no workflow/check context/check-run source/branch-protection mutation in this owner
+- readback evidence: latest origin/main 5fac8ca check-runs for `Build and static gates` and `Synthetic browser E2E advisory` were completed/success from GitHub Actions app id 15368
+- readback evidence: REST required-status-checks still has contexts `Build and static gates` and `Synthetic browser E2E advisory`, app_id 15368, strict=false
+- readback evidence: GraphQL branch protection rule for main has requiresStatusChecks=true, requiresStrictStatusChecks=false, requiresApprovingReviews=false, restrictsPushes=false, allowsForcePushes=false, allowsDeletions=false
+- readback caveat: full REST branch-protection endpoint returned EOF twice, so this owner used granular REST and GraphQL readbacks; no mutation was attempted
+- rollback owner: future required-gate owner only, if separately signed; stable evidence is static scan plus current green remote check-run readback; baseline resets on check-context/source/workflow/protection changes or required-check instability
+
+DONE G14h frontend-owner-scope-contract-inventory
+- inventory-only; changed only handoff/docs
+- scanned all frontend accountOwnerType/accountOwnerId query/body paths
+- inventoried buildControlScopeQuery/buildControlMediaScope callers
+- inventoried wallet ownerType/ownerId usage and current organization-derived callsites
+- exact files, request body/query assertion candidates, and test candidates are recorded in docs before runtime changes
+- current source-of-truth baseline remains G14g explicit UI/account context
+- service owner parameters remain transitional compatibility, not long-term source of truth
+- preserved route path, status code, response shape, exported API names, DTOs, runtime behavior, owner-scope migration, wallet entitlement behavior, avatar upload, password-auth, transport, polling, DB, deleteTask, api.ts wrappers, and legacy/deploy evidence
+- required gate/branch protection: no workflow/check context/check-run source/branch-protection mutation in this owner
+- readback evidence: latest origin/main 5fac8ca check-runs for `Build and static gates` and `Synthetic browser E2E advisory` were completed/success from GitHub Actions app id 15368
+- readback evidence: REST required-status-checks still has contexts `Build and static gates` and `Synthetic browser E2E advisory`, app_id 15368, strict=false; enforce_admins=false
+- readback evidence: GraphQL branch protection rule for main has requiresStatusChecks=true, requiresStrictStatusChecks=false, requiresApprovingReviews=false, restrictsPushes=false, allowsForcePushes=false, allowsDeletions=false
+- readback caveat: full REST branch-protection endpoint returned EOF; this owner used granular REST and GraphQL readbacks; no mutation was attempted
+- rollback owner: future required-gate owner only, if separately signed; stable evidence is static scan plus current green remote check-run readback; baseline resets on check-context/source/workflow/protection changes or required-check instability
+
+DONE G14i frontend-owner-scope-core-resolver
+- added pure frontend ControlOwnerScope/resolveCurrentOwnerScope boundary
+- added synthetic resolver tests for personal/default, enterprise admin, enterprise member, guest/ops/super none and explicit fallback, and stale defaultOrganizationId fallback
+- kept G14g source-of-truth rules and G14h request-path inventory as planning baseline
+- kept service input parameters as transitional compatibility
+- did not migrate jobs, media, playground, projects/canvas/create, toolbox, wallet, or api.ts builders in this owner
+- preserved route path, status code, response shape, frontend exported API names, DTOs, default personal compatibility, wallet entitlement behavior, avatar upload, settings shell, password auth, transport, polling, DB, deleteTask, api.ts wrappers, and legacy/deploy evidence
+- required gate/branch protection: no workflow/check context/check-run source/branch-protection mutation in this owner
+- validation: targeted control-owner-scope tests, frontend lint, full unit tests, frontend build, whitespace scan, and git diff --check passed
+
+DONE G14j frontend-owner-scope-jobs-media
+- migrated jobs.ts and media.ts onto ControlOwnerScope/resolveCurrentOwnerScope
+- jobs create/list now mirror resolved owner scope into accountOwnerType/accountOwnerId
+- media upload-begin/upload-complete/move-temp-to-permanent/signed-read-url bodies now mirror resolved owner scope
+- kept actorId for createdByUserId, idempotency, and media object-key compatibility
+- kept personal/user fallback for no-owner contexts to preserve current service compatibility
+- added organization request body/query synthetic tests for jobs and media
+- preserved route path, status code, response shape, frontend exported API names, DTOs, api.ts wrappers, password auth, avatar upload, wallet entitlement, settings shell, playground/project/toolbox/wallet migrations, transport, polling, DB, deleteTask, and legacy/deploy evidence
+- required gate/branch protection: no workflow/check context/check-run source/branch-protection mutation in this owner
+- validation: targeted jobs/media/resolver tests, api compatibility wrapper tests, frontend lint, full unit tests, frontend build, whitespace scan, and git diff --check passed
+
+DONE G14k frontend-owner-scope-projects-canvas-create
+- migrated projects-canvas-create.ts onto ControlOwnerScope/resolveCurrentOwnerScope
+- project list/create/update now mirror resolved owner scope into query/body accountOwnerType/accountOwnerId
+- canvas and agent-canvas list/save/delete now mirror resolved owner scope into query/body accountOwnerType/accountOwnerId
+- create image/video list/delete queries mirror resolved owner scope
+- create image/video generation keeps delegating to jobsService.createCanonicalJob, whose G14j body scope remains covered
+- kept ownerType/organizationId project input fields as transitional compatibility
+- preserved default personal fallback compatibility
+- added organization request body/query synthetic tests for project, canvas, agent-canvas, and create image/video paths
+- preserved route path, status code, response shape, frontend exported API names, DTOs, api.ts wrappers, playground/toolbox/wallet migrations, password auth, avatar upload, wallet entitlement, settings shell, transport, polling, DB, deleteTask, and legacy/deploy evidence
+- required gate/branch protection: no workflow/check context/check-run source/branch-protection mutation in this owner
+- readback evidence: origin/main 5fac8ca check-runs for `Build and static gates` and `Synthetic browser E2E advisory` are completed/success from GitHub Actions app id 15368
+- readback evidence: required contexts remain `Build and static gates` and `Synthetic browser E2E advisory`, app_id 15368, strict=false, enforce_admins=false
+- readback evidence: GraphQL main rule requiresStatusChecks=true, requiresStrictStatusChecks=false, requiresApprovingReviews=false, restrictsPushes=false, allowsForcePushes=false, allowsDeletions=false
+- rollback owner: future required-gate owner only, if separately signed; baseline resets on check-context/source/workflow/protection changes or required-check instability
+- validation: targeted projects/canvas/create and api compatibility wrapper tests, frontend lint, full unit tests, frontend build, whitespace scan, and git diff --check passed
+
+DONE G14l frontend-owner-scope-playground
+- migrated playground.ts onto ControlOwnerScope/resolveCurrentOwnerScope
+- playground config and memories read queries mirror resolved owner scope
+- playground conversation list/get/delete queries mirror resolved owner scope
+- playground conversation create/update bodies mirror resolved owner scope
+- playground message list queries mirror resolved owner scope
+- playground chat-job list/get queries and start body mirror resolved owner scope
+- playground memory preference/update bodies and delete query mirror resolved owner scope
+- kept signed-out read fallbacks and auth-required write errors stable
+- kept streamPlaygroundChat as the existing non-stream facade with no polling/transport changes
+- preserved default personal fallback compatibility
+- added organization request body/query synthetic tests for conversations, messages, chat-jobs, and memories
+- preserved route path, status code, response shape, frontend exported API names, DTOs, api.ts wrappers, toolbox/wallet migrations, password auth, avatar upload, wallet entitlement, settings shell, transport, polling, DB, deleteTask, and legacy/deploy evidence
+- required gate/branch protection: no workflow/check context/check-run source/branch-protection mutation in this owner
+- readback evidence: origin/main 5fac8ca check-runs for `Build and static gates` and `Synthetic browser E2E advisory` are completed/success from GitHub Actions app id 15368
+- readback evidence: required contexts remain `Build and static gates` and `Synthetic browser E2E advisory`, app_id 15368, strict=false, enforce_admins=false
+- readback evidence: GraphQL main rule requiresStatusChecks=true, requiresStrictStatusChecks=false, requiresApprovingReviews=false, restrictsPushes=false, allowsForcePushes=false, allowsDeletions=false
+- rollback owner: future required-gate owner only, if separately signed; baseline resets on check-context/source/workflow/protection changes or required-check instability
+- validation: targeted playground and api compatibility wrapper tests, frontend lint, full unit tests, frontend build, whitespace scan, and git diff --check passed
+
+DONE G14m frontend-api-facade-split-plan
+- docs-only inventory and plan; changed only handoff/docs
+- scanned api.ts route allowlist, legacy mutation guard, request clients, DTO/type exports, wrapper exports, and service factory wiring
+- recorded exact exported runtime API names and DTO/type export buckets in docs
+- recorded exact Control API exact-path allowlist and prefix allowlist in docs
+- recorded legacy mutation guard behavior: mutating methods, VITE_ALLOW_LEGACY_MUTATIONS, legacy surface predicate, and 410 LEGACY_WRITE_DISABLED envelope
+- recorded request client boundary: API_BASE_URL, ApiRequestError, request, controlApiJsonRequest, fetch headers, auth token/client assertion choice, JSON/error parsing
+- recorded service factory wiring: walletPayment, authAccount, media, playground, jobs, projectsCanvasCreate, toolbox, adminEnterprise
+- G14n wave-1 plan: extract route-policy and control-api-client modules first, keep api.ts as compatibility barrel and keep DTO/type exports in api.ts for now
+- preserved route path, status code, response shape, frontend exported API names, default personal compatibility, api.ts wrappers, owner-scope migrations, password/auth/avatar/wallet/settings/polling/transport/DB/deleteTask boundaries, and legacy/deploy evidence
+- required gate/branch protection: no workflow/check context/check-run source/branch-protection mutation in this owner
+- validation: static api.ts/export/route-policy/service-wiring scans, docs whitespace scan, and git diff --check passed
+
+DONE G14n frontend-api-facade-split-wave-1
+- completed 2026-05-06 16:55 +08
+- route-policy.ts now owns the exact/prefix Control API allowlists, legacy surface predicate, mutation methods/env flag, and pure block decision
+- control-api-client.ts now owns API_BASE_URL, ApiRequestError, assertNoLegacyMutatingRequest, request, controlApiJsonRequest, auth headers, JSON parsing, and error mapping
+- api.ts remains the compatibility barrel and wrapper surface
+- api.ts re-exports API_BASE_URL and ApiRequestError and keeps DTO/type exports in place
+- videoReplaceRequest still uses the same legacy mutation guard behavior
+- service factory wiring order and dependencies stayed stable
+- targeted route-policy/control-api-client/api-compatibility tests, lint, full unit, build, whitespace scan, and git diff --check passed
+
+DONE G14o backend-auth-boundary-split-plan
+- completed 2026-05-06 17:09 +08
+- docs/handoff plan only; no runtime module or import moved
+- inventoried AuthHelpers as ClientRoutePolicy, AccountScopeAuthorizer, ClientAssertionFactory, header/env helper, client auth provider, and error envelope boundaries
+- mapped G14p wave-1 to pure route policy and grant/account-scope policy helper moves only
+- G14p should keep AuthHelpers facade names and should not move HTTP middleware, endpoint imports, error envelopes, env configuration, JWT signing, ProjectEndpoints, transport, DB, password, frontend api.ts, or deleteTask semantics
+
+DONE G14p backend-auth-boundary-split-wave-1
+- completed 2026-05-06 17:28 +08
+- added ClientRoutePolicy under Modules\Auth for public-client classification, anonymous identity classification, and permission mapping
+- added AccountScopeAuthorizer under Modules\Auth for pure CSV grant parsing, configured/provider grant matching, and normalized account-scope allow/deny decisions
+- AuthHelpers facade method names remain stable for Program.cs and endpoint modules
+- ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal shapes stayed in AuthHelpers unchanged
+- did not move HTTP middleware, endpoint imports, error envelopes, env option names/defaults, JWT signing/assertion creation, ProjectEndpoints, Playground transport, jobs delete semantics, password auth, frontend api.ts, polling, transport, DB, real SSE/WS/ReadableStream, or deleteTask
+- validation passed: targeted AuthHelpersTests 96/96, full ControlApi xUnit 203/203, Release solution build 0 warnings/0 errors
+
+DONE G14q project-endpoint-authorize-helper
+- completed 2026-05-06 17:41 +08
+- added ProjectEndpoints.LoadAuthorizedProjectAsync for repeated GetProjectAsync -> 404 -> AuthorizeAccountRow flow
+- replaced normal project subresource load/404/authorize boilerplate while leaving canvas/agent-canvas/create owners untouched
+- added synthetic helper tests for stable 404, account-scope 403 owner mismatch, configured-owner success, and matching account-header success
+- preserved route paths, status codes, response shapes, auth/permission/account-scope behavior, exported API names, AuthHelpers facade names, branch protection, and required checks
+- validation passed: targeted ProjectEndpointsAuthorizationTests 4/4, full ControlApi xUnit 207/207, Release solution build 0 warnings/0 errors
+
+NEXT G14r playground-transport-semantics
+- decide facade rename vs real SSE/WS/ReadableStream in a dedicated owner
+
+NEXT G14s jobs-delete-task-semantics
+- clarify delete/cancel/dismiss/archive semantics in public jobs facade only
+
+NEXT G14t test-data-config-cleanup-check
+- repeat generated/temp/config scan between implementation owners
+- delete only confirmed irrelevant generated/test material
+- exclude user-confirmed `xiaolou` database-name changes
+
+FUTURE password-auth-owner
+- design password persistence/hash/verification/reset separately
+- do not mix it into account profile or settings navigation owners
+
+CONDITIONAL required-synthetic-e2e-stability-monitor
+- run only after push/PR, required check instability, or required-gate/branch-protection mutation
+
+DONE archived advisory/preflight owners
+- backend/frontend advisory coverage expansions
+- coverage-threshold-preflight
+- security-required-gate-preflight
+- branch-protection-hardening-review
+- continue only on explicit request
 ```
 
 ### 推荐下一棒顺序
 
 ```text
-1. DEFAULT NEXT required-synthetic-e2e-stability-monitor: run only after the current local advisory changes are pushed/opened as a PR, before any required-gate/branch-protection mutation, or if the required `Synthetic browser E2E advisory` check flakes/times out.
-2. frontend-advisory-coverage-expansion: not the default after the auth-account route/error pass. Continue only if explicitly requested for deeper frontend service/fetch/timer coverage with synthetic mocks.
-3. backend-advisory-coverage-expansion: not the default after the response-shape pass. Continue only if explicitly requested for deeper backend handler/store coverage with mocks/isolated synthetic fixtures; no real DB fixture, provider material, object storage, payment capture, or production dump.
-4. coverage-threshold-follow-up: not a default NEXT owner. Only proceed if explicitly requested; first allowed steps are non-required frontend aggregate advisory floor proposal or backend coverage collector baseline, never immediate required coverage gate.
-5. security-required-gate-follow-up: not a default NEXT owner. Only proceed if explicitly requested; first allowed steps are non-required advisory evidence/noise-policy planning for npm audit, dotnet vulnerable, or CodeQL, never immediate required security gate.
-6. branch-protection-hardening-follow-up: not a default NEXT owner. Only proceed if explicitly requested; no branch-protection mutation without exact before/after, test PR evidence, rollback owner/action, stable required-check evidence, and baseline-reset conditions.
+1. G14r playground-transport-semantics.
+2. G14s jobs-delete-task-semantics.
+3. G14t test-data-config-cleanup-check can run between owners.
+4. Do not re-check the user-confirmed `xiaolou` database-name change.
+5. password-auth-owner remains future standalone work.
+6. required-synthetic-e2e-stability-monitor only when its conditional trigger applies.
 ```
 
 ### 下一棒提示词
 
 ```text
-当前默认下一棒是 `required-synthetic-e2e-stability-monitor`（只在当前本地 advisory 变更 push/开 PR 后、新 required check 不稳定、或任何 required-gate/branch-protection mutation 前做 required synthetic E2E 监控/rollback 预案读取；不改 workflow、required checks 或 branch protection）。若用户显式指定其他 owner，则按指定 owner 执行；否则按“推荐下一棒顺序”从上到下选择第一个仍适用的 owner。下一棒先读取根 handoff、README Deferred CI/Test Gate Follow-Up、docs\xiaolouai-finalization-handoff.md 当前结论/队列、当前 dirty worktree、XIAOLOU-main test:e2e:synthetic/Playwright harness、backend/frontend route/type static scan records、legacy dependency gate、当前 CI/branch-protection 状态。
+当前默认下一棒：
+- `G14r playground-transport-semantics`
 
-执行前先明确选择一个 owner，并只处理该 owner：required-synthetic-e2e-stability-monitor、frontend-advisory-coverage-expansion、backend-advisory-coverage-expansion、coverage-threshold-follow-up、security-required-gate-follow-up、branch-protection-hardening-follow-up。不要把多个 NEXT 项合并到同一棒；required-synthetic-e2e-stability-monitor 只在当前本地 advisory 变更 push/开 PR 后、required check 不稳定、或任何 required-gate/branch-protection mutation 前优先插队；backend/frontend advisory coverage 只在用户显式要求更深 synthetic mock coverage 时继续；backend-advisory-coverage-expansion 当前已有 route metadata/auth grant 与 response-shape 两轮，默认不再优先；frontend-advisory-coverage-expansion 当前已有 browser fetch/download/cache/service-worker 与 auth-account route/error 两轮，默认不再优先；coverage-threshold-follow-up 只有在用户显式要求时才继续，且不得直接 required；security-required-gate-follow-up 只有在用户显式要求时才继续，且不得直接 required；branch-protection-hardening-follow-up 只有在用户显式要求并签收 exact before/after、rollback 和稳定证据时才继续。
+下一棒先读取：
+- 根 handoff
+- docs\xiaolouai-refactor-gap-verification.md
+- docs\xiaolouai-finalization-handoff.md
+- docs\xiaolouai-deep-research-structured.md
+- 当前 dirty worktree
 
-保持 DTO、route path、status code、response shape、auth/permission/account-scope 行为、frontend exported API names、polling/transport/DB owner 不变；不删除 api.ts compatibility wrappers 或 legacy verifier/deploy evidence；不读取或上传真实 auth/provider/payment/storage/operator material、production dump/snapshot、真实 DB fixture 或真实 object storage。任何 required gate 或 branch-protection 扩展都必须重新签收并确认精确 check context、CI workflow/check-run 来源、branch-protection before/after、rollback owner、稳定证据和 baseline-reset 条件。
+G14r 只处理：
+- inventory then decide playground transport naming semantics
+- verify whether streamPlaygroundChat remains a non-stream facade, should be renamed/documented, or needs a separately signed real transport owner
+- if adding compatibility naming, keep existing exported API names via wrappers and cover facade compatibility
+- do not introduce real SSE/WebSocket/ReadableStream unless this owner explicitly signs transport scope and tests first
+- keep Playground route path, status code, response shape, auth/permission/account-scope behavior, exported API names, polling behavior, branch protection, and required checks stable unless separately signed
+- keep G14g-G14n frontend owner-scope/api facade work as the current planning baseline
+- keep G14p AuthHelpers ClientRoutePolicy/AccountScopeAuthorizer split as the backend Auth planning baseline
+- keep G14q ProjectEndpoints authorize helper as the current backend project endpoint baseline
+- do not move HTTP middleware, AuthHelpers facade names, endpoint imports, error envelopes, env option names/defaults, JWT signing/assertion creation, ProjectEndpoints helpers, jobs delete semantics, password auth, avatar upload, wallet entitlement, settings shell, frontend api.ts moves, DB, or deleteTask changes
+
+G14b-G14q 已完成：
+- 账号资料/设置/头像/钱包额度/组织作用域操作逻辑
+- 头像入口和设置二级菜单都可进入“账号与个人资料”
+- 左下角“更多”改“设置”
+- 身份切换、管理面板、退出登录进入设置二级菜单
+- 用户名是首页显示名
+- 头像走现有媒体上传
+- 邮箱必填，手机号可选
+- 默认组织只给企业管理员/企业员工
+- 积分统计放侧边栏资产库下方
+- 企业管理员企业钱包
+- 企业员工无个人钱包
+- 个人账号个人钱包
+- 前端 accountOwnerType/accountOwnerId 与 wallet ownerType/ownerId 请求路径已完成 inventory
+- ControlOwnerScope/resolveCurrentOwnerScope 纯前端边界已完成 synthetic tests
+- jobs/media 已迁移到 resolver，并覆盖 organization 请求体/query synthetic tests
+- projects/canvas/create 已迁移到 resolver，并覆盖 organization 请求体/query synthetic tests
+- playground 已迁移到 resolver，并覆盖 organization 请求体/query synthetic tests
+- api.ts facade split inventory/plan 已完成
+- G14n wave-1 低风险拆分顺序已记录
+- api.ts route-policy/control-api-client wave-1 已完成，并覆盖 route-policy/control-api-client/api compatibility synthetic tests
+- AuthHelpers boundary split inventory/plan 已完成
+- G14p wave-1 低风险 backend route-policy/grant helper 顺序已记录
+- G14p backend ClientRoutePolicy/AccountScopeAuthorizer wave-1 已完成，并覆盖 facade/direct helper synthetic tests
+- ProjectEndpoints load/404/AuthorizeAccountRow helper 已完成，并覆盖 404/403/owner mismatch/success synthetic tests
+
+Password:
+- 当前只记录未持久化/未校验事实
+- 存储、哈希、验证、重置走 future password-auth-owner
+
+Keep stable unless current owner signs the boundary:
+- DTO
+- route path
+- status code
+- response shape
+- frontend exported API names
+- polling/transport/DB owner
+
+Do not:
+- delete api.ts compatibility wrappers
+- delete legacy verifier/deploy evidence
+- review the user-confirmed `xiaolou` database-name change as cleanup
+- read/upload real auth/provider/payment/storage/operator material
+- read/upload production dump/snapshot, real DB fixture, or real object storage
+
+Required gate / branch protection:
+- must be separately signed off
+- must record exact check context
+- must record CI workflow/check-run source
+- must record branch-protection before/after
+- must record rollback owner, stable evidence, and baseline-reset conditions
 ```
 
 ## 输出要求
@@ -119,6 +511,8 @@ DONE branch-protection-hardening-review: policy review/preflight completed. Curr
 1. XIAOLOU_REFACTOR_HANDOFF.md
 2. docs\xiaolouai-finalization-handoff.md
 3. docs\xiaolouai-deep-research-structured.md
+4. docs\xiaolouai-refactor-gap-verification.md（G14 队列或复核事实变化时）
+5. 以上文件保持 PowerShell 友好格式：UTF-8、短行、text 代码块、避免宽表格
 ```
 
 ## 快速验证入口
@@ -131,8 +525,17 @@ dotnet build .\control-plane-dotnet\XiaoLou.ControlPlane.sln --configuration Rel
 # 后端测试（仅存在测试项目时）
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
-$testProjects = @(Get-ChildItem -Path .\control-plane-dotnet -Recurse -Filter "*Tests*.csproj" -File | Sort-Object FullName)
-if ($testProjects.Count -gt 0) { foreach ($project in $testProjects) { dotnet test $project.FullName --configuration Release --no-restore } } else { Write-Host "::notice title=dotnet test skipped::No *Tests*.csproj projects found under control-plane-dotnet." }
+$testProjects = @(
+  Get-ChildItem -Path .\control-plane-dotnet -Recurse -Filter "*Tests*.csproj" -File |
+    Sort-Object FullName
+)
+if ($testProjects.Count -gt 0) {
+  foreach ($project in $testProjects) {
+    dotnet test $project.FullName --configuration Release --no-restore
+  }
+} else {
+  Write-Host "::notice title=dotnet test skipped::No *Tests*.csproj projects found."
+}
 
 # 前端构建
 npm --prefix .\XIAOLOU-main run build
@@ -144,7 +547,10 @@ npm --prefix .\XIAOLOU-main run test:e2e:synthetic
 .\scripts\windows\verify-frontend-legacy-dependencies.ps1
 
 # 最终 legacy 表面门禁（G11 后默认 retained manifest 模式）
-.\scripts\windows\verify-final-legacy-surface.ps1 -CoreApiRoot .\legacy\__missing-core-api -ServicesApiRoot .\legacy\__missing-services-api -LegacySurfaceManifestPath .\legacy-surface-evidence\final-legacy-surface-manifest-g11k.json
+.\scripts\windows\verify-final-legacy-surface.ps1 `
+  -CoreApiRoot .\legacy\__missing-core-api `
+  -ServicesApiRoot .\legacy\__missing-services-api `
+  -LegacySurfaceManifestPath .\legacy-surface-evidence\final-legacy-surface-manifest-g11k.json
 
 # handoff 空白检查
 Select-String -Path .\XIAOLOU_REFACTOR_HANDOFF.md,.\docs\xiaolouai-finalization-handoff.md,.\docs\xiaolouai-deep-research-structured.md -Pattern '[ \t]+$'

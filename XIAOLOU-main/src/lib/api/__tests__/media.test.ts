@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMediaService } from "../media";
-import { createSyntheticMediaScope, parseJsonBody, type RequestCall, type RequestHandler } from "./synthetic-fixtures";
+import type { ControlOwnerScope } from "../../control-owner-scope";
+import { parseJsonBody, type RequestCall, type RequestHandler } from "./synthetic-fixtures";
 
 type MediaServiceDeps = Parameters<typeof createMediaService>[0];
 
@@ -17,15 +18,18 @@ function createServiceHarness({
   actorId = "synthetic actor@example",
   clientId = "synthetic-media-client",
   handler = () => ({}),
+  ownerScope,
 }: {
   actorId?: string;
   clientId?: string;
   handler?: RequestHandler;
+  ownerScope?: ControlOwnerScope;
 } = {}) {
   const calls: RequestCall[] = [];
   const clientIdPrefixes: string[] = [];
   const errors: Array<{ message: string; options?: { code?: string; status?: number } }> = [];
-  const mediaScopeActorIds: string[] = [];
+  const ownerScopeCalls: ControlOwnerScope[] = [];
+  const effectiveOwnerScope = ownerScope ?? createSyntheticOwnerScope(actorId);
 
   const deps: MediaServiceDeps = {
     controlApiJsonRequest: async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -33,9 +37,9 @@ function createServiceHarness({
       return (await handler(path, init)) as T;
     },
     getCurrentActorId: () => actorId,
-    buildControlMediaScope: (scopeActorId) => {
-      mediaScopeActorIds.push(scopeActorId);
-      return createSyntheticMediaScope(scopeActorId);
+    resolveCurrentOwnerScope: () => {
+      ownerScopeCalls.push(effectiveOwnerScope);
+      return effectiveOwnerScope;
     },
     createClientId: (prefix) => {
       clientIdPrefixes.push(prefix);
@@ -51,8 +55,22 @@ function createServiceHarness({
     calls,
     clientIdPrefixes,
     errors,
-    mediaScopeActorIds,
+    ownerScopeCalls,
     service: createMediaService(deps),
+  };
+}
+
+function createSyntheticOwnerScope(
+  actorId: string,
+  overrides: Partial<ControlOwnerScope> = {},
+): ControlOwnerScope {
+  return {
+    accountOwnerType: "user",
+    accountOwnerId: actorId,
+    organizationId: null,
+    organizationRole: null,
+    source: "personal-default",
+    ...overrides,
   };
 }
 
@@ -72,7 +90,7 @@ afterEach(() => {
 describe("createMediaService", () => {
   it("uploads a File through stable Control API routes and normalized object keys", async () => {
     const signedReadUrl = "https://synthetic-storage.example/read/media-object";
-    const { calls, clientIdPrefixes, mediaScopeActorIds, service } = createServiceHarness({
+    const { calls, clientIdPrefixes, ownerScopeCalls, service } = createServiceHarness({
       handler: (path) => {
         if (path === "/api/media/upload-begin") {
           return {
@@ -165,7 +183,59 @@ describe("createMediaService", () => {
     });
     expect(fetchCalls[0].init?.body).toBeInstanceOf(File);
     expect(clientIdPrefixes).toEqual(["media"]);
-    expect(mediaScopeActorIds).toEqual(["synthetic actor@example"]);
+    expect(ownerScopeCalls).toEqual([createSyntheticOwnerScope("synthetic actor@example")]);
+  });
+
+  it("propagates organization owner scope through the media upload lifecycle", async () => {
+    const organizationScope = createSyntheticOwnerScope("synthetic-actor", {
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
+      organizationId: "synthetic-organization",
+      organizationRole: "enterprise_admin",
+      source: "current-organization",
+    });
+    const { calls, service } = createServiceHarness({
+      actorId: "synthetic-actor",
+      clientId: "synthetic-organization-media-client",
+      ownerScope: organizationScope,
+      handler: (path) => {
+        if (path === "/api/media/upload-begin") {
+          return {
+            media_object_id: "synthetic-organization-media",
+            upload_session_id: "synthetic-organization-upload-session",
+            upload_url: "https://synthetic-storage.example/upload/organization-media",
+          };
+        }
+        if (path === "/api/media/signed-read-url") {
+          return {
+            signed_read_url: "https://synthetic-storage.example/read/organization-media",
+          };
+        }
+
+        return { ok: true };
+      },
+    });
+    installSyntheticFetch(() => ({
+      ok: true,
+      status: 200,
+    }));
+
+    await service.uploadFile(createUploadFile("organization.png", "image/png"), "image");
+
+    expect(calls.map((call) => call.path)).toEqual([
+      "/api/media/upload-begin",
+      "/api/media/upload-complete",
+      "/api/media/move-temp-to-permanent",
+      "/api/media/signed-read-url",
+    ]);
+    for (const call of calls) {
+      expect(parseJsonBody(call)).toMatchObject({
+        accountOwnerType: "organization",
+        accountOwnerId: "synthetic-organization",
+        regionCode: "CN",
+        currency: "CNY",
+      });
+    }
   });
 
   it("converts data URLs to synthetic files and accepts camelCase upload responses", async () => {
@@ -264,6 +334,64 @@ describe("createMediaService", () => {
       signedReadUrl: uploadUrl,
       url: uploadUrl,
       urlPath: uploadUrl,
+    });
+  });
+
+  it("routes avatar files through the existing media upload flow", async () => {
+    const signedReadUrl = "https://synthetic-storage.example/read/avatar-object";
+    const { calls, service } = createServiceHarness({
+      actorId: "avatar-owner",
+      clientId: "avatar-upload-client",
+      handler: (path) => {
+        if (path === "/api/media/upload-begin") {
+          return {
+            media_object_id: "synthetic-avatar-media",
+            upload_session_id: "synthetic-avatar-session",
+            upload_url: "https://synthetic-storage.example/upload/avatar-object",
+          };
+        }
+        if (path === "/api/media/signed-read-url") {
+          return {
+            signed_read_url: signedReadUrl,
+          };
+        }
+
+        return { ok: true };
+      },
+    });
+    installSyntheticFetch(() => ({
+      ok: true,
+      status: 200,
+    }));
+
+    await expect(service.uploadFile(createUploadFile("avatar.png", "image/png"), "avatar")).resolves.toMatchObject({
+      kind: "avatar",
+      url: signedReadUrl,
+      urlPath: signedReadUrl,
+      mediaObjectId: "synthetic-avatar-media",
+      objectKey: "media/frontend/avatar-owner/avatar-upload-client-avatar.png",
+    });
+    expect(calls.map((call) => call.path)).toEqual([
+      "/api/media/upload-begin",
+      "/api/media/upload-complete",
+      "/api/media/move-temp-to-permanent",
+      "/api/media/signed-read-url",
+    ]);
+    expect(parseJsonBody(calls[0])).toMatchObject({
+      accountOwnerType: "user",
+      accountOwnerId: "avatar-owner",
+      objectKey: "media/frontend/avatar-owner/avatar-upload-client-avatar.png",
+      mediaType: "avatar",
+      contentType: "image/png",
+      data: {
+        originalName: "avatar.png",
+        frontendKind: "avatar",
+      },
+    });
+    expect(parseJsonBody(calls[2])).toMatchObject({
+      mediaObjectId: "synthetic-avatar-media",
+      permanentObjectKey: "media/frontend/avatar-owner/avatar-upload-client-avatar.png",
+      reason: "frontend-avatar",
     });
   });
 

@@ -100,7 +100,7 @@ function ConvertTo-LibpqDatabaseUrl {
 
 $databaseUrl = $env:DATABASE_URL
 if (-not $databaseUrl -or $databaseUrl.Contains("change-me")) {
-  $databaseUrl = "postgres://root:root@127.0.0.1:5432/xiaolou_windows_native_test"
+  $databaseUrl = "postgres://root:root@127.0.0.1:5432/xiaolou"
 }
 
 $Psql = Resolve-DDriveTool $Psql "D:\soft\program\PostgreSQL\18\bin\psql.exe" "psql.exe"

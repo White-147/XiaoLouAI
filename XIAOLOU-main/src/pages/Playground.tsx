@@ -39,7 +39,7 @@ import {
   type PlaygroundMessage,
   type PlaygroundModel,
 } from "../lib/api";
-import { useActorId } from "../lib/actor-session";
+import { hasSessionCredentials, useActorId } from "../lib/actor-session";
 import { cn } from "../lib/utils";
 
 function formatTime(value: string | null | undefined) {
@@ -103,6 +103,7 @@ export default function Playground() {
   const [memoryDrafts, setMemoryDrafts] = useState<Record<string, MemoryDraft>>({});
   const [savingMemoryKey, setSavingMemoryKey] = useState<string | null>(null);
   const [memoryPanelOpen, setMemoryPanelOpen] = useState(true);
+  const canUsePlayground = hasSessionCredentials();
   const activeJobByConversation = new Map(
     activeJobs.filter(isActiveChatJob).map((job) => [job.conversationId, job]),
   );
@@ -464,7 +465,7 @@ export default function Playground() {
             <select
               value={selectedModel}
               onChange={(event) => setSelectedModel(event.currentTarget.value)}
-              disabled={Boolean(activeConversationJob)}
+              disabled={!canUsePlayground || Boolean(activeConversationJob)}
               className="h-9 min-w-52 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none"
             >
               {models.map((model) => (
@@ -557,7 +558,7 @@ export default function Playground() {
             <textarea
               value={input}
               onChange={(event) => setInput(event.currentTarget.value)}
-              disabled={Boolean(activeConversationJob)}
+              disabled={!canUsePlayground || Boolean(activeConversationJob)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -570,7 +571,7 @@ export default function Playground() {
             />
             <button
               type="submit"
-              disabled={sending || Boolean(activeConversationJob) || !input.trim()}
+              disabled={!canUsePlayground || sending || Boolean(activeConversationJob) || !input.trim()}
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="发送"
             >
@@ -596,8 +597,9 @@ export default function Playground() {
               <button
                 type="button"
                 onClick={toggleMemoryPreference}
+                disabled={!canUsePlayground}
                 className={cn(
-                  "inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition",
+                  "inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-50",
                   memoryPreference.enabled
                     ? "border-primary/40 bg-primary/10 text-primary"
                     : "border-border text-muted-foreground hover:bg-accent",
@@ -609,6 +611,7 @@ export default function Playground() {
               <button
                 type="button"
                 onClick={() => void loadMemories()}
+                disabled={!canUsePlayground}
                 className="inline-flex h-8 items-center justify-center rounded-md border border-border px-2 text-muted-foreground transition hover:bg-accent hover:text-foreground"
                 aria-label="刷新记忆"
               >

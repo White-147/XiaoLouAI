@@ -72,8 +72,7 @@ function Test-ControlApiPublicPath {
     -or $Path -match "^/api/agent-canvas/projects/" `
     -or $Path -match "^/api/create/(images|videos)($|[/?#])" `
     -or $Path -match "^/api/create/(images|videos)/" `
-    -or $Path -match "^/api/payments/callbacks/[^/?#]+($|[/?#])" `
-    -or $Path -match "^/api/payments/(alipay|wechat)/notify($|[/?#])"
+    -or $Path -match "^/api/payments/callbacks/[^/?#]+($|[/?#])"
 }
 
 function Test-CoreApiReadonlyPublicPath {
@@ -161,8 +160,7 @@ if (Test-Path -LiteralPath $caddyPath) {
     -and $caddyText -match "handle\s+/livez\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/readyz\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/windows-native/status\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
-    -and $caddyText -match "handle\s+/api/payments/alipay/notify\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
-    -and $caddyText -match "handle\s+/api/payments/wechat/notify\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/payments/callbacks/\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/media/upload-begin\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/media/signed-read-url\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/projects\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
@@ -195,7 +193,7 @@ if (Test-Path -LiteralPath $iisPath) {
   $hasOperationalBlock = $iisText -match '\^\(metrics\|api/\(schema\.\*\|providers/health\.\*\)\)\$'
   $hasUnlistedBlock = $iisText -match 'Block Unlisted XiaoLou API'
   $hasHealthProxy = $iisText -match '\^\(healthz\|livez\|readyz\)\$'
-  $hasPublicProxy = $iisText -match 'windows-native/status\|capabilities\|accounts/ensure\|auth\(/.\*\)\?\|me\|organizations\(/.\*\)\?\|api-center\(/.\*\)\?\|admin\(/.\*\)\?\|enterprise-applications\(/.\*\)\?\|playground\(/.\*\)\?\|toolbox\(/.\*\)\?\|jobs\(/.\*\)\?\|wallet\|wallet/usage-stats\|wallets\(/.\*\)\?\|projects\(/.\*\)\?\|canvas-projects\(/.\*\)\?\|agent-canvas/projects\(/.\*\)\?\|create/\(images\|videos\)\(/.\*\)\?\|payments/\(callbacks/\[\^/\]\+\|alipay/notify\|wechat/notify\)\|media/\(upload-begin\|upload-complete\|move-temp-to-permanent\|signed-read-url\)'
+  $hasPublicProxy = $iisText -match 'windows-native/status\|capabilities\|accounts/ensure\|auth\(/.\*\)\?\|me\|organizations\(/.\*\)\?\|api-center\(/.\*\)\?\|admin\(/.\*\)\?\|enterprise-applications\(/.\*\)\?\|playground\(/.\*\)\?\|toolbox\(/.\*\)\?\|jobs\(/.\*\)\?\|wallet\|wallet/usage-stats\|wallets\(/.\*\)\?\|projects\(/.\*\)\?\|canvas-projects\(/.\*\)\?\|agent-canvas/projects\(/.\*\)\?\|create/\(images\|videos\)\(/.\*\)\?\|payments/callbacks/\[\^/\]\+\|media/\(upload-begin\|upload-complete\|move-temp-to-permanent\|signed-read-url\)'
   if ($hasInternalBlock -and $hasOperationalBlock -and $hasUnlistedBlock -and $hasHealthProxy -and $hasPublicProxy) {
     Add-Item $checks "iis-public-surface" "ok" "IIS routes only explicit Control API public paths and blocks unlisted legacy surfaces."
   } else {
