@@ -348,7 +348,7 @@ describe("createJobsService", () => {
     ]);
   });
 
-  it("keeps deleteTask not-found and cancellable-task behavior stable", async () => {
+  it("dismisses missing tasks without calling the cancel route", async () => {
     const notFound = new Error("synthetic not found");
     const notFoundHarness = createServiceHarness({
       handler: () => {
@@ -357,7 +357,7 @@ describe("createJobsService", () => {
       notFoundError: notFound,
     });
 
-    await expect(notFoundHarness.service.deleteTask("missing job/1")).resolves.toEqual({
+    await expect(notFoundHarness.service.dismissTask("missing job/1")).resolves.toEqual({
       deleted: false,
       taskId: "missing job/1",
     });
@@ -367,7 +367,9 @@ describe("createJobsService", () => {
         init: undefined,
       },
     ]);
+  });
 
+  it("dismisses active tasks through the stable cancel route", async () => {
     const cancelHarness = createServiceHarness({
       handler: (path) => {
         if (path.endsWith("/cancel")) {
@@ -384,7 +386,7 @@ describe("createJobsService", () => {
       },
     });
 
-    await expect(cancelHarness.service.deleteTask("synthetic-running-job")).resolves.toEqual({
+    await expect(cancelHarness.service.dismissTask("synthetic-running-job")).resolves.toEqual({
       deleted: false,
       taskId: "synthetic-running-job",
     });
@@ -397,6 +399,33 @@ describe("createJobsService", () => {
     expect(parseJsonBody(cancelHarness.calls[1])).toEqual({
       reason: "frontend task dismissed",
     });
+  });
+
+  it("dismisses completed tasks without canceling or deleting backend records", async () => {
+    const { calls, service } = createServiceHarness({
+      handler: () =>
+        createSyntheticJob({
+          id: "synthetic-complete-job",
+          status: "succeeded",
+        }),
+    });
+
+    await expect(service.dismissTask("synthetic-complete-job")).resolves.toEqual({
+      deleted: false,
+      taskId: "synthetic-complete-job",
+    });
+    expect(calls).toEqual([
+      {
+        path: "/api/jobs/synthetic-complete-job",
+        init: undefined,
+      },
+    ]);
+  });
+
+  it("keeps deleteTask as a compatibility alias for dismissTask", () => {
+    const { service } = createServiceHarness();
+
+    expect(service.deleteTask).toBe(service.dismissTask);
   });
 
   it("clears filtered tasks by canceling only active public jobs", async () => {

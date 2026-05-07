@@ -48,6 +48,7 @@ async function importApiWithMockServices() {
       "mapControlJobToTask",
       "listTasks",
       "getTask",
+      "dismissTask",
       "deleteTask",
       "clearTasks",
     ]),
@@ -64,6 +65,7 @@ async function importApiWithMockServices() {
       "listPlaygroundChatJobs",
       "getPlaygroundChatJob",
       "startPlaygroundChatJob",
+      "runPlaygroundChatFacade",
       "listPlaygroundMemories",
       "updatePlaygroundMemoryPreference",
       "updatePlaygroundMemory",
@@ -203,6 +205,7 @@ describe("api.ts compatibility wrappers", () => {
       "listProjects",
       "listTasks",
       "getTask",
+      "dismissTask",
       "deleteTask",
       "clearTasks",
       "getWallet",
@@ -213,6 +216,7 @@ describe("api.ts compatibility wrappers", () => {
       "reviewAdminOrder",
       "listPlaygroundConversations",
       "startPlaygroundChatJob",
+      "runPlaygroundChatFacade",
       "streamPlaygroundChat",
       "listCanvasProjects",
       "saveCanvasProject",
@@ -283,6 +287,14 @@ describe("api.ts compatibility wrappers", () => {
       prompt: "Synthetic image prompt",
       idempotencyKey: "synthetic-image-key",
     };
+    const chatInput = {
+      conversationId: "synthetic-conversation",
+      message: "Synthetic chat",
+      model: "qwen-plus",
+    };
+    const onChatEvent = vi.fn();
+    const signal = new AbortController().signal;
+    const taskId = "synthetic-task/1";
     const canvasInput = {
       id: "synthetic canvas/1",
       title: "Synthetic Canvas",
@@ -305,6 +317,16 @@ describe("api.ts compatibility wrappers", () => {
       methodName: "listTasks",
       args: ["synthetic-project", "image.render"],
     });
+    await expect(api.dismissTask(taskId)).resolves.toEqual({
+      serviceName: "jobs",
+      methodName: "dismissTask",
+      args: [taskId],
+    });
+    await expect(api.deleteTask(taskId)).resolves.toEqual({
+      serviceName: "jobs",
+      methodName: "dismissTask",
+      args: [taskId],
+    });
     await expect(api.uploadFile(file, "image")).resolves.toEqual({
       serviceName: "media",
       methodName: "uploadFile",
@@ -314,6 +336,16 @@ describe("api.ts compatibility wrappers", () => {
       serviceName: "projectsCanvasCreate",
       methodName: "generateCreateImages",
       args: [imageInput],
+    });
+    await expect(api.runPlaygroundChatFacade(chatInput, onChatEvent, signal)).resolves.toEqual({
+      serviceName: "playground",
+      methodName: "runPlaygroundChatFacade",
+      args: [chatInput, onChatEvent, signal],
+    });
+    await expect(api.streamPlaygroundChat(chatInput, onChatEvent, signal)).resolves.toEqual({
+      serviceName: "playground",
+      methodName: "runPlaygroundChatFacade",
+      args: [chatInput, onChatEvent, signal],
     });
     await expect(api.saveCanvasProject(canvasInput)).resolves.toEqual({
       serviceName: "projectsCanvasCreate",
@@ -328,8 +360,14 @@ describe("api.ts compatibility wrappers", () => {
 
     expect(services.authAccount.updateMe).toHaveBeenCalledWith(mePatch);
     expect(services.jobs.listTasks).toHaveBeenCalledWith("synthetic-project", "image.render");
+    expect(services.jobs.dismissTask).toHaveBeenCalledTimes(2);
+    expect(services.jobs.dismissTask).toHaveBeenCalledWith(taskId);
+    expect(services.jobs.deleteTask).not.toHaveBeenCalled();
     expect(services.media.uploadFile).toHaveBeenCalledWith(file, "image");
     expect(services.projectsCanvasCreate.generateCreateImages).toHaveBeenCalledWith(imageInput);
+    expect(services.playground.runPlaygroundChatFacade).toHaveBeenCalledTimes(2);
+    expect(services.playground.runPlaygroundChatFacade).toHaveBeenCalledWith(chatInput, onChatEvent, signal);
+    expect(services.playground.streamPlaygroundChat).not.toHaveBeenCalled();
     expect(services.projectsCanvasCreate.saveCanvasProject).toHaveBeenCalledWith(canvasInput);
     expect(services.toolbox.runToolboxCapability).toHaveBeenCalledWith("character_replace", toolboxInput);
   });

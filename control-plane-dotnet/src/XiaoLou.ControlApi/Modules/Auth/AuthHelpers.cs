@@ -41,31 +41,14 @@ internal static class AuthHelpers
 
     internal static string CreateLocalAuthToken(string actorId)
     {
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes($"{actorId}:{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}"));
+        return ClientAssertionFactory.CreateLocalAuthToken(actorId);
     }
 
     internal static string? CreateControlApiClientAssertion(
         Dictionary<string, object?> permissionContext,
         ClientApiOptions options)
     {
-        var secret = GetConfiguredClientAuthProviderSecret(options);
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            return null;
-        }
-
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var ttlSeconds = ReadPositiveIntegerOption("CLIENT_API_AUTH_PROVIDER_TTL_SECONDS", 3600);
-        var header = new Dictionary<string, object?>
-        {
-            ["alg"] = "HS256",
-            ["typ"] = "JWT",
-        };
-        var claims = BuildControlApiAssertionClaims(permissionContext, options, now, ttlSeconds);
-        var signingInput = $"{Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(header))}.{Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(claims))}";
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret.Trim()));
-        var signature = Base64UrlEncode(hmac.ComputeHash(Encoding.ASCII.GetBytes(signingInput)));
-        return $"{signingInput}.{signature}";
+        return ClientAssertionFactory.CreateControlApiClientAssertion(permissionContext, options);
     }
 
     internal static Dictionary<string, object?>? TryReadDictionary(Dictionary<string, object?>? source, string key)
@@ -198,11 +181,11 @@ internal static class AuthHelpers
 
     internal static ClientAuthenticationResult AuthenticateClientRequest(HttpContext context, ClientApiOptions options)
     {
-        var authProviderEnabled = IsClientAuthProviderEnabled(options);
-        var authProviderRequired = ShouldRequireAuthProvider(options);
+        var authProviderEnabled = ClientAuthProviderValidator.IsClientAuthProviderEnabled(options);
+        var authProviderRequired = ClientAuthProviderValidator.ShouldRequireAuthProvider(options);
         if (authProviderEnabled && ReadAuthorizationBearerToken(context) is { } bearerToken)
         {
-            if (TryValidateClientAuthProviderToken(options, bearerToken, out var providerPrincipal))
+            if (ClientAuthProviderValidator.TryValidateClientAuthProviderToken(options, bearerToken, out var providerPrincipal))
             {
                 return ClientAuthenticationResult.Allowed(providerPrincipal);
             }
@@ -262,14 +245,10 @@ internal static class AuthHelpers
         var principal = GetClientPrincipal(context);
         if (principal?.FromAuthProvider == true)
         {
-            if (!ContainsCsvGrant(principal.AllowedPermissions, requiredPermission))
-            {
-                return false;
-            }
-
-            var configuredPermissions = GetConfiguredAllowedPermissions(options);
-            return string.IsNullOrWhiteSpace(configuredPermissions)
-                || ContainsCsvGrant(configuredPermissions, requiredPermission);
+            return ClientAuthProviderValidator.IsProviderPermissionAllowed(
+                principal,
+                GetConfiguredAllowedPermissions(options),
+                requiredPermission);
         }
 
         var allowedPermissions = principal?.AllowedPermissions ?? GetConfiguredAllowedPermissions(options);
@@ -285,58 +264,42 @@ internal static class AuthHelpers
     internal static bool IsClientAuthModeEnabled(ClientApiOptions options)
     {
         return GetConfiguredClientToken(options) is not null
-            || IsClientAuthProviderEnabled(options);
+            || ClientAuthProviderValidator.IsClientAuthProviderEnabled(options);
     }
 
     internal static string? GetConfiguredAllowedAccountIds(ClientApiOptions options)
     {
-        return string.IsNullOrWhiteSpace(options.AllowedAccountIds)
-            ? Environment.GetEnvironmentVariable("CLIENT_API_ALLOWED_ACCOUNT_IDS")
-            : options.AllowedAccountIds;
+        return ClientApiHeaderEnvHelpers.GetConfiguredAllowedAccountIds(options);
     }
 
     internal static string? GetConfiguredAllowedAccountOwnerIds(ClientApiOptions options)
     {
-        return string.IsNullOrWhiteSpace(options.AllowedAccountOwnerIds)
-            ? Environment.GetEnvironmentVariable("CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS")
-            : options.AllowedAccountOwnerIds;
+        return ClientApiHeaderEnvHelpers.GetConfiguredAllowedAccountOwnerIds(options);
     }
 
     internal static string? GetConfiguredAllowedPermissions(ClientApiOptions options)
     {
-        return JoinGrantLists(
-            options.AllowedPermissions,
-            Environment.GetEnvironmentVariable("ClientApi__AllowedPermissions"),
-            Environment.GetEnvironmentVariable("CLIENT_API_ALLOWED_PERMISSIONS"),
-            Environment.GetEnvironmentVariable("CONTROL_API_CLIENT_ASSERTION_PERMISSIONS"));
+        return ClientApiHeaderEnvHelpers.GetConfiguredAllowedPermissions(options);
     }
 
     internal static string? GetConfiguredClientAuthProviderSecret(ClientApiOptions options)
     {
-        return string.IsNullOrWhiteSpace(options.AuthProviderSecret)
-            ? Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_SECRET")
-            : options.AuthProviderSecret;
+        return ClientApiHeaderEnvHelpers.GetConfiguredClientAuthProviderSecret(options);
     }
 
     internal static string? GetConfiguredClientAuthProviderIssuer(ClientApiOptions options)
     {
-        return string.IsNullOrWhiteSpace(options.AuthProviderIssuer)
-            ? Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_ISSUER")
-            : options.AuthProviderIssuer;
+        return ClientApiHeaderEnvHelpers.GetConfiguredClientAuthProviderIssuer(options);
     }
 
     internal static string? GetConfiguredClientAuthProviderAudience(ClientApiOptions options)
     {
-        return string.IsNullOrWhiteSpace(options.AuthProviderAudience)
-            ? Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_AUDIENCE")
-            : options.AuthProviderAudience;
+        return ClientApiHeaderEnvHelpers.GetConfiguredClientAuthProviderAudience(options);
     }
 
     internal static ClientPrincipal? GetClientPrincipal(HttpContext context)
     {
-        return context.Items.TryGetValue(ClientPrincipal.ItemKey, out var value)
-            ? value as ClientPrincipal
-            : null;
+        return ClientApiHeaderEnvHelpers.GetClientPrincipal(context);
     }
 
     internal static bool TryReadAccountId(Dictionary<string, object?> row, out Guid accountId)
@@ -379,7 +342,7 @@ internal static class AuthHelpers
 
     internal static string? ReadHeader(HttpContext context, string name)
     {
-        return context.Request.Headers[name].FirstOrDefault();
+        return ClientApiHeaderEnvHelpers.ReadHeader(context, name);
     }
 
     internal static string? NormalizeBlank(string? value)
@@ -414,26 +377,7 @@ internal static class AuthHelpers
 
     internal static bool HasExternalForwardedAddress(HttpContext context)
     {
-        foreach (var headerName in new[] { "X-Forwarded-For", "X-Real-IP" })
-        {
-            foreach (var raw in context.Request.Headers[headerName])
-            {
-                if (string.IsNullOrWhiteSpace(raw))
-                {
-                    continue;
-                }
-
-                foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                {
-                    if (IPAddress.TryParse(part, out var parsed) && !IPAddress.IsLoopback(parsed))
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
+        return ClientApiHeaderEnvHelpers.HasExternalForwardedAddress(context);
     }
 
     internal static bool FixedTimeEquals(string expected, string supplied)
@@ -444,115 +388,6 @@ internal static class AuthHelpers
             && CryptographicOperations.FixedTimeEquals(expectedBytes, suppliedBytes);
     }
 
-    private static Dictionary<string, object?> BuildControlApiAssertionClaims(
-        Dictionary<string, object?> permissionContext,
-        ClientApiOptions options,
-        long now,
-        int ttlSeconds)
-    {
-        var actor = TryReadDictionary(permissionContext, "actor");
-        var actorId = ReadDictionaryString(actor, "id")
-            ?? ReadDictionaryString(permissionContext, "actorId")
-            ?? "guest";
-        var claims = new Dictionary<string, object?>
-        {
-            ["sub"] = actorId,
-            ["iat"] = now,
-            ["nbf"] = now - 30,
-            ["exp"] = now + ttlSeconds,
-            ["jti"] = Guid.NewGuid().ToString("D"),
-            ["xiaolou_account_owner_type"] = "user",
-            ["xiaolou_account_owner_ids"] = CollectOwnerGrants(permissionContext, actorId),
-            ["xiaolou_permissions"] = NormalizeGrantArray(GetAssertionPermissions(options)),
-        };
-
-        var issuer = NormalizeBlank(GetConfiguredClientAuthProviderIssuer(options));
-        if (issuer is not null)
-        {
-            claims["iss"] = issuer;
-        }
-
-        var audience = NormalizeBlank(GetConfiguredClientAuthProviderAudience(options));
-        if (audience is not null)
-        {
-            claims["aud"] = audience;
-        }
-
-        var currentOrganizationId = ReadDictionaryString(permissionContext, "currentOrganizationId");
-        if (currentOrganizationId is not null)
-        {
-            claims["xiaolou_current_organization_id"] = currentOrganizationId;
-        }
-
-        return claims;
-    }
-
-    private static string[] CollectOwnerGrants(Dictionary<string, object?> permissionContext, string actorId)
-    {
-        var grants = new List<string>
-        {
-            actorId,
-            $"user:{actorId}",
-        };
-
-        if (ReadDictionaryEnumerable(permissionContext, "organizations") is { } organizations)
-        {
-            foreach (var organization in organizations)
-            {
-                var organizationId = ReadDictionaryString(organization, "id");
-                var status = ReadDictionaryString(organization, "status");
-                if (organizationId is null || string.Equals(status, "disabled", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                grants.Add(organizationId);
-                grants.Add($"organization:{organizationId}");
-            }
-        }
-
-        var currentOrganizationId = ReadDictionaryString(permissionContext, "currentOrganizationId");
-        if (currentOrganizationId is not null)
-        {
-            grants.Add(currentOrganizationId);
-            grants.Add($"organization:{currentOrganizationId}");
-        }
-
-        return grants.Distinct(StringComparer.Ordinal).ToArray();
-    }
-
-    private static string GetAssertionPermissions(ClientApiOptions options)
-    {
-        return string.IsNullOrWhiteSpace(GetConfiguredAllowedPermissions(options))
-            ? DefaultClientApiPermissions()
-            : GetConfiguredAllowedPermissions(options)!;
-    }
-
-    private static string DefaultClientApiPermissions()
-    {
-        return "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write,identity:read,identity:write,organization:read,organization:write,api-center:read,api-center:write,admin:read,admin:write,enterprise-applications:read,enterprise-applications:write,playground:read,playground:write,toolbox:read,toolbox:write";
-    }
-
-    private static string[] NormalizeGrantArray(string value)
-    {
-        return value.Split(',', ';', ' ', '\t', '\r', '\n')
-            .Select(item => item.Trim())
-            .Where(item => item.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
-    private static int ReadPositiveIntegerOption(string envName, int fallback)
-    {
-        var raw = Environment.GetEnvironmentVariable(envName);
-        return int.TryParse(raw, out var value) && value > 0 ? value : fallback;
-    }
-
-    private static string Base64UrlEncode(byte[] bytes)
-    {
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    }
-
     private static IResult AccountForbidden()
     {
         return Results.Json(new
@@ -561,101 +396,34 @@ internal static class AuthHelpers
         }, statusCode: StatusCodes.Status403Forbidden);
     }
 
-    private static bool IsClientAuthProviderEnabled(ClientApiOptions options)
-    {
-        return string.Equals(GetConfiguredClientAuthProvider(options), "hs256-jwt", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? GetConfiguredClientAuthProvider(ClientApiOptions options)
-    {
-        var configuredProvider = string.IsNullOrWhiteSpace(options.AuthProvider)
-            ? Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER")
-            : options.AuthProvider;
-        var provider = string.IsNullOrWhiteSpace(configuredProvider) ? null : configuredProvider.Trim();
-        if (provider is not null && string.Equals(provider, "jwt-hs256", StringComparison.OrdinalIgnoreCase))
-        {
-            return "hs256-jwt";
-        }
-
-        return provider;
-    }
-
     private static string? GetConfiguredClientToken(ClientApiOptions options)
     {
-        var configuredToken = string.IsNullOrWhiteSpace(options.Token)
-            ? Environment.GetEnvironmentVariable("CLIENT_API_TOKEN")
-            : options.Token;
-        var expectedToken = string.IsNullOrWhiteSpace(configuredToken) ? null : configuredToken.Trim();
-        return expectedToken;
-    }
-
-    private static string GetConfiguredClientTokenHeader(ClientApiOptions options)
-    {
-        var configuredHeader = Environment.GetEnvironmentVariable("CLIENT_API_TOKEN_HEADER");
-        if (string.IsNullOrWhiteSpace(configuredHeader))
-        {
-            configuredHeader = options.TokenHeader;
-        }
-
-        return string.IsNullOrWhiteSpace(configuredHeader)
-            ? "X-XiaoLou-Client-Token"
-            : configuredHeader.Trim();
+        return ClientApiHeaderEnvHelpers.GetConfiguredClientToken(options);
     }
 
     private static bool ShouldRequireAccountScope(ClientApiOptions options)
     {
-        return ReadBoolOption("CLIENT_API_REQUIRE_ACCOUNT_SCOPE", options.RequireAccountScope);
+        return ClientApiHeaderEnvHelpers.ShouldRequireAccountScope(options);
     }
 
     private static bool ShouldRequireConfiguredAccountGrant(ClientApiOptions options)
     {
-        return ReadBoolOption("CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT", options.RequireConfiguredAccountGrant);
-    }
-
-    private static bool ShouldRequireAuthProvider(ClientApiOptions options)
-    {
-        return ReadBoolOption("CLIENT_API_REQUIRE_AUTH_PROVIDER", options.RequireAuthProvider);
+        return ClientApiHeaderEnvHelpers.ShouldRequireConfiguredAccountGrant(options);
     }
 
     internal static bool ReadBoolOption(string envName, bool configuredDefault)
     {
-        var raw = Environment.GetEnvironmentVariable(envName);
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return configuredDefault;
-        }
-
-        return raw.Trim().ToLowerInvariant() switch
-        {
-            "1" or "true" or "yes" or "on" => true,
-            "0" or "false" or "no" or "off" => false,
-            _ => configuredDefault,
-        };
+        return ClientApiHeaderEnvHelpers.ReadBoolOption(envName, configuredDefault);
     }
 
     private static string? ReadClientToken(HttpContext context, ClientApiOptions options)
     {
-        var headerName = GetConfiguredClientTokenHeader(options);
-        var headerValue = ReadHeader(context, headerName);
-        if (!string.IsNullOrWhiteSpace(headerValue))
-        {
-            return headerValue.Trim();
-        }
-
-        var authorization = ReadHeader(context, "Authorization");
-        const string bearerPrefix = "Bearer ";
-        return authorization is not null && authorization.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)
-            ? authorization[bearerPrefix.Length..].Trim()
-            : null;
+        return ClientApiHeaderEnvHelpers.ReadClientToken(context, options);
     }
 
     private static string? ReadAuthorizationBearerToken(HttpContext context)
     {
-        var authorization = ReadHeader(context, "Authorization");
-        const string bearerPrefix = "Bearer ";
-        return authorization is not null && authorization.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)
-            ? authorization[bearerPrefix.Length..].Trim()
-            : null;
+        return ClientApiHeaderEnvHelpers.ReadAuthorizationBearerToken(context);
     }
 
     private static bool IsAccountScopeAllowed(
@@ -684,251 +452,6 @@ internal static class AuthHelpers
             normalizedOwnerType,
             ownerType is not null,
             ownerId);
-    }
-
-    private static int GetClientAuthProviderClockSkewSeconds(ClientApiOptions options)
-    {
-        var raw = Environment.GetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS");
-        if (int.TryParse(raw, out var envValue))
-        {
-            return Math.Clamp(envValue, 0, 300);
-        }
-
-        return Math.Clamp(options.AuthProviderClockSkewSeconds, 0, 300);
-    }
-
-    private static bool TryValidateClientAuthProviderToken(
-        ClientApiOptions options,
-        string token,
-        out ClientPrincipal? principal)
-    {
-        principal = null;
-        var secret = GetConfiguredClientAuthProviderSecret(options);
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            return false;
-        }
-
-        var parts = token.Split('.');
-        if (parts.Length != 3 || parts.Any(string.IsNullOrWhiteSpace))
-        {
-            return false;
-        }
-
-        byte[] headerBytes;
-        byte[] payloadBytes;
-        byte[] signatureBytes;
-        try
-        {
-            headerBytes = DecodeBase64Url(parts[0]);
-            payloadBytes = DecodeBase64Url(parts[1]);
-            signatureBytes = DecodeBase64Url(parts[2]);
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret.Trim()));
-        var expectedSignature = hmac.ComputeHash(Encoding.ASCII.GetBytes($"{parts[0]}.{parts[1]}"));
-        if (signatureBytes.Length != expectedSignature.Length
-            || !CryptographicOperations.FixedTimeEquals(signatureBytes, expectedSignature))
-        {
-            return false;
-        }
-
-        try
-        {
-            using var headerJson = JsonDocument.Parse(headerBytes);
-            if (!headerJson.RootElement.TryGetProperty("alg", out var alg)
-                || !string.Equals(alg.GetString(), "HS256", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            using var payloadJson = JsonDocument.Parse(payloadBytes);
-            var payload = payloadJson.RootElement;
-            if (!IsClientAuthProviderIssuerAllowed(options, payload)
-                || !IsClientAuthProviderAudienceAllowed(options, payload)
-                || !IsClientAuthProviderTimeWindowAllowed(options, payload))
-            {
-                return false;
-            }
-
-            var subject = ReadStringClaim(payload, "sub");
-            var ownerType = ReadStringClaim(payload, "xiaolou_account_owner_type") ?? "user";
-            var accountOwnerIds = ReadClaimGrantList(
-                payload,
-                "xiaolou_account_owner_ids",
-                "account_owner_ids",
-                "owner_ids",
-                "owner_id");
-            if (!string.IsNullOrWhiteSpace(subject))
-            {
-                accountOwnerIds = JoinGrantLists(accountOwnerIds, subject, $"{ownerType}:{subject}");
-            }
-
-            principal = new ClientPrincipal(
-                Subject: subject,
-                FromAuthProvider: true,
-                AllowedAccountIds: ReadClaimGrantList(payload, "xiaolou_account_ids", "account_ids", "account_id"),
-                AllowedAccountOwnerIds: accountOwnerIds,
-                AllowedPermissions: ReadClaimGrantList(payload, "xiaolou_permissions", "permissions", "scope", "scp"));
-            return true;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    private static bool IsClientAuthProviderIssuerAllowed(ClientApiOptions options, JsonElement payload)
-    {
-        var configuredIssuer = NormalizeBlank(GetConfiguredClientAuthProviderIssuer(options));
-        if (configuredIssuer is null)
-        {
-            return true;
-        }
-
-        return string.Equals(ReadStringClaim(payload, "iss"), configuredIssuer, StringComparison.Ordinal);
-    }
-
-    private static bool IsClientAuthProviderAudienceAllowed(ClientApiOptions options, JsonElement payload)
-    {
-        var configuredAudience = NormalizeBlank(GetConfiguredClientAuthProviderAudience(options));
-        if (configuredAudience is null)
-        {
-            return true;
-        }
-
-        if (!payload.TryGetProperty("aud", out var aud))
-        {
-            return false;
-        }
-
-        if (aud.ValueKind == JsonValueKind.String)
-        {
-            return string.Equals(aud.GetString(), configuredAudience, StringComparison.Ordinal);
-        }
-
-        if (aud.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in aud.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String
-                    && string.Equals(item.GetString(), configuredAudience, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsClientAuthProviderTimeWindowAllowed(ClientApiOptions options, JsonElement payload)
-    {
-        if (!payload.TryGetProperty("exp", out var exp) || !TryReadUnixSeconds(exp, out var expiresAt))
-        {
-            return false;
-        }
-
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var skew = GetClientAuthProviderClockSkewSeconds(options);
-        if (now - skew > expiresAt)
-        {
-            return false;
-        }
-
-        if (!payload.TryGetProperty("nbf", out var nbf))
-        {
-            return true;
-        }
-
-        return TryReadUnixSeconds(nbf, out var notBefore)
-            && now + skew >= notBefore;
-    }
-
-    private static bool TryReadUnixSeconds(JsonElement element, out long value)
-    {
-        value = 0;
-        return element.ValueKind switch
-        {
-            JsonValueKind.Number => element.TryGetInt64(out value),
-            JsonValueKind.String => long.TryParse(element.GetString(), out value),
-            _ => false,
-        };
-    }
-
-    private static string? ReadStringClaim(JsonElement payload, string name)
-    {
-        return payload.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
-            ? NormalizeBlank(value.GetString())
-            : null;
-    }
-
-    private static string? ReadClaimGrantList(JsonElement payload, params string[] names)
-    {
-        var grants = new List<string>();
-        foreach (var name in names)
-        {
-            if (!payload.TryGetProperty(name, out var value))
-            {
-                continue;
-            }
-
-            if (value.ValueKind == JsonValueKind.String)
-            {
-                AddGrantValues(grants, value.GetString());
-            }
-            else if (value.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in value.EnumerateArray())
-                {
-                    if (item.ValueKind == JsonValueKind.String)
-                    {
-                        AddGrantValues(grants, item.GetString());
-                    }
-                }
-            }
-        }
-
-        return grants.Count == 0
-            ? null
-            : string.Join(",", grants.Distinct(StringComparer.OrdinalIgnoreCase));
-    }
-
-    private static void AddGrantValues(List<string> grants, string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return;
-        }
-
-        grants.AddRange(raw.Split(
-                new[] { ',', ';', ' ', '\r', '\n', '\t' },
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(item => !string.IsNullOrWhiteSpace(item)));
-    }
-
-    private static string? JoinGrantLists(params string?[] values)
-    {
-        var grants = new List<string>();
-        foreach (var value in values)
-        {
-            AddGrantValues(grants, value);
-        }
-
-        return grants.Count == 0
-            ? null
-            : string.Join(",", grants.Distinct(StringComparer.OrdinalIgnoreCase));
-    }
-
-    private static byte[] DecodeBase64Url(string value)
-    {
-        var padded = value.Replace('-', '+').Replace('_', '/');
-        padded = padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '=');
-        return Convert.FromBase64String(padded);
     }
 
 }

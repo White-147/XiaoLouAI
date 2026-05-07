@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using XiaoLou.ControlApi.Modules.Auth;
@@ -125,6 +127,216 @@ public sealed class AuthHelpersTests
         }
     }
 
+    [Fact]
+    public void ClientApiHeaderEnvHelpers_PreserveOptionEnvPrecedenceDefaultsAndAliases()
+    {
+        using var env = ClearClientAuthEnvironment();
+        Environment.SetEnvironmentVariable("CLIENT_API_TOKEN", "  env-token  ");
+        Environment.SetEnvironmentVariable("CLIENT_API_TOKEN_HEADER", "  X-Env-Client-Token  ");
+        Environment.SetEnvironmentVariable("CLIENT_API_ALLOWED_ACCOUNT_IDS", "env-account");
+        Environment.SetEnvironmentVariable("CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS", "user:env-owner");
+        Environment.SetEnvironmentVariable("ClientApi__AllowedPermissions", "identity:read jobs:read");
+        Environment.SetEnvironmentVariable("CLIENT_API_ALLOWED_PERMISSIONS", "toolbox:write");
+        Environment.SetEnvironmentVariable("CONTROL_API_CLIENT_ASSERTION_PERMISSIONS", "jobs:read,media:read");
+        Environment.SetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_SECRET", "env-secret");
+        Environment.SetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_ISSUER", "env-issuer");
+        Environment.SetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_AUDIENCE", "env-audience");
+
+        var fallbackOptions = new ClientApiOptions();
+        var configuredOptions = new ClientApiOptions
+        {
+            Token = "  option-token  ",
+            TokenHeader = "  X-Option-Client-Token  ",
+            AllowedAccountIds = "option-account",
+            AllowedAccountOwnerIds = "user:option-owner",
+            AllowedPermissions = "admin:read",
+            AuthProviderSecret = "option-secret",
+            AuthProviderIssuer = "option-issuer",
+            AuthProviderAudience = "option-audience",
+        };
+
+        Assert.Equal("env-token", ClientApiHeaderEnvHelpers.GetConfiguredClientToken(fallbackOptions));
+        Assert.Equal("option-token", ClientApiHeaderEnvHelpers.GetConfiguredClientToken(configuredOptions));
+        Assert.Equal("X-Env-Client-Token", ClientApiHeaderEnvHelpers.GetConfiguredClientTokenHeader(configuredOptions));
+        Assert.Equal("env-account", AuthHelpers.GetConfiguredAllowedAccountIds(fallbackOptions));
+        Assert.Equal("option-account", AuthHelpers.GetConfiguredAllowedAccountIds(configuredOptions));
+        Assert.Equal("user:env-owner", AuthHelpers.GetConfiguredAllowedAccountOwnerIds(fallbackOptions));
+        Assert.Equal("user:option-owner", AuthHelpers.GetConfiguredAllowedAccountOwnerIds(configuredOptions));
+        Assert.Equal(
+            "admin:read,identity:read,jobs:read,toolbox:write,media:read",
+            AuthHelpers.GetConfiguredAllowedPermissions(configuredOptions));
+        Assert.Equal("env-secret", AuthHelpers.GetConfiguredClientAuthProviderSecret(fallbackOptions));
+        Assert.Equal("option-secret", AuthHelpers.GetConfiguredClientAuthProviderSecret(configuredOptions));
+        Assert.Equal("env-issuer", AuthHelpers.GetConfiguredClientAuthProviderIssuer(fallbackOptions));
+        Assert.Equal("option-issuer", AuthHelpers.GetConfiguredClientAuthProviderIssuer(configuredOptions));
+        Assert.Equal("env-audience", AuthHelpers.GetConfiguredClientAuthProviderAudience(fallbackOptions));
+        Assert.Equal("option-audience", AuthHelpers.GetConfiguredClientAuthProviderAudience(configuredOptions));
+
+        Environment.SetEnvironmentVariable("CLIENT_API_TOKEN_HEADER", null);
+        Assert.Equal("X-Option-Client-Token", ClientApiHeaderEnvHelpers.GetConfiguredClientTokenHeader(configuredOptions));
+        Assert.Equal("X-XiaoLou-Client-Token", ClientApiHeaderEnvHelpers.GetConfiguredClientTokenHeader(new ClientApiOptions
+        {
+            TokenHeader = "",
+        }));
+    }
+
+    [Theory]
+    [InlineData("hs256-jwt", "hs256-jwt", true)]
+    [InlineData("jwt-hs256", "hs256-jwt", true)]
+    [InlineData("none", "none", false)]
+    [InlineData("   ", null, false)]
+    public void ClientApiHeaderEnvHelpers_NormalizeProviderAliases(
+        string? configuredProvider,
+        string? expectedProvider,
+        bool expectedEnabled)
+    {
+        using var env = ClearClientAuthEnvironment();
+        var options = new ClientApiOptions
+        {
+            AuthProvider = configuredProvider,
+        };
+
+        Assert.Equal(expectedProvider, ClientApiHeaderEnvHelpers.GetConfiguredClientAuthProvider(options));
+        Assert.Equal(expectedEnabled, ClientApiHeaderEnvHelpers.IsClientAuthProviderEnabled(options));
+
+        Environment.SetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER", configuredProvider);
+        Assert.Equal(expectedProvider, ClientApiHeaderEnvHelpers.GetConfiguredClientAuthProvider(new ClientApiOptions()));
+        Assert.Equal(expectedEnabled, ClientApiHeaderEnvHelpers.IsClientAuthProviderEnabled(new ClientApiOptions()));
+    }
+
+    [Fact]
+    public void ClientApiHeaderEnvHelpers_ClampAuthProviderClockSkew()
+    {
+        using var env = ClearClientAuthEnvironment();
+
+        Assert.Equal(0, ClientApiHeaderEnvHelpers.GetClientAuthProviderClockSkewSeconds(new ClientApiOptions
+        {
+            AuthProviderClockSkewSeconds = -10,
+        }));
+        Assert.Equal(300, ClientApiHeaderEnvHelpers.GetClientAuthProviderClockSkewSeconds(new ClientApiOptions
+        {
+            AuthProviderClockSkewSeconds = 999,
+        }));
+
+        Environment.SetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS", "-1");
+        Assert.Equal(0, ClientApiHeaderEnvHelpers.GetClientAuthProviderClockSkewSeconds(new ClientApiOptions
+        {
+            AuthProviderClockSkewSeconds = 60,
+        }));
+
+        Environment.SetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS", "301");
+        Assert.Equal(300, ClientApiHeaderEnvHelpers.GetClientAuthProviderClockSkewSeconds(new ClientApiOptions
+        {
+            AuthProviderClockSkewSeconds = 60,
+        }));
+
+        Environment.SetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS", "not-a-number");
+        Assert.Equal(42, ClientApiHeaderEnvHelpers.GetClientAuthProviderClockSkewSeconds(new ClientApiOptions
+        {
+            AuthProviderClockSkewSeconds = 42,
+        }));
+    }
+
+    [Fact]
+    public void CreateLocalAuthToken_EncodesActorAndRecentTimestamp()
+    {
+        var before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        var token = AuthHelpers.CreateLocalAuthToken("synthetic-actor");
+
+        var after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(token));
+        var separatorIndex = decoded.LastIndexOf(':');
+        Assert.True(separatorIndex > 0);
+        Assert.Equal("synthetic-actor", decoded[..separatorIndex]);
+        Assert.True(long.TryParse(decoded[(separatorIndex + 1)..], out var timestamp));
+        Assert.InRange(timestamp, before, after);
+    }
+
+    [Fact]
+    public void CreateControlApiClientAssertion_ReturnsNullWithoutSecret()
+    {
+        using var env = ClearClientAuthEnvironment();
+
+        var assertion = AuthHelpers.CreateControlApiClientAssertion(
+            SyntheticPermissionContext(),
+            new ClientApiOptions());
+
+        Assert.Null(assertion);
+    }
+
+    [Fact]
+    public void CreateControlApiClientAssertion_SignsExpectedHeaderPayloadAndExplicitClaims()
+    {
+        using var env = ClearClientAuthEnvironment();
+        Environment.SetEnvironmentVariable("CLIENT_API_AUTH_PROVIDER_TTL_SECONDS", "120");
+        var secret = "  synthetic-secret  ";
+        var options = new ClientApiOptions
+        {
+            AuthProviderSecret = secret,
+            AuthProviderIssuer = "https://issuer.example.test",
+            AuthProviderAudience = "control-api",
+            AllowedPermissions = "jobs:read media:write",
+        };
+
+        var assertion = AuthHelpers.CreateControlApiClientAssertion(SyntheticPermissionContext(), options);
+
+        var parts = AssertJwtShape(assertion);
+        var header = DecodeJwtJson(parts[0]);
+        var payload = DecodeJwtJson(parts[1]);
+        Assert.Equal("HS256", header.GetProperty("alg").GetString());
+        Assert.Equal("JWT", header.GetProperty("typ").GetString());
+        AssertJwtSignature(secret.Trim(), parts);
+        Assert.Equal("actor-1", payload.GetProperty("sub").GetString());
+        Assert.Equal("https://issuer.example.test", payload.GetProperty("iss").GetString());
+        Assert.Equal("control-api", payload.GetProperty("aud").GetString());
+        Assert.Equal("user", payload.GetProperty("xiaolou_account_owner_type").GetString());
+        Assert.Equal("tenant-current", payload.GetProperty("xiaolou_current_organization_id").GetString());
+        Assert.True(Guid.TryParse(payload.GetProperty("jti").GetString(), out _));
+
+        var iat = payload.GetProperty("iat").GetInt64();
+        var nbf = payload.GetProperty("nbf").GetInt64();
+        var exp = payload.GetProperty("exp").GetInt64();
+        Assert.Equal(30, iat - nbf);
+        Assert.Equal(120, exp - iat);
+
+        Assert.Equal(
+            new[] { "jobs:read", "media:write" },
+            ReadStringArray(payload, "xiaolou_permissions"));
+        Assert.Equal(
+            new[]
+            {
+                "actor-1",
+                "user:actor-1",
+                "tenant-enabled",
+                "organization:tenant-enabled",
+                "tenant-current",
+                "organization:tenant-current",
+            },
+            ReadStringArray(payload, "xiaolou_account_owner_ids"));
+    }
+
+    [Fact]
+    public void CreateControlApiClientAssertion_UsesDefaultPermissionsWhenUnconfigured()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var assertion = AuthHelpers.CreateControlApiClientAssertion(
+            SyntheticPermissionContext(),
+            new ClientApiOptions
+            {
+                AuthProviderSecret = "synthetic-secret",
+            });
+
+        var parts = AssertJwtShape(assertion);
+        var payload = DecodeJwtJson(parts[1]);
+        var permissions = ReadStringArray(payload, "xiaolou_permissions");
+
+        Assert.Contains("accounts:ensure", permissions);
+        Assert.Contains("jobs:create", permissions);
+        Assert.Contains("playground:write", permissions);
+        Assert.Contains("toolbox:write", permissions);
+    }
+
     [Theory]
     [InlineData("GET", "/api/playground", true)]
     [InlineData("POST", "/api/media/upload-begin", true)]
@@ -231,6 +443,249 @@ public sealed class AuthHelpersTests
         Assert.True(customHeader.IsAllowed);
         Assert.Equal(StatusCodes.Status200OK, customHeader.StatusCode);
         Assert.IsType<ClientPrincipal>(customHeader.Principal);
+    }
+
+    [Fact]
+    public void AuthenticateClientRequest_UsesAuthorizationBearerFallbackForStaticToken()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var options = new ClientApiOptions
+        {
+            Token = "synthetic-client-token",
+        };
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = "Bearer synthetic-client-token";
+
+        var result = AuthHelpers.AuthenticateClientRequest(context, options);
+
+        Assert.True(result.IsAllowed);
+        Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
+        Assert.IsType<ClientPrincipal>(result.Principal);
+    }
+
+    [Theory]
+    [InlineData("missing.segments")]
+    [InlineData("not-base64.!!.also-not-base64")]
+    public void AuthenticateClientRequest_RejectsMalformedProviderJwt(string token)
+    {
+        using var env = ClearClientAuthEnvironment();
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = $"Bearer {token}";
+
+        var result = AuthHelpers.AuthenticateClientRequest(context, RequiredProviderOptions());
+
+        AssertClientError(
+            result,
+            StatusCodes.Status401Unauthorized,
+            "client auth provider token is required or invalid");
+    }
+
+    [Fact]
+    public void AuthenticateClientRequest_RejectsProviderJwtAlgMismatch()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var token = CreateProviderJwt(
+            "synthetic-provider-secret",
+            SyntheticProviderPayload(),
+            new Dictionary<string, object?>
+            {
+                ["alg"] = "none",
+                ["typ"] = "JWT",
+            });
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = $"Bearer {token}";
+
+        var result = AuthHelpers.AuthenticateClientRequest(context, RequiredProviderOptions());
+
+        AssertClientError(
+            result,
+            StatusCodes.Status401Unauthorized,
+            "client auth provider token is required or invalid");
+    }
+
+    [Fact]
+    public void AuthenticateClientRequest_RejectsProviderJwtSignatureFailure()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var token = CreateProviderJwt(
+            "synthetic-provider-secret",
+            SyntheticProviderPayload(),
+            signingSecret: "wrong-provider-secret");
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = $"Bearer {token}";
+
+        var result = AuthHelpers.AuthenticateClientRequest(context, RequiredProviderOptions());
+
+        AssertClientError(
+            result,
+            StatusCodes.Status401Unauthorized,
+            "client auth provider token is required or invalid");
+    }
+
+    [Fact]
+    public void AuthenticateClientRequest_CreatesProviderPrincipalFromValidJwt()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var token = CreateProviderJwt(
+            "synthetic-provider-secret",
+            SyntheticProviderPayload());
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = $"Bearer {token}";
+
+        var result = AuthHelpers.AuthenticateClientRequest(context, RequiredProviderOptions());
+
+        Assert.True(result.IsAllowed);
+        Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
+        var principal = Assert.IsType<ClientPrincipal>(result.Principal);
+        Assert.True(principal.FromAuthProvider);
+        Assert.Equal("provider-subject", principal.Subject);
+        Assert.Equal("account-1,account-2", principal.AllowedAccountIds);
+        Assert.Equal(
+            "explicit-owner,organization:explicit-org,provider-subject,organization:provider-subject",
+            principal.AllowedAccountOwnerIds);
+        Assert.Equal("jobs:read,toolbox:write,media:read", principal.AllowedPermissions);
+    }
+
+    [Fact]
+    public void AuthenticateClientRequest_AcceptsProviderJwtAudienceArray()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var payload = SyntheticProviderPayload();
+        payload["aud"] = new[] { "other-audience", "control-api" };
+        var token = CreateProviderJwt("synthetic-provider-secret", payload);
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = $"Bearer {token}";
+
+        var result = AuthHelpers.AuthenticateClientRequest(context, RequiredProviderOptions());
+
+        Assert.True(result.IsAllowed);
+        Assert.Equal("provider-subject", result.Principal?.Subject);
+    }
+
+    [Theory]
+    [InlineData("iss", "wrong-issuer")]
+    [InlineData("aud", "wrong-audience")]
+    public void AuthenticateClientRequest_RejectsProviderJwtIssuerOrAudienceMismatch(
+        string claimName,
+        string claimValue)
+    {
+        using var env = ClearClientAuthEnvironment();
+        var payload = SyntheticProviderPayload();
+        payload[claimName] = claimValue;
+        var token = CreateProviderJwt("synthetic-provider-secret", payload);
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = $"Bearer {token}";
+
+        var result = AuthHelpers.AuthenticateClientRequest(context, RequiredProviderOptions());
+
+        AssertClientError(
+            result,
+            StatusCodes.Status401Unauthorized,
+            "client auth provider token is required or invalid");
+    }
+
+    [Theory]
+    [InlineData(-30, null, true)]
+    [InlineData(-90, null, false)]
+    [InlineData(300, 30, true)]
+    [InlineData(300, 90, false)]
+    public void AuthenticateClientRequest_AppliesProviderJwtExpNbfAndSkew(
+        int expOffsetSeconds,
+        int? nbfOffsetSeconds,
+        bool expectedAllowed)
+    {
+        using var env = ClearClientAuthEnvironment();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var payload = SyntheticProviderPayload(now);
+        payload["exp"] = now + expOffsetSeconds;
+        if (nbfOffsetSeconds is not null)
+        {
+            payload["nbf"] = now + nbfOffsetSeconds.Value;
+        }
+
+        var token = CreateProviderJwt("synthetic-provider-secret", payload);
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = $"Bearer {token}";
+
+        var result = AuthHelpers.AuthenticateClientRequest(context, RequiredProviderOptions());
+
+        if (expectedAllowed)
+        {
+            Assert.True(result.IsAllowed);
+            Assert.Equal("provider-subject", result.Principal?.Subject);
+        }
+        else
+        {
+            AssertClientError(
+                result,
+                StatusCodes.Status401Unauthorized,
+                "client auth provider token is required or invalid");
+        }
+    }
+
+    [Fact]
+    public void AuthenticateClientRequest_RequiredProviderModeRejectsStaticTokenFallback()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["X-XiaoLou-Client-Token"] = "synthetic-client-token";
+
+        var result = AuthHelpers.AuthenticateClientRequest(
+            context,
+            RequiredProviderOptions(token: "synthetic-client-token"));
+
+        AssertClientError(
+            result,
+            StatusCodes.Status401Unauthorized,
+            "client auth provider token is required or invalid");
+    }
+
+    [Fact]
+    public void AuthenticateClientRequest_FallsBackToStaticTokenWhenProviderIsOptional()
+    {
+        using var env = ClearClientAuthEnvironment();
+        var context = NewHttpContext("GET", "/api/jobs");
+        context.Request.Headers["Authorization"] = "Bearer invalid.provider.token";
+        context.Request.Headers["X-XiaoLou-Client-Token"] = "synthetic-client-token";
+
+        var result = AuthHelpers.AuthenticateClientRequest(
+            context,
+            new ClientApiOptions
+            {
+                Token = "synthetic-client-token",
+                AuthProvider = "hs256-jwt",
+                AuthProviderSecret = "synthetic-provider-secret",
+                AllowedPermissions = "jobs:read",
+            });
+
+        Assert.True(result.IsAllowed);
+        var principal = Assert.IsType<ClientPrincipal>(result.Principal);
+        Assert.False(principal.FromAuthProvider);
+        Assert.Equal("jobs:read", principal.AllowedPermissions);
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/admin/retired-review", true)]
+    [InlineData("POST", "/api/admin/retired-review", false)]
+    public void IsClientPermissionAllowed_FiltersProviderGrantsThroughConfiguredPermissions(
+        string method,
+        string path,
+        bool expected)
+    {
+        using var env = ClearClientAuthEnvironment();
+        var token = CreateProviderJwt(
+            "synthetic-provider-secret",
+            SyntheticProviderPayload(permissions: "admin:*"));
+        var context = NewHttpContext(method, path);
+        context.Request.Headers["Authorization"] = $"Bearer {token}";
+        var options = RequiredProviderOptions(
+            allowedPermissions: "admin:read",
+            requireAuthProvider: false);
+        var authentication = AuthHelpers.AuthenticateClientRequest(context, options);
+        context.Items[ClientPrincipal.ItemKey] = authentication.Principal;
+
+        Assert.True(authentication.IsAllowed);
+        Assert.Equal(expected, AuthHelpers.IsClientPermissionAllowed(context, options));
     }
 
     [Fact]
@@ -618,7 +1073,136 @@ public sealed class AuthHelpersTests
             "CLIENT_API_ALLOWED_ACCOUNT_OWNER_IDS",
             "CLIENT_API_ALLOWED_PERMISSIONS",
             "ClientApi__AllowedPermissions",
-            "CONTROL_API_CLIENT_ASSERTION_PERMISSIONS");
+            "CONTROL_API_CLIENT_ASSERTION_PERMISSIONS",
+            "CLIENT_API_AUTH_PROVIDER_SECRET",
+            "CLIENT_API_AUTH_PROVIDER_ISSUER",
+            "CLIENT_API_AUTH_PROVIDER_AUDIENCE",
+            "CLIENT_API_AUTH_PROVIDER_CLOCK_SKEW_SECONDS",
+            "CLIENT_API_AUTH_PROVIDER_TTL_SECONDS");
+    }
+
+    private static Dictionary<string, object?> SyntheticPermissionContext()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["actor"] = new Dictionary<string, object?>
+            {
+                ["id"] = "actor-1",
+            },
+            ["currentOrganizationId"] = "tenant-current",
+            ["organizations"] = new object[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["id"] = "tenant-enabled",
+                    ["status"] = "active",
+                },
+                new Dictionary<string, object?>
+                {
+                    ["id"] = "tenant-disabled",
+                    ["status"] = "disabled",
+                },
+            },
+        };
+    }
+
+    private static ClientApiOptions RequiredProviderOptions(
+        string? token = null,
+        string? allowedPermissions = null,
+        bool requireAuthProvider = true)
+    {
+        return new ClientApiOptions
+        {
+            Token = token,
+            AuthProvider = "hs256-jwt",
+            AuthProviderSecret = "synthetic-provider-secret",
+            AuthProviderIssuer = "https://issuer.example.test",
+            AuthProviderAudience = "control-api",
+            AuthProviderClockSkewSeconds = 60,
+            RequireAuthProvider = requireAuthProvider,
+            AllowedPermissions = allowedPermissions,
+        };
+    }
+
+    private static Dictionary<string, object?> SyntheticProviderPayload(
+        long? now = null,
+        string? permissions = null)
+    {
+        var timestamp = now ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        return new Dictionary<string, object?>
+        {
+            ["sub"] = "provider-subject",
+            ["iss"] = "https://issuer.example.test",
+            ["aud"] = "control-api",
+            ["nbf"] = timestamp - 30,
+            ["exp"] = timestamp + 300,
+            ["xiaolou_account_ids"] = new[] { "account-1", "account-2" },
+            ["xiaolou_account_owner_type"] = "organization",
+            ["xiaolou_account_owner_ids"] = new[] { "explicit-owner", "organization:explicit-org" },
+            ["scope"] = permissions ?? "jobs:read toolbox:write",
+            ["scp"] = permissions is null ? new[] { "media:read", "jobs:read" } : Array.Empty<string>(),
+        };
+    }
+
+    private static string CreateProviderJwt(
+        string secret,
+        Dictionary<string, object?> payload,
+        Dictionary<string, object?>? header = null,
+        string? signingSecret = null)
+    {
+        header ??= new Dictionary<string, object?>
+        {
+            ["alg"] = "HS256",
+            ["typ"] = "JWT",
+        };
+        var signingInput = $"{Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(header))}.{Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(payload))}";
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(signingSecret ?? secret));
+        var signature = Base64UrlEncode(hmac.ComputeHash(Encoding.ASCII.GetBytes(signingInput)));
+        return $"{signingInput}.{signature}";
+    }
+
+    private static string[] AssertJwtShape(string? token)
+    {
+        Assert.False(string.IsNullOrWhiteSpace(token));
+        var parts = token.Split('.');
+        Assert.Equal(3, parts.Length);
+        Assert.All(parts, part => Assert.False(string.IsNullOrWhiteSpace(part)));
+        return parts;
+    }
+
+    private static JsonElement DecodeJwtJson(string part)
+    {
+        using var document = JsonDocument.Parse(DecodeBase64Url(part));
+        return document.RootElement.Clone();
+    }
+
+    private static string[] ReadStringArray(JsonElement payload, string name)
+    {
+        return payload.GetProperty(name)
+            .EnumerateArray()
+            .Select(item => item.GetString())
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .ToArray();
+    }
+
+    private static void AssertJwtSignature(string secret, string[] parts)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        var expected = hmac.ComputeHash(Encoding.ASCII.GetBytes($"{parts[0]}.{parts[1]}"));
+        Assert.Equal(expected, DecodeBase64Url(parts[2]));
+    }
+
+    private static string Base64UrlEncode(byte[] bytes)
+    {
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    private static byte[] DecodeBase64Url(string value)
+    {
+        var padded = value.Replace('-', '+').Replace('_', '/');
+        padded = padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '=');
+        return Convert.FromBase64String(padded);
     }
 
     private sealed class EnvironmentVariableScope : IDisposable

@@ -146,6 +146,34 @@ export function createPlaygroundService({
     });
   };
 
+  const runPlaygroundChatFacade = async (
+    input: PlaygroundChatInput,
+    onEvent: (event: PlaygroundChatEvent) => void,
+    signal?: AbortSignal,
+  ) => {
+    if (signal?.aborted) {
+      throw createApiRequestError("Playground chat request was aborted", {
+        code: "PLAYGROUND_CHAT_ABORTED",
+        status: 499,
+      });
+    }
+
+    // Event facade over chat-job POST plus memory read; real streaming is a separate transport owner.
+    const result = await startPlaygroundChatJob(input);
+    onEvent({ type: "conversation", conversation: result.conversation });
+    onEvent({ type: "user_message", message: result.userMessage });
+    onEvent({ type: "assistant_message", message: result.assistantMessage });
+    onEvent({ type: "job", job: result.job });
+    const memories = (await listPlaygroundMemories()).items;
+    onEvent({
+      type: "done",
+      conversation: result.conversation,
+      message: result.assistantMessage,
+      memories,
+      job: result.job,
+    });
+  };
+
   return {
     async getPlaygroundConfig() {
       const actorId = getCurrentActorId();
@@ -364,30 +392,8 @@ export function createPlaygroundService({
       );
     },
 
-    async streamPlaygroundChat(
-      input: PlaygroundChatInput,
-      onEvent: (event: PlaygroundChatEvent) => void,
-      signal?: AbortSignal,
-    ) {
-      if (signal?.aborted) {
-        throw createApiRequestError("Playground chat request was aborted", {
-          code: "PLAYGROUND_CHAT_ABORTED",
-          status: 499,
-        });
-      }
-      const result = await startPlaygroundChatJob(input);
-      onEvent({ type: "conversation", conversation: result.conversation });
-      onEvent({ type: "user_message", message: result.userMessage });
-      onEvent({ type: "assistant_message", message: result.assistantMessage });
-      onEvent({ type: "job", job: result.job });
-      const memories = (await listPlaygroundMemories()).items;
-      onEvent({
-        type: "done",
-        conversation: result.conversation,
-        message: result.assistantMessage,
-        memories,
-        job: result.job,
-      });
-    },
+    runPlaygroundChatFacade,
+
+    streamPlaygroundChat: runPlaygroundChatFacade,
   };
 }

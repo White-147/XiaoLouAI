@@ -1,6 +1,6 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-06 17:41 +08
+更新时间：2026-05-07 09:59 +08
 工作目录：`D:\code\XiaoLouAI`
 
 本文件是后续每一棒的第一读取文件。根短棒只保留总进度、固定边界、当前 owner/队列提示词和验证入口；历史细节见 docs handoff：
@@ -82,13 +82,13 @@ G14 refactor-gap closure: active
 G14 source: 2026-05-06 uploaded gap report plus 2026-05-06 14:19 +08 user decisions
 G14 fact: G12/G13 file split, tests, and required synthetic E2E remain valid
 G14 gap: low-coupling closure is not complete
-G14 latest completed: 2026-05-06 17:41 +08 G14q project endpoint authorize helper
+G14 latest completed: 2026-05-07 09:59 +08 G14x backend auth provider/JWT focused tests and helper split
 ```
 
 ## 当前模块
 
 ```text
-Owner: G14-refactor-gap-closure（下一棒默认从 playground-transport-semantics 开始）
+Owner: G14-refactor-gap-closure（下一棒默认从 backend-auth-provider-jwt-focused-tests 开始）
 
 Current facts:
 - G12/G13 详细阶段记录已归档到 docs\xiaolouai-finalization-handoff.md。
@@ -111,6 +111,13 @@ Current facts:
 - 2026-05-06 17:09 +08 已完成 G14o AuthHelpers boundary split 计划，无 runtime 行为变化。
 - 2026-05-06 17:28 +08 已完成 G14p AuthHelpers route-policy/grant helper wave-1 拆分。
 - 2026-05-06 17:41 +08 已完成 G14q ProjectEndpoints load/404/authorize helper 收敛。
+- 2026-05-06 17:57 +08 已完成 G14r Playground transport 命名语义收口。
+- 2026-05-07 09:13 +08 已完成 G14s jobs deleteTask/dismissTask 语义收口。
+- 2026-05-07 09:26 +08 已完成 G14t 生成/临时/配置/测试残留盘点，未删除文件。
+- 2026-05-07 09:34 +08 已完成 G14u AuthHelpers 剩余边界盘点和后续波次计划，无 runtime 行为变化。
+- 2026-05-07 09:43 +08 已完成 G14v AuthHelpers header/env helper wave-1。
+- 2026-05-07 09:51 +08 已完成 G14w ClientAssertionFactory focused tests and helper split。
+- 2026-05-07 09:59 +08 已完成 G14x ClientAuthProviderValidator focused tests and helper split。
 - active backend/proxy/matrix 只保留 `/api/payments/callbacks/{provider}`。
 - 旧 `/api/payments/{provider}/notify` 只保留在 legacy verifier/evidence 历史记录中。
 - “后端模块和前端服务拆分已完成”仍成立。
@@ -141,18 +148,25 @@ Password baseline:
 Cleanup baseline:
 - `xiaolou` 数据库名称变更是用户修改，后续清理/复核不再检查该项。
 - 临时残留只读扫描已排除 .git/node_modules/dist/bin/obj/coverage/.runtime。
-- .tmp/.bak/.orig/.log 未发现可删文件。
+- G14t safe source/test roots 未发现 .tmp/.bak/.orig/.rej/.old/.log/.trace/.tsbuildinfo。
+- G14t untracked non-ignored files 为空。
+- G14t ignored generated evidence retained: XIAOLOU-main\test-results, XIAOLOU-main\playwright-report, XIAOLOU-main\coverage。
+- G14t build artifact excluded: XIAOLOU-main\dist。
+- G14t protected local config retained without reading contents: XIAOLOU-main\.env.local。
 - 本轮未删除任何文件。
 
 Still-open structural lines:
 - 账号/设置/头像/钱包额度与组织作用域操作逻辑。
 - 前端 owner scope 统一。
 - api.ts facade wave-1 runtime 拆分。
-- AuthHelpers 后续 assertion/header/env/error envelope 边界（wave-1 纯 route/grant helper 已完成）。
+- AuthHelpers 后续 error envelope/middleware response-shape 边界。
+- AuthHelpers header/env helper wave-1 已完成，facade 名称稳定。
+- AuthHelpers ClientAssertionFactory helper split 已完成，facade 名称稳定。
+- AuthHelpers ClientAuthProviderValidator helper split 已完成，facade 名称稳定。
 - ProjectEndpoints 后续更深 endpoint filter/MapGroup 收敛（G14q load/404/authorize helper 已完成）。
-- Playground transport/stream 命名语义。
-- jobs delete/cancel 语义。
-- 穿插清理无关测试数据/配置。
+- Playground real transport/stream 仍属后续独立 owner（G14r 已完成 non-stream facade 命名收口）。
+- jobs delete/cancel 语义已收口为 dismissTask 主名，deleteTask 兼容 wrapper。
+- 穿插清理无关测试数据/配置已完成一轮；后续仍可在实现 owner 之间按需复扫。
 
 Rules:
 - inventory first。
@@ -383,16 +397,146 @@ DONE G14q project-endpoint-authorize-helper
 - preserved route paths, status codes, response shapes, auth/permission/account-scope behavior, exported API names, AuthHelpers facade names, branch protection, and required checks
 - validation passed: targeted ProjectEndpointsAuthorizationTests 4/4, full ControlApi xUnit 207/207, Release solution build 0 warnings/0 errors
 
-NEXT G14r playground-transport-semantics
-- decide facade rename vs real SSE/WS/ReadableStream in a dedicated owner
+DONE G14r playground-transport-semantics
+- completed 2026-05-06 17:57 +08
+- inventoried Playground frontend/backend transport state after G14l/G14n/G14q
+- verified backend Playground exposes REST chat-job POST/GET routes only and no SSE/WS/ReadableStream endpoint
+- verified Playground page currently uses startPlaygroundChatJob rather than streamPlaygroundChat
+- added runPlaygroundChatFacade as the clearer non-stream facade name
+- kept streamPlaygroundChat as a stable compatibility export/wrapper over runPlaygroundChatFacade
+- covered non-stream event order, pre-abort behavior, no timer/polling transport, and api.ts facade compatibility
+- did not introduce real SSE/WebSocket/ReadableStream, route/status/response/auth/account-scope, polling, DB, backend, ProjectEndpoints, AuthHelpers, jobs delete, password, avatar, wallet, settings, or deleteTask changes
+- required gate/branch protection unchanged: contexts `Build and static gates` and `Synthetic browser E2E advisory`, source GitHub Actions app id 15368, no branch-protection mutation; rollback owner remains future required-gate owner if separately signed
+- validation passed: targeted playground/api compatibility tests 16/16, full frontend unit tests 97/97, frontend lint, frontend build, whitespace scan, and git diff --check
 
-NEXT G14s jobs-delete-task-semantics
-- clarify delete/cancel/dismiss/archive semantics in public jobs facade only
+DONE G14s jobs-delete-task-semantics
+- completed 2026-05-07 09:13 +08
+- inventoried frontend jobs facade, ImageCreate/VideoCreate callsites, api.ts wrappers, backend InternalJobsEndpoints, Auth route policy, and existing tests
+- verified backend has no public DELETE `/api/jobs` route
+- verified backend public job mutation for this surface is `POST /api/jobs/{jobId}/cancel`
+- clarified deleteTask as a compatibility name, not true delete/archive
+- added dismissTask as the clearer public facade name
+- kept deleteTask as a stable compatibility export/wrapper over dismissTask
+- kept route path/body/response behavior stable: GET task first, cancel only active jobs, return `{ deleted: false, taskId }`
+- covered missing-task, active cancel, completed no-op, service alias, and api.ts facade compatibility with synthetic tests
+- did not change backend jobs endpoints, route/status/response/auth/account-scope behavior, polling/transport/DB, ProjectEndpoints, AuthHelpers, Playground transport, password, avatar, wallet, settings, or unrelated deleteTask behavior
+- required gate/branch protection unchanged: contexts `Build and static gates` and `Synthetic browser E2E advisory`, source GitHub Actions app id 15368, no branch-protection mutation; rollback owner remains future required-gate owner if separately signed
+- validation passed: targeted jobs/api compatibility tests 14/14, full frontend unit tests 100/100, frontend lint, frontend build, whitespace scan, and git diff --check
 
-NEXT G14t test-data-config-cleanup-check
-- repeat generated/temp/config scan between implementation owners
-- delete only confirmed irrelevant generated/test material
-- exclude user-confirmed `xiaolou` database-name changes
+DONE G14t test-data-config-cleanup-check
+- completed 2026-05-07 09:26 +08
+- inventory-only cleanup check after G14s
+- used git untracked scan, ignored-path classification, safe-root temp extension scan, and generated-output metadata scan
+- non-ignored untracked files: none
+- safe source/test roots found no .tmp/.bak/.orig/.rej/.old/.log/.trace/.tsbuildinfo files
+- ignored generated evidence retained: XIAOLOU-main\test-results (1 file, 45 bytes), XIAOLOU-main\playwright-report (1 file, 537092 bytes), XIAOLOU-main\coverage (1 file, 2840 bytes)
+- ignored build artifact excluded from cleanup without separate signoff: XIAOLOU-main\dist (158 files, 5377015 bytes)
+- protected local config retained without reading contents: XIAOLOU-main\.env.local
+- tracked examples/test helpers retained: XIAOLOU-main\.env.example, tools\video\video-replace-service\.env.example, scripts\seed_4_assets.js, synthetic fixtures
+- did not review the user-confirmed `xiaolou` database-name change as cleanup
+- did not read/upload real auth/provider/payment/storage/operator material, production dump/snapshot, real DB fixture, or real object storage
+- no files deleted because candidates were generated evidence, excluded build artifact, protected config, or tracked intentional test/example files
+- required gate/branch protection unchanged: contexts `Build and static gates` and `Synthetic browser E2E advisory`, source GitHub Actions app id 15368, no branch-protection mutation; rollback owner remains future required-gate owner if separately signed
+- validation passed: no untracked files, safe-root residue scan clean, docs/source whitespace scan clean, and git diff --check
+
+DONE G14u backend-auth-remaining-boundary-plan
+- completed 2026-05-07 09:34 +08
+- docs/handoff plan only; no runtime module or import moved
+- inventoried remaining AuthHelpers responsibilities after G14p:
+  ClientAssertionFactory, request header/token/bearer readers, ClientApi env/config option readers,
+  client auth provider JWT validation/authentication, client permission evaluation, and error envelopes
+- verified Program.cs still uses static AuthHelpers facade names for AuthenticateClientRequest,
+  ClientAuthenticationResult, ClientPrincipal, and IsClientPermissionAllowed
+- verified AccountsAuthEndpoints still calls CreateLocalAuthToken, CreateControlApiClientAssertion, ReadHeader,
+  ResolveActorId, ResolvePublicOwnerScope, and account-scope authorization facades
+- verified existing tests cover static token header, custom token header, loopback/forwarded denial,
+  route policy, account-scope/grant helpers, permission grants, and BadRequest/Forbidden envelopes
+- gap recorded: no direct synthetic coverage yet for controlApiClientAssertion JWT claims/signature/TTL,
+  auth provider bearer JWT validation, issuer/audience/time-window/skew behavior, Program.cs middleware
+  401/403 envelopes, or platform-admin envelope
+- future wave order recorded:
+  G14v header/env helper first; later ClientAssertionFactory, client auth provider validator,
+  and error-envelope/middleware response-shape owners only after focused tests
+- kept AuthHelpers facade names, ClientApiOptions, ClientAuthenticationResult, ClientPrincipal,
+  route/status/response/auth/permission/account-scope behavior, branch protection, and required checks stable
+- required gate/branch protection unchanged: contexts `Build and static gates` and `Synthetic browser E2E advisory`, source GitHub Actions app id 15368, no branch-protection mutation; rollback owner remains future required-gate owner if separately signed
+- validation passed: required docs read, dirty worktree scan, AuthHelpers boundary/callsite/test inventory, docs whitespace scan, and git diff --check with CRLF warnings only
+
+DONE G14v backend-auth-header-env-helper-wave-1
+- completed 2026-05-07 09:43 +08
+- added ClientApiHeaderEnvHelpers under Modules\Auth
+- moved request header/token/bearer/forwarded-address logic behind that helper
+- moved ClientApi env/config option readers behind that helper
+- kept AuthHelpers facade names stable for Program.cs and endpoint modules
+- kept ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal shape stable
+- added synthetic tests for Authorization bearer fallback, env/config precedence/defaults/aliases,
+  provider alias normalization, and clock-skew clamp
+- kept existing default/custom token header, forwarded-address denial, and bool parsing tests
+- did not move HTTP middleware, endpoint imports outside AuthHelpers, error envelopes,
+  JWT signing/assertion creation, client auth provider validation, ProjectEndpoints helpers,
+  Playground transport, jobs facade semantics, password auth, avatar upload, wallet entitlement,
+  settings shell, frontend api.ts moves, polling/transport/DB, real SSE/WS/ReadableStream,
+  deleteTask behavior, or cleanup/delete files
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368, no branch-protection mutation
+- validation passed: targeted AuthHelpersTests 103/103, full ControlApi xUnit 214/214,
+  Release solution build 0 warnings/0 errors
+
+DONE G14w backend-auth-client-assertion-factory-focused-tests
+- completed 2026-05-07 09:51 +08
+- added ClientAssertionFactory under Modules\Auth
+- added focused synthetic tests before the helper move and kept them green after the move
+- moved CreateLocalAuthToken and CreateControlApiClientAssertion responsibilities behind ClientAssertionFactory
+- covered local auth token base64 actor/timestamp shape
+- covered controlApiClientAssertion null-without-secret behavior
+- covered JWT header/payload/signature shape, issuer/audience claims, jti shape,
+  explicit permissions, default permissions, organization owner grants,
+  current organization claim, and TTL window deltas
+- kept AuthHelpers facade method names stable for Program.cs and endpoint modules
+- kept ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal shape stable
+- did not move client auth provider JWT validation, Program.cs middleware, error envelopes,
+  endpoint imports outside AuthHelpers, ProjectEndpoints, Playground transport, jobs facade,
+  password auth, avatar upload, wallet entitlement, settings shell, frontend api.ts,
+  polling/transport/DB, cleanup/delete files, or branch protection
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368, no branch-protection mutation
+- validation passed: targeted AuthHelpersTests 107/107, full ControlApi xUnit 218/218,
+  Release solution build 0 warnings/0 errors
+
+DONE G14x backend-auth-provider-jwt-focused-tests
+- completed 2026-05-07 09:59 +08
+- added ClientAuthProviderValidator under Modules\Auth
+- added focused provider/JWT synthetic tests before the helper move and kept them green after the move
+- moved HS256 JWT provider validation and provider permission filtering behind ClientAuthProviderValidator
+- covered invalid token segments/base64, alg mismatch, signature failure, valid provider principal,
+  subject owner grants, issuer/audience checks, exp/nbf/skew behavior,
+  scope/scp array/string claims, required-provider mode, static-token fallback,
+  and permission grant filtering
+- kept AuthHelpers facade method names stable for Program.cs and endpoint modules
+- kept ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal shape stable
+- did not move Program.cs middleware, error envelopes, endpoint imports outside AuthHelpers,
+  ProjectEndpoints, Playground transport, jobs facade, password auth, avatar upload,
+  wallet entitlement, settings shell, frontend api.ts, polling/transport/DB,
+  cleanup/delete files, or branch protection
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368, no branch-protection mutation
+- validation passed: targeted AuthHelpersTests 123/123 before/after helper move,
+  full ControlApi xUnit 234/234, Release solution build 0 warnings/0 errors
+
+NEXT G14y backend-auth-error-envelope-middleware-focused-tests
+- add focused synthetic tests for backend AuthHelpers/Program.cs error envelope and middleware response shapes
+- cover public-client 401/403 JSON, missing requiredPermission JSON,
+  account-scope 403 JSON, platform-admin 403 JSON,
+  BadRequestError, ForbiddenError, and AccountForbidden shapes
+- move or centralize error envelope/middleware response helpers only after focused tests are green
+- keep AuthHelpers facade names stable
+- keep ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal shape stable
+- do not move endpoint imports outside AuthHelpers, ProjectEndpoints, Playground transport,
+  jobs facade, password auth, avatar upload, wallet entitlement, settings shell,
+  frontend api.ts, polling/transport/DB, cleanup/delete files, or branch protection
 
 FUTURE password-auth-owner
 - design password persistence/hash/verification/reset separately
@@ -412,19 +556,18 @@ DONE archived advisory/preflight owners
 ### 推荐下一棒顺序
 
 ```text
-1. G14r playground-transport-semantics.
-2. G14s jobs-delete-task-semantics.
-3. G14t test-data-config-cleanup-check can run between owners.
-4. Do not re-check the user-confirmed `xiaolou` database-name change.
-5. password-auth-owner remains future standalone work.
-6. required-synthetic-e2e-stability-monitor only when its conditional trigger applies.
+1. G14y backend-auth-error-envelope-middleware-focused-tests.
+2. Future Playground real transport only with separate signed owner and tests.
+3. Do not re-check the user-confirmed `xiaolou` database-name change.
+4. password-auth-owner remains future standalone work.
+5. required-synthetic-e2e-stability-monitor only when its conditional trigger applies.
 ```
 
 ### 下一棒提示词
 
 ```text
 当前默认下一棒：
-- `G14r playground-transport-semantics`
+- `G14y backend-auth-error-envelope-middleware-focused-tests`
 
 下一棒先读取：
 - 根 handoff
@@ -433,18 +576,31 @@ DONE archived advisory/preflight owners
 - docs\xiaolouai-deep-research-structured.md
 - 当前 dirty worktree
 
-G14r 只处理：
-- inventory then decide playground transport naming semantics
-- verify whether streamPlaygroundChat remains a non-stream facade, should be renamed/documented, or needs a separately signed real transport owner
-- if adding compatibility naming, keep existing exported API names via wrappers and cover facade compatibility
-- do not introduce real SSE/WebSocket/ReadableStream unless this owner explicitly signs transport scope and tests first
-- keep Playground route path, status code, response shape, auth/permission/account-scope behavior, exported API names, polling behavior, branch protection, and required checks stable unless separately signed
+G14y 只处理：
+- add focused synthetic tests for backend AuthHelpers/Program.cs error envelope and middleware response shapes
+- move or centralize error envelope/middleware response helpers only after focused tests are in place and green
+- cover public-client authentication 401 JSON envelope
+- cover client permission 403 JSON envelope and requiredPermission shape
+- cover account-scope 403 JSON envelope
+- cover platform-admin 403 JSON envelope
+- cover BadRequestError, ForbiddenError, and AccountForbidden helper shapes
+- keep AuthHelpers facade method names stable for Program.cs and endpoint modules
+- keep ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal public/internal shape stable
+- preserve route path, status code, response shape, auth/permission/account-scope behavior, exported API names, polling behavior, branch protection, and required checks
+- preserve env option names/defaults/precedence exactly
 - keep G14g-G14n frontend owner-scope/api facade work as the current planning baseline
 - keep G14p AuthHelpers ClientRoutePolicy/AccountScopeAuthorizer split as the backend Auth planning baseline
+- keep G14u/G14v/G14w/G14x remaining AuthHelpers boundary plan as the backend Auth planning baseline
 - keep G14q ProjectEndpoints authorize helper as the current backend project endpoint baseline
-- do not move HTTP middleware, AuthHelpers facade names, endpoint imports, error envelopes, env option names/defaults, JWT signing/assertion creation, ProjectEndpoints helpers, jobs delete semantics, password auth, avatar upload, wallet entitlement, settings shell, frontend api.ts moves, DB, or deleteTask changes
+- keep G14r Playground non-stream facade naming as the current transport baseline
+- keep G14s jobs dismissTask/deleteTask compatibility naming as the current jobs facade baseline
+- keep G14t cleanup inventory/no-delete baseline
+- keep G14v ClientApiHeaderEnvHelpers header/env split as current backend Auth baseline
+- keep G14w ClientAssertionFactory split as current backend Auth baseline
+- keep G14x ClientAuthProviderValidator split as current backend Auth baseline
+- do not move AuthHelpers facade names, endpoint imports outside AuthHelpers, ProjectEndpoints helpers, Playground transport, jobs facade semantics, password auth, avatar upload, wallet entitlement, settings shell, frontend api.ts moves, polling/transport/DB, real SSE/WS/ReadableStream, deleteTask behavior, or cleanup/delete files
 
-G14b-G14q 已完成：
+G14b-G14x 已完成：
 - 账号资料/设置/头像/钱包额度/组织作用域操作逻辑
 - 头像入口和设置二级菜单都可进入“账号与个人资料”
 - 左下角“更多”改“设置”
@@ -469,6 +625,13 @@ G14b-G14q 已完成：
 - G14p wave-1 低风险 backend route-policy/grant helper 顺序已记录
 - G14p backend ClientRoutePolicy/AccountScopeAuthorizer wave-1 已完成，并覆盖 facade/direct helper synthetic tests
 - ProjectEndpoints load/404/AuthorizeAccountRow helper 已完成，并覆盖 404/403/owner mismatch/success synthetic tests
+- Playground runPlaygroundChatFacade non-stream facade 已完成，streamPlaygroundChat 保留 compatibility wrapper，并覆盖 facade compatibility synthetic tests
+- Jobs dismissTask 主名已完成，deleteTask 保留 compatibility wrapper，并覆盖 missing/active/completed/alias/api facade synthetic tests
+- G14t generated/temp/config/test-data cleanup inventory 已完成；无确认可删项，未删除文件
+- G14u remaining AuthHelpers boundary plan 已完成；G14v header/env helper wave-1 顺序和测试边界已记录
+- G14v ClientApiHeaderEnvHelpers header/env helper wave-1 已完成，并覆盖 bearer fallback、env/config aliases、provider alias、clock-skew clamp synthetic tests
+- G14w ClientAssertionFactory focused tests/helper split 已完成，并覆盖 local auth token、JWT header/payload/signature、null secret、issuer/audience、permissions、organization grants、current organization、TTL synthetic tests
+- G14x ClientAuthProviderValidator focused tests/helper split 已完成，并覆盖 invalid JWT、alg/signature、valid provider principal、subject grants、issuer/audience、exp/nbf/skew、scope/scp、required-provider、static fallback、permission filtering synthetic tests
 
 Password:
 - 当前只记录未持久化/未校验事实

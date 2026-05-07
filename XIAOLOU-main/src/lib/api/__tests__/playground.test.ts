@@ -577,7 +577,7 @@ describe("createPlaygroundService", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("emits streamPlaygroundChat non-stream facade events in deterministic order", async () => {
+  it("emits runPlaygroundChatFacade non-stream facade events in deterministic order", async () => {
     vi.useFakeTimers();
     const startResult = {
       job: createSyntheticChatJob({
@@ -623,7 +623,7 @@ describe("createPlaygroundService", () => {
     });
 
     await expect(
-      service.streamPlaygroundChat(
+      service.runPlaygroundChatFacade(
         {
           conversationId: "synthetic-stream-conversation",
           message: "  Synthetic streaming prompt  ",
@@ -665,6 +665,12 @@ describe("createPlaygroundService", () => {
       init: undefined,
     });
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps streamPlaygroundChat as a compatibility alias for the non-stream facade", () => {
+    const { service } = createServiceHarness();
+
+    expect(service.streamPlaygroundChat).toBe(service.runPlaygroundChatFacade);
   });
 
   it("rejects pre-aborted streamPlaygroundChat before requests or timers are started", async () => {

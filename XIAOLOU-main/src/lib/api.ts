@@ -1949,8 +1949,12 @@ export async function getTask(taskId: string) {
   return jobsService.getTask(taskId);
 }
 
+export async function dismissTask(taskId: string) {
+  return jobsService.dismissTask(taskId);
+}
+
 export async function deleteTask(taskId: string) {
-  return jobsService.deleteTask(taskId);
+  return dismissTask(taskId);
 }
 
 export async function clearTasks(projectId?: string, type?: string) {
@@ -2302,12 +2306,20 @@ export async function deletePlaygroundMemory(key: string) {
   return playgroundService.deletePlaygroundMemory(key);
 }
 
+export async function runPlaygroundChatFacade(
+  input: PlaygroundChatInput,
+  onEvent: (event: PlaygroundChatEvent) => void,
+  signal?: AbortSignal,
+) {
+  return playgroundService.runPlaygroundChatFacade(input, onEvent, signal);
+}
+
 export async function streamPlaygroundChat(
   input: PlaygroundChatInput,
   onEvent: (event: PlaygroundChatEvent) => void,
   signal?: AbortSignal,
 ) {
-  return playgroundService.streamPlaygroundChat(input, onEvent, signal);
+  return runPlaygroundChatFacade(input, onEvent, signal);
 }
 
 export async function registerPersonalUser(input: RegisterPersonalInput) {

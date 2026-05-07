@@ -262,7 +262,7 @@ export function createJobsService({
     return mapControlJobToTask(job);
   };
 
-  const deleteTask = async (taskId: string) => {
+  const dismissTask = async (taskId: string) => {
     let task: Task;
     try {
       task = await getTask(taskId);
@@ -274,6 +274,7 @@ export function createJobsService({
     }
 
     if (isCancellableJobTask(task)) {
+      // Dismiss is a public facade; active jobs are cancelled through the stable backend route.
       await cancelTask(taskId, "frontend task dismissed");
     }
 
@@ -292,7 +293,8 @@ export function createJobsService({
     createCanonicalJob,
     listTasks,
     getTask,
-    deleteTask,
+    dismissTask,
+    deleteTask: dismissTask,
     clearTasks,
   };
 }
