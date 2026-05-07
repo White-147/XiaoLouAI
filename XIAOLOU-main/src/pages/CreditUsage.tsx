@@ -25,7 +25,6 @@ import {
 import { cn } from "../lib/utils";
 import {
   resolveWalletEntitlement,
-  resolveWalletUsageRequest,
 } from "../lib/wallet-entitlements";
 
 function formatCredits(value: number | null | undefined) {
@@ -204,7 +203,6 @@ export default function CreditUsage() {
 
   const isPlatformAdmin = me?.platformRole === "ops_admin" || me?.platformRole === "super_admin";
   const walletEntitlement = useMemo(() => resolveWalletEntitlement(me), [me]);
-  const walletUsageRequest = useMemo(() => resolveWalletUsageRequest(me), [me]);
   const isEnterpriseWalletContext =
     walletEntitlement.kind === "enterprise_admin" || walletEntitlement.kind === "enterprise_member";
 
@@ -238,7 +236,7 @@ export default function CreditUsage() {
     setLoading(true);
     setError(null);
 
-    if (!isPlatformAdmin && !walletUsageRequest) {
+    if (!isPlatformAdmin && !walletEntitlement.ownerType) {
       setStats(null);
       setLoading(false);
       return () => {
@@ -251,7 +249,7 @@ export default function CreditUsage() {
           subjectType: selectedSubject?.type || "platform",
           subjectId: selectedSubject?.type === "platform" ? null : selectedSubject?.id || null,
         })
-      : getWalletUsageStats(walletUsageRequest.mode, walletUsageRequest.ownerId);
+      : getWalletUsageStats();
 
     void request
       .then((response) => {
@@ -267,7 +265,7 @@ export default function CreditUsage() {
     return () => {
       active = false;
     };
-  }, [isPlatformAdmin, me, refreshKey, selectedSubject, walletUsageRequest]);
+  }, [isPlatformAdmin, me, refreshKey, selectedSubject, walletEntitlement]);
 
   const walletDescription = useMemo(() => {
     if (!stats?.wallets.length) return "暂无可统计钱包";

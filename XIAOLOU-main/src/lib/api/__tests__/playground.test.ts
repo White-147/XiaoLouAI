@@ -11,6 +11,7 @@ import {
 } from "./synthetic-fixtures";
 
 type PlaygroundServiceDeps = Parameters<typeof createPlaygroundService>[0];
+type StreamHandler = (path: string, init?: RequestInit) => Promise<Response> | Response;
 
 function createSyntheticOwnerScope(
   overrides: Partial<ControlOwnerScope> = {},
@@ -81,20 +82,45 @@ function createSyntheticChatJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createSyntheticSseEvent(type: string, data: Record<string, unknown>) {
+  return `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+}
+
+function createSyntheticSseResponse(chunks: string[], status = 200) {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": "text/event-stream",
+    },
+  });
+}
+
 function createServiceHarness({
   actorId = SYNTHETIC_ACTOR_ID,
   ownerScope,
   handler = () => ({ synthetic: true }),
+  streamHandler = () => createSyntheticSseResponse([]),
   hasSessionCredentials = () => true,
   isAuthBoundaryError = () => false,
 }: {
   actorId?: string;
   ownerScope?: ControlOwnerScope;
   handler?: RequestHandler;
+  streamHandler?: StreamHandler;
   hasSessionCredentials?: () => boolean;
   isAuthBoundaryError?: (error: unknown) => boolean;
 } = {}) {
   const calls: RequestCall[] = [];
+  const streamCalls: RequestCall[] = [];
   const errors: Array<{ message: string; options?: { code?: string; status?: number } }> = [];
   const ownerScopeCalls: ControlOwnerScope[] = [];
   const resolvedOwnerScope =
@@ -104,6 +130,10 @@ function createServiceHarness({
     controlApiJsonRequest: async <T>(path: string, init?: RequestInit): Promise<T> => {
       calls.push({ path, init });
       return (await handler(path, init)) as T;
+    },
+    controlApiStreamRequest: async (path: string, init?: RequestInit): Promise<Response> => {
+      streamCalls.push({ path, init });
+      return streamHandler(path, init);
     },
     getCurrentActorId: () => actorId,
     resolveCurrentOwnerScope: () => {
@@ -121,6 +151,7 @@ function createServiceHarness({
 
   return {
     calls,
+    streamCalls,
     errors,
     ownerScopeCalls,
     service: createPlaygroundService(deps),
@@ -667,10 +698,160 @@ describe("createPlaygroundService", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("keeps streamPlaygroundChat as a compatibility alias for the non-stream facade", () => {
-    const { service } = createServiceHarness();
+  it("streams Playground chat events over the real transport endpoint", async () => {
+    vi.useFakeTimers();
+    const startResult = {
+      job: createSyntheticChatJob({
+        id: "synthetic-stream-chat-job",
+        status: "queued",
+      }),
+      conversation: createSyntheticConversation({
+        id: "synthetic-stream-conversation",
+      }),
+      userMessage: createSyntheticMessage({
+        id: "synthetic-stream-user-message",
+        role: "user",
+        content: "Synthetic streaming prompt",
+      }),
+      assistantMessage: createSyntheticMessage({
+        id: "synthetic-stream-assistant-message",
+        content: "Synthetic streaming answer",
+      }),
+    };
+    const memory = {
+      key: "synthetic-memory",
+      value: "Synthetic memory",
+      enabled: true,
+      confidence: 1,
+      updatedAt: "2026-05-05T00:04:00.000Z",
+      source: "synthetic",
+    };
+    const streamPayload = [
+      createSyntheticSseEvent("conversation", { conversation: startResult.conversation }),
+      createSyntheticSseEvent("user_message", { message: startResult.userMessage }),
+      createSyntheticSseEvent("assistant_message", { message: startResult.assistantMessage }),
+      createSyntheticSseEvent("job", { job: startResult.job }),
+      createSyntheticSseEvent("done", {
+        conversation: startResult.conversation,
+        message: startResult.assistantMessage,
+        memories: [memory],
+        job: startResult.job,
+      }),
+    ].join("");
+    const events: Array<{ type: string; [key: string]: unknown }> = [];
+    const { calls, streamCalls, ownerScopeCalls, service } = createServiceHarness({
+      handler: () => {
+        throw new Error("streamPlaygroundChat should not use JSON chat-job requests");
+      },
+      streamHandler: () =>
+        createSyntheticSseResponse([
+          streamPayload.slice(0, 115),
+          streamPayload.slice(115),
+        ]),
+    });
 
-    expect(service.streamPlaygroundChat).toBe(service.runPlaygroundChatFacade);
+    await expect(
+      service.streamPlaygroundChat(
+        {
+          conversationId: "synthetic-stream-conversation",
+          message: "  Synthetic streaming prompt  ",
+          model: "qwen-plus",
+        },
+        (event) => {
+          events.push(event);
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(events.map((event) => event.type)).toEqual([
+      "conversation",
+      "user_message",
+      "assistant_message",
+      "job",
+      "done",
+    ]);
+    expect(events[4]).toMatchObject({
+      type: "done",
+      conversation: startResult.conversation,
+      message: startResult.assistantMessage,
+      memories: [memory],
+      job: startResult.job,
+    });
+    expect(calls).toEqual([]);
+    expect(streamCalls).toHaveLength(1);
+    expect(streamCalls[0].path).toBe("/api/playground/chat");
+    expect(streamCalls[0].init?.method).toBe("POST");
+    expect(parseJsonBody(streamCalls[0])).toEqual({
+      accountOwnerType: "user",
+      accountOwnerId: "synthetic-actor",
+      regionCode: "CN",
+      currency: "CNY",
+      conversationId: "synthetic-stream-conversation",
+      message: "Synthetic streaming prompt",
+      model: "qwen-plus",
+    });
+    expect(ownerScopeCalls).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("mirrors organization owner scope into stream request bodies", async () => {
+    const organizationScope = createSyntheticOrganizationOwnerScope();
+    const { streamCalls, service } = createServiceHarness({
+      actorId: "synthetic-org-actor",
+      ownerScope: organizationScope,
+      streamHandler: () => createSyntheticSseResponse([]),
+    });
+
+    await service.streamPlaygroundChat(
+      {
+        conversationId: "synthetic conversation/1",
+        message: "  Synthetic organization prompt  ",
+        model: "doubao-pro",
+      },
+      () => undefined,
+    );
+
+    expect(streamCalls).toHaveLength(1);
+    expect(streamCalls[0].path).toBe("/api/playground/chat");
+    expect(streamCalls[0].init?.method).toBe("POST");
+    expect(parseJsonBody(streamCalls[0])).toEqual({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-org/one",
+      regionCode: "CN",
+      currency: "CNY",
+      conversationId: "synthetic conversation/1",
+      message: "Synthetic organization prompt",
+      model: "doubao-pro",
+    });
+  });
+
+  it("maps stream HTTP errors through stable ApiRequestError options", async () => {
+    const { errors, service } = createServiceHarness({
+      streamHandler: () =>
+        new Response(JSON.stringify({ error: "synthetic stream denied" }), {
+          status: 403,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }),
+    });
+
+    await expect(
+      service.streamPlaygroundChat(
+        {
+          message: "Synthetic prompt",
+        },
+        () => undefined,
+      ),
+    ).rejects.toThrow("PLAYGROUND_ERROR:synthetic stream denied");
+
+    expect(errors).toContainEqual({
+      message: "synthetic stream denied",
+      options: {
+        code: undefined,
+        status: 403,
+      },
+    });
   });
 
   it("rejects pre-aborted streamPlaygroundChat before requests or timers are started", async () => {
@@ -678,9 +859,12 @@ describe("createPlaygroundService", () => {
     const controller = new AbortController();
     controller.abort();
     const events: Array<{ type: string }> = [];
-    const { calls, errors, service } = createServiceHarness({
+    const { calls, streamCalls, errors, service } = createServiceHarness({
       handler: () => {
         throw new Error("streamPlaygroundChat should not request after a pre-aborted signal");
+      },
+      streamHandler: () => {
+        throw new Error("streamPlaygroundChat should not stream after a pre-aborted signal");
       },
     });
 
@@ -698,6 +882,7 @@ describe("createPlaygroundService", () => {
 
     expect(events).toEqual([]);
     expect(calls).toEqual([]);
+    expect(streamCalls).toEqual([]);
     expect(errors).toEqual([
       {
         message: "Playground chat request was aborted",

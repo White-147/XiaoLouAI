@@ -10,6 +10,7 @@ import {
   ApiRequestError,
   assertNoLegacyMutatingRequest,
   controlApiJsonRequest,
+  controlApiStreamRequest,
 } from "./api/control-api-client";
 import { createAuthAccountService } from "./api/auth-account";
 import { createJobsService } from "./api/jobs";
@@ -22,6 +23,10 @@ import {
   resolveCurrentOwnerScope,
   type ControlOwnerScope,
 } from "./control-owner-scope";
+import {
+  applyCurrentOrganizationSelection,
+  getStoredCurrentOrganizationOwnerScope,
+} from "./current-organization-context";
 import type {
   VideoInputMode,
   VideoGenerationMode,
@@ -597,6 +602,46 @@ export type LoginInput = {
   password: string;
 };
 
+export type BootstrapPlatformPasswordInput = {
+  email: string;
+  password: string;
+};
+
+export type ChangePasswordInput = {
+  currentPassword: string;
+  newPassword: string;
+};
+
+export type AdminResetPasswordInput = {
+  email: string;
+  newPassword: string;
+};
+
+export type RequestPasswordResetInput = {
+  email: string;
+};
+
+export type CompletePasswordResetInput = {
+  resetToken: string;
+  newPassword: string;
+};
+
+export type PasswordConfiguredResult = {
+  actorId: string;
+  email: string | null;
+  platformRole: PlatformRole;
+  passwordConfigured: boolean;
+  passwordUpdated: boolean;
+};
+
+export type PasswordResetRequestResult = {
+  email: string;
+  accepted: boolean;
+  delivery: "email_unconfigured" | "local_token";
+  resetToken?: string | null;
+  expiresAt?: string | null;
+};
+
 export type LoginResult = {
   actorId: string;
   token: string;
@@ -856,13 +901,6 @@ export type UploadedFile = {
   signedReadUrl?: string;
 };
 
-type ControlMediaRequestScope = {
-  accountOwnerType: "user";
-  accountOwnerId: string;
-  regionCode: "CN";
-  currency: "CNY";
-};
-
 export type ProjectOverview = {
   project: Project & {
     settings: Settings;
@@ -1115,19 +1153,6 @@ function retiredRechargeError(flow: string): never {
   );
 }
 
-function buildControlMediaScope(actorId: string): ControlMediaRequestScope {
-  return {
-    accountOwnerType: "user",
-    accountOwnerId: actorId,
-    regionCode: "CN",
-    currency: "CNY",
-  };
-}
-
-function buildControlScopeQuery(actorId = getCurrentActorId()) {
-  return `accountOwnerType=user&accountOwnerId=${encodeURIComponent(actorId)}`;
-}
-
 function buildPersonalOwnerFallback(actorId: string): ControlOwnerScope {
   return {
     accountOwnerType: "user",
@@ -1140,14 +1165,20 @@ function buildPersonalOwnerFallback(actorId: string): ControlOwnerScope {
 
 function resolveCurrentControlOwnerScope() {
   const actorId = getCurrentActorId();
-  return resolveCurrentOwnerScope(buildFallbackPermissionContext(actorId), {
-    explicitFallback: buildPersonalOwnerFallback(actorId),
-  });
+  const selectedOrganizationScope = getStoredCurrentOrganizationOwnerScope(actorId);
+  if (selectedOrganizationScope) return selectedOrganizationScope;
+  return resolveCurrentOwnerScope(
+    applyCurrentOrganizationSelection(buildFallbackPermissionContext(actorId)),
+    {
+      explicitFallback: buildPersonalOwnerFallback(actorId),
+    },
+  );
 }
 
 const walletPaymentService = createWalletPaymentService({
   controlApiJsonRequest,
   getCurrentActorId,
+  resolveCurrentOwnerScope: resolveCurrentControlOwnerScope,
   isRouteNotFoundError,
   isLocalLoopbackAccess,
   superAdminDemoActorId: SUPER_ADMIN_DEMO_ACTOR_ID,
@@ -1158,7 +1189,7 @@ const walletPaymentService = createWalletPaymentService({
 
 const authAccountService = createAuthAccountService({
   controlApiJsonRequest,
-  buildControlScopeQuery,
+  resolveCurrentOwnerScope: resolveCurrentControlOwnerScope,
   getWallet,
   createEmptyWallet,
   isRouteNotFoundError,
@@ -1174,6 +1205,7 @@ const mediaService = createMediaService({
 
 const playgroundService = createPlaygroundService({
   controlApiJsonRequest,
+  controlApiStreamRequest,
   getCurrentActorId,
   resolveCurrentOwnerScope: resolveCurrentControlOwnerScope,
   createApiRequestError: (message, options) => new ApiRequestError(message, options),
@@ -1200,7 +1232,7 @@ const projectsCanvasCreateService = createProjectsCanvasCreateService({
 const toolboxService = createToolboxService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope: resolveCurrentControlOwnerScope,
   createClientId,
   createApiRequestError: (message, options) => new ApiRequestError(message, options),
   readString,
@@ -1652,12 +1684,51 @@ function buildLocalNetworkAccessInfo(): NetworkAccessInfo {
   };
 }
 
-export async function getMe() {
-  return authAccountService.getMe();
+function isPermissionContextValue(value: unknown): value is PermissionContext {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<PermissionContext>;
+  return (
+    !!candidate.actor &&
+    typeof candidate.actor === "object" &&
+    Array.isArray(candidate.organizations) &&
+    !!candidate.permissions &&
+    typeof candidate.permissions === "object" &&
+    typeof candidate.platformRole === "string"
+  );
 }
 
-export async function updateMe(data: { displayName?: string; avatar?: string | null }) {
-  return authAccountService.updateMe(data);
+function withCurrentOrganizationSelection<T>(value: T): T {
+  if (!isPermissionContextValue(value)) return value;
+  return applyCurrentOrganizationSelection(value, {
+    persistEffectiveSelection: true,
+  }) as T;
+}
+
+function withResultCurrentOrganizationSelection<T>(value: T): T {
+  if (!value || typeof value !== "object") return value;
+  const candidate = value as { permissionContext?: unknown };
+  if (!isPermissionContextValue(candidate.permissionContext)) return value;
+  return {
+    ...candidate,
+    permissionContext: applyCurrentOrganizationSelection(candidate.permissionContext, {
+      persistEffectiveSelection: true,
+    }),
+  } as T;
+}
+
+export async function getMe() {
+  return withCurrentOrganizationSelection(await authAccountService.getMe());
+}
+
+export type UpdateMeInput = {
+  displayName?: string;
+  avatar?: string | null;
+  phone?: string | null;
+  defaultOrganizationId?: string | null;
+};
+
+export async function updateMe(data: UpdateMeInput) {
+  return withCurrentOrganizationSelection(await authAccountService.updateMe(data));
 }
 
 export async function listProjects() {
@@ -1961,11 +2032,11 @@ export async function clearTasks(projectId?: string, type?: string) {
   return jobsService.clearTasks(projectId, type);
 }
 
-export async function getWallet(ownerType: WalletOwnerType = "user", ownerId = getCurrentActorId()) {
+export async function getWallet(ownerType?: WalletOwnerType, ownerId?: string) {
   return walletPaymentService.getWallet(ownerType, ownerId);
 }
 
-export async function listWallets(ownerType: WalletOwnerType = "user", ownerId = getCurrentActorId()) {
+export async function listWallets(ownerType?: WalletOwnerType, ownerId?: string) {
   return walletPaymentService.listWallets(ownerType, ownerId);
 }
 
@@ -1973,7 +2044,7 @@ export async function listWalletLedger(walletId: string) {
   return walletPaymentService.listWalletLedger(walletId);
 }
 
-export async function getWalletUsageStats(mode: CreditUsageMode = "personal", ownerId?: string) {
+export async function getWalletUsageStats(mode?: CreditUsageMode, ownerId?: string) {
   return walletPaymentService.getWalletUsageStats(mode, ownerId);
 }
 
@@ -2127,15 +2198,41 @@ export async function getOrganizationWallet(organizationId: string) {
 }
 
 export async function loginWithEmail(input: LoginInput) {
-  return authAccountService.loginWithEmail(input);
+  return withResultCurrentOrganizationSelection(
+    await authAccountService.loginWithEmail(input),
+  );
 }
 
 export async function loginAdminWithEmail(input: LoginInput) {
-  return authAccountService.loginAdminWithEmail(input);
+  return withResultCurrentOrganizationSelection(
+    await authAccountService.loginAdminWithEmail(input),
+  );
+}
+
+export async function bootstrapPlatformPassword(input: BootstrapPlatformPasswordInput) {
+  return authAccountService.bootstrapPlatformPassword(input);
+}
+
+export async function changePassword(input: ChangePasswordInput) {
+  return authAccountService.changePassword(input);
+}
+
+export async function adminResetPassword(input: AdminResetPasswordInput) {
+  return authAccountService.adminResetPassword(input);
+}
+
+export async function requestPasswordReset(input: RequestPasswordResetInput) {
+  return authAccountService.requestPasswordReset(input);
+}
+
+export async function completePasswordReset(input: CompletePasswordResetInput) {
+  return authAccountService.completePasswordReset(input);
 }
 
 export async function startDemoSession(actorId: string): Promise<LoginResult> {
-  return authAccountService.startDemoSession(actorId);
+  return withResultCurrentOrganizationSelection(
+    await authAccountService.startDemoSession(actorId),
+  );
 }
 
 export async function getAuthProviders() {
@@ -2143,7 +2240,9 @@ export async function getAuthProviders() {
 }
 
 export async function exchangeGoogleLogin(code: string): Promise<LoginResult> {
-  return authAccountService.exchangeGoogleLogin(code);
+  return withResultCurrentOrganizationSelection(
+    await authAccountService.exchangeGoogleLogin(code),
+  );
 }
 
 export type PlaygroundModel = {
@@ -2319,15 +2418,19 @@ export async function streamPlaygroundChat(
   onEvent: (event: PlaygroundChatEvent) => void,
   signal?: AbortSignal,
 ) {
-  return runPlaygroundChatFacade(input, onEvent, signal);
+  return playgroundService.streamPlaygroundChat(input, onEvent, signal);
 }
 
 export async function registerPersonalUser(input: RegisterPersonalInput) {
-  return authAccountService.registerPersonalUser(input);
+  return withResultCurrentOrganizationSelection(
+    await authAccountService.registerPersonalUser(input),
+  );
 }
 
 export async function registerEnterpriseAdmin(input: RegisterEnterpriseAdminInput) {
-  return authAccountService.registerEnterpriseAdmin(input);
+  return withResultCurrentOrganizationSelection(
+    await authAccountService.registerEnterpriseAdmin(input),
+  );
 }
 
 export type CanvasProject = {

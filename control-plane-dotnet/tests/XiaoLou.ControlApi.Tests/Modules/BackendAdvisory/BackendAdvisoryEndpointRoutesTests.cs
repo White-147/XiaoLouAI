@@ -167,6 +167,7 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         yield return Route(HttpMethods.Get, "/api/playground/conversations/{conversationId}/messages");
         yield return Route(HttpMethods.Get, "/api/playground/chat-jobs");
         yield return Route(HttpMethods.Post, "/api/playground/chat-jobs");
+        yield return Route(HttpMethods.Post, "/api/playground/chat");
         yield return Route(HttpMethods.Get, "/api/playground/chat-jobs/{jobId:guid}");
         yield return Route(HttpMethods.Get, "/api/playground/memories");
         yield return Route(HttpMethods.Put, "/api/playground/memories/preference");

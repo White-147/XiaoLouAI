@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -11,6 +12,8 @@ namespace XiaoLou.ControlApi.Modules.Playground;
 
 internal static class PlaygroundEndpoints
 {
+    private static readonly JsonSerializerOptions SseJsonOptions = new(JsonSerializerDefaults.Web);
+
     public static IEndpointRouteBuilder MapPlaygroundEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGet("/api/playground/config", async (
@@ -230,6 +233,97 @@ internal static class PlaygroundEndpoints
             }
         });
 
+        endpoints.MapPost("/api/playground/chat", async (
+            PlaygroundChatRequest request,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresPlaygroundStore playground,
+            CancellationToken ct) =>
+        {
+            var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+            var scopedRequest = request with
+            {
+                AccountOwnerType = scope.AccountOwnerType,
+                AccountOwnerId = scope.AccountOwnerId,
+                RegionCode = scope.RegionCode,
+                Currency = scope.Currency,
+            };
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
+            {
+                return denied;
+            }
+
+            Dictionary<string, object?> result;
+            try
+            {
+                result = await playground.StartChatJobAsync(scopedRequest, ResolveActorId(httpContext), scopedRequest, ct);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequestError(ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return ForbiddenError(ex);
+            }
+
+            httpContext.Response.StatusCode = StatusCodes.Status200OK;
+            httpContext.Response.ContentType = "text/event-stream";
+            httpContext.Response.Headers.CacheControl = "no-cache";
+            httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+            await WritePlaygroundSseEventAsync(httpContext, "conversation", new
+            {
+                type = "conversation",
+                conversation = result["conversation"],
+            }, ct);
+            await WritePlaygroundSseEventAsync(httpContext, "user_message", new
+            {
+                type = "user_message",
+                message = result["userMessage"],
+            }, ct);
+            await WritePlaygroundSseEventAsync(httpContext, "assistant_message", new
+            {
+                type = "assistant_message",
+                message = result["assistantMessage"],
+            }, ct);
+            await WritePlaygroundSseEventAsync(httpContext, "job", new
+            {
+                type = "job",
+                job = result["job"],
+            }, ct);
+
+            try
+            {
+                var memories = await playground.ListMemoriesAsync(scopedRequest, ct);
+                memories.TryGetValue("items", out var memoryItems);
+                await WritePlaygroundSseEventAsync(httpContext, "done", new
+                {
+                    type = "done",
+                    conversation = result["conversation"],
+                    message = result["assistantMessage"],
+                    memories = memoryItems ?? Array.Empty<object>(),
+                    job = result["job"],
+                }, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                await WritePlaygroundSseEventAsync(httpContext, "error", new
+                {
+                    type = "error",
+                    code = "PLAYGROUND_STREAM_FAILED",
+                    message = ex.Message,
+                    job = result["job"],
+                }, ct);
+            }
+
+            return Results.Empty;
+        });
+
         endpoints.MapGet("/api/playground/chat-jobs/{jobId:guid}", async (
             Guid jobId,
             string? accountOwnerType,
@@ -340,5 +434,16 @@ internal static class PlaygroundEndpoints
         });
 
         return endpoints;
+    }
+
+    private static async Task WritePlaygroundSseEventAsync(
+        HttpContext httpContext,
+        string eventName,
+        object payload,
+        CancellationToken ct)
+    {
+        await httpContext.Response.WriteAsync($"event: {eventName}\n", ct);
+        await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(payload, SseJsonOptions)}\n\n", ct);
+        await httpContext.Response.Body.FlushAsync(ct);
     }
 }

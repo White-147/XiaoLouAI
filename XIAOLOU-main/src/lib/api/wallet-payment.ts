@@ -9,12 +9,14 @@ import type {
   WalletRechargeCapabilities,
   WalletRechargeOrder,
 } from "../api";
+import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export type WalletPaymentServiceDeps = {
   controlApiJsonRequest: ControlApiJsonRequest;
   getCurrentActorId: () => string;
+  resolveCurrentOwnerScope: () => ControlOwnerScope;
   isRouteNotFoundError: (error: unknown) => boolean;
   isLocalLoopbackAccess: () => boolean;
   superAdminDemoActorId: string;
@@ -25,6 +27,12 @@ export type WalletPaymentServiceDeps = {
 
 function walletOwnerTypeForControlApi(ownerType: WalletOwnerType) {
   return ownerType === "platform" ? "system" : ownerType;
+}
+
+function walletOwnerTypeFromControlScope(ownerScope: ControlOwnerScope): WalletOwnerType {
+  if (ownerScope.accountOwnerType === "organization") return "organization";
+  if (ownerScope.accountOwnerType === "system") return "platform";
+  return "user";
 }
 
 function buildWalletQuery(
@@ -105,6 +113,7 @@ function retiredWalletRechargeCapabilities(): WalletRechargeCapabilities {
 export function createWalletPaymentService({
   controlApiJsonRequest,
   getCurrentActorId,
+  resolveCurrentOwnerScope,
   isRouteNotFoundError,
   isLocalLoopbackAccess,
   superAdminDemoActorId,
@@ -112,6 +121,49 @@ export function createWalletPaymentService({
   normalizeWalletRecord,
   retiredRechargeError,
 }: WalletPaymentServiceDeps) {
+  const resolveWalletOwner = (
+    ownerType?: WalletOwnerType,
+    ownerId?: string,
+  ) => {
+    if (ownerType) {
+      return {
+        ownerType,
+        ownerId: ownerId ?? getCurrentActorId(),
+      };
+    }
+
+    const ownerScope = resolveCurrentOwnerScope();
+    return {
+      ownerType: walletOwnerTypeFromControlScope(ownerScope),
+      ownerId: ownerScope.accountOwnerId ?? getCurrentActorId(),
+    };
+  };
+
+  const resolveUsageOwner = (
+    mode?: CreditUsageMode,
+    ownerId?: string,
+  ) => {
+    const actorId = getCurrentActorId();
+    const ownerScope = ownerId ? null : resolveCurrentOwnerScope();
+    const resolvedOwnerType = ownerScope
+      ? walletOwnerTypeFromControlScope(ownerScope)
+      : "user";
+    const effectiveMode =
+      mode ?? (resolvedOwnerType === "organization" ? "organization" : "personal");
+    const ownerType: WalletOwnerType =
+      effectiveMode === "organization" ? "organization" : "user";
+    const effectiveOwnerId =
+      ownerId ??
+      (ownerType === resolvedOwnerType ? ownerScope?.accountOwnerId : null) ??
+      actorId;
+
+    return {
+      mode: effectiveMode,
+      ownerType,
+      ownerId: effectiveOwnerId,
+    };
+  };
+
   const currentUserSubject = (): CreditUsageSubject => {
     const actorId = getCurrentActorId();
     return {
@@ -123,29 +175,31 @@ export function createWalletPaymentService({
   };
 
   return {
-    async getWallet(ownerType: WalletOwnerType = "user", ownerId = getCurrentActorId()) {
-      const query = buildWalletQuery(ownerType, ownerId);
+    async getWallet(ownerType?: WalletOwnerType, ownerId?: string) {
+      const owner = resolveWalletOwner(ownerType, ownerId);
+      const query = buildWalletQuery(owner.ownerType, owner.ownerId);
       const wallet = await controlApiJsonRequest<Wallet>(`/api/wallet?${query}`);
-      return normalizeWalletRecord(wallet, ownerId);
+      return normalizeWalletRecord(wallet, owner.ownerId);
     },
 
-    async listWallets(ownerType: WalletOwnerType = "user", ownerId = getCurrentActorId()) {
+    async listWallets(ownerType?: WalletOwnerType, ownerId?: string) {
+      const owner = resolveWalletOwner(ownerType, ownerId);
       try {
-        const query = buildWalletQuery(ownerType, ownerId);
+        const query = buildWalletQuery(owner.ownerType, owner.ownerId);
         const response = await controlApiJsonRequest<{ items: Wallet[] }>(`/api/wallets?${query}`);
         return {
-          items: response.items.map((wallet) => normalizeWalletRecord(wallet, ownerId)),
+          items: response.items.map((wallet) => normalizeWalletRecord(wallet, owner.ownerId)),
         };
       } catch (error) {
         if (!isRouteNotFoundError(error)) throw error;
 
         const effectiveActorId =
-          ownerId === superAdminDemoActorId && !isLocalLoopbackAccess() ? "guest" : ownerId;
+          owner.ownerId === superAdminDemoActorId && !isLocalLoopbackAccess() ? "guest" : owner.ownerId;
         if (effectiveActorId === "guest" || effectiveActorId === "ops_demo_001" || effectiveActorId === superAdminDemoActorId) {
           return { items: [] };
         }
 
-        return { items: [createEmptyWallet(ownerType, effectiveActorId)] };
+        return { items: [createEmptyWallet(owner.ownerType, effectiveActorId)] };
       }
     },
 
@@ -162,24 +216,22 @@ export function createWalletPaymentService({
       }
     },
 
-    async getWalletUsageStats(mode: CreditUsageMode = "personal", ownerId = getCurrentActorId()) {
-      const actorId = getCurrentActorId();
-      const ownerType: WalletOwnerType = mode === "organization" ? "organization" : "user";
-      const effectiveOwnerId = ownerId || actorId;
-      const query = buildWalletQuery(ownerType, effectiveOwnerId, { mode });
+    async getWalletUsageStats(mode?: CreditUsageMode, ownerId?: string) {
+      const owner = resolveUsageOwner(mode, ownerId);
+      const query = buildWalletQuery(owner.ownerType, owner.ownerId, { mode: owner.mode });
       try {
         return await controlApiJsonRequest<CreditUsageStats>(`/api/wallet/usage-stats?${query}`);
       } catch (error) {
         if (!isRouteNotFoundError(error)) throw error;
-        const wallet = createEmptyWallet(ownerType, effectiveOwnerId);
+        const wallet = createEmptyWallet(owner.ownerType, owner.ownerId);
         return emptyCreditUsageStats(
           {
-            type: ownerType,
-            id: effectiveOwnerId,
-            label: ownerType === "organization" ? `Organization ${effectiveOwnerId}` : `User ${effectiveOwnerId}`,
+            type: owner.ownerType,
+            id: owner.ownerId,
+            label: owner.ownerType === "organization" ? `Organization ${owner.ownerId}` : `User ${owner.ownerId}`,
             detail: "canonical wallet read surface",
           },
-          mode,
+          owner.mode,
           [wallet],
         );
       }

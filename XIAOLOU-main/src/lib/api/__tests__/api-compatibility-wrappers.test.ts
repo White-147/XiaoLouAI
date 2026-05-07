@@ -1,8 +1,93 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { PermissionContext } from "../../api";
+
 type ApiModule = typeof import("../../api.ts");
 type ServiceMethod = ReturnType<typeof vi.fn>;
 type MockService = Record<string, ServiceMethod>;
+
+function installBrowserStorageMock() {
+  const store = new Map<string, string>();
+  const storage = {
+    get length() {
+      return store.size;
+    },
+    clear: vi.fn(() => {
+      store.clear();
+    }),
+    getItem: vi.fn((key: string) => store.get(key) ?? null),
+    key: vi.fn((index: number) => Array.from(store.keys())[index] ?? null),
+    removeItem: vi.fn((key: string) => {
+      store.delete(key);
+    }),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(key, value);
+    }),
+  } satisfies Storage;
+  class SyntheticCustomEvent<T = unknown> {
+    type: string;
+    detail: T | undefined;
+
+    constructor(type: string, init?: CustomEventInit<T>) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  }
+
+  vi.stubGlobal("localStorage", storage);
+  vi.stubGlobal("CustomEvent", SyntheticCustomEvent);
+  vi.stubGlobal("window", {
+    localStorage: storage,
+    dispatchEvent: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    location: { origin: "http://127.0.0.1:3000" },
+  });
+}
+
+function createSelectorPermissionContext(): PermissionContext {
+  return {
+    actor: {
+      id: "user_demo_001",
+      displayName: "Synthetic Admin",
+      email: "synthetic-admin@example.test",
+      phone: null,
+      avatar: null,
+      platformRole: "customer",
+      status: "active",
+      defaultOrganizationId: "org-alpha",
+    },
+    platformRole: "customer",
+    organizations: [
+      {
+        id: "org-alpha",
+        name: "Org Alpha",
+        role: "enterprise_admin",
+        membershipRole: "admin",
+        status: "active",
+        assetLibraryStatus: "ready",
+      },
+      {
+        id: "org-beta",
+        name: "Org Beta",
+        role: "enterprise_member",
+        membershipRole: "member",
+        status: "active",
+        assetLibraryStatus: "ready",
+      },
+    ],
+    currentOrganizationId: "org-alpha",
+    currentOrganizationRole: "enterprise_admin",
+    permissions: {
+      canCreateProject: true,
+      canRecharge: true,
+      canUseEnterprise: true,
+      canManageOrganization: true,
+      canManageOps: false,
+      canManageSystem: false,
+    },
+  };
+}
 
 function createMockService(serviceName: string, methodNames: string[]) {
   const service: MockService = {};
@@ -38,6 +123,11 @@ async function importApiWithMockServices() {
       "getOrganizationWallet",
       "loginWithEmail",
       "loginAdminWithEmail",
+      "bootstrapPlatformPassword",
+      "changePassword",
+      "adminResetPassword",
+      "requestPasswordReset",
+      "completePasswordReset",
       "getAuthProviders",
       "exchangeGoogleLogin",
       "registerPersonalUser",
@@ -192,6 +282,7 @@ async function importApiWithMockServices() {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.resetModules();
 });
 
@@ -218,8 +309,16 @@ describe("api.ts compatibility wrappers", () => {
       "startPlaygroundChatJob",
       "runPlaygroundChatFacade",
       "streamPlaygroundChat",
+      "bootstrapPlatformPassword",
+      "changePassword",
+      "adminResetPassword",
+      "requestPasswordReset",
+      "completePasswordReset",
       "listCanvasProjects",
       "saveCanvasProject",
+      "translateText",
+      "generateStoryboardGrid25",
+      "reverseVideoPrompt",
       "runToolboxCapability",
       "generateCreateImages",
       "ApiRequestError",
@@ -243,10 +342,18 @@ describe("api.ts compatibility wrappers", () => {
     expect(factories.createAdminEnterpriseService).toHaveBeenCalledOnce();
 
     expect(factories.createAuthAccountService.mock.calls[0][0]).toMatchObject({
+      controlApiJsonRequest: expect.any(Function),
+      resolveCurrentOwnerScope: expect.any(Function),
       getWallet: api.getWallet,
+    });
+    expect(factories.createWalletPaymentService.mock.calls[0][0]).toMatchObject({
+      controlApiJsonRequest: expect.any(Function),
+      getCurrentActorId: expect.any(Function),
+      resolveCurrentOwnerScope: expect.any(Function),
     });
     expect(factories.createPlaygroundService.mock.calls[0][0]).toMatchObject({
       controlApiJsonRequest: expect.any(Function),
+      controlApiStreamRequest: expect.any(Function),
       getCurrentActorId: expect.any(Function),
       resolveCurrentOwnerScope: expect.any(Function),
       createApiRequestError: expect.any(Function),
@@ -260,6 +367,9 @@ describe("api.ts compatibility wrappers", () => {
       createCanonicalJob: services.jobs.createCanonicalJob,
     });
     expect(factories.createToolboxService.mock.calls[0][0]).toMatchObject({
+      controlApiJsonRequest: expect.any(Function),
+      getCurrentActorId: expect.any(Function),
+      resolveCurrentOwnerScope: expect.any(Function),
       mapControlJobToTask: services.jobs.mapControlJobToTask,
     });
     expect(factories.createJobsService.mock.calls[0][0]).toMatchObject({
@@ -278,9 +388,49 @@ describe("api.ts compatibility wrappers", () => {
     });
   });
 
+  it("lets stable service resolvers use an explicit current organization selection", async () => {
+    installBrowserStorageMock();
+    const { factories } = await importApiWithMockServices();
+    const { setCurrentActorId } = await import("../../actor-session");
+    const { setCurrentOrganizationSelection } = await import("../../current-organization-context");
+    const context = createSelectorPermissionContext();
+    setCurrentActorId(context.actor.id);
+    setCurrentOrganizationSelection(context, "org-beta");
+
+    const authDeps = factories.createAuthAccountService.mock.calls[0][0] as {
+      resolveCurrentOwnerScope: () => unknown;
+    };
+    const walletDeps = factories.createWalletPaymentService.mock.calls[0][0] as {
+      resolveCurrentOwnerScope: () => unknown;
+    };
+    const toolboxDeps = factories.createToolboxService.mock.calls[0][0] as {
+      resolveCurrentOwnerScope: () => unknown;
+    };
+
+    const expectedScope = {
+      accountOwnerType: "organization",
+      accountOwnerId: "org-beta",
+      organizationId: "org-beta",
+      organizationRole: "enterprise_member",
+      source: "current-organization",
+    };
+
+    expect(authDeps.resolveCurrentOwnerScope()).toEqual(expectedScope);
+    expect(walletDeps.resolveCurrentOwnerScope()).toEqual(expectedScope);
+    expect(toolboxDeps.resolveCurrentOwnerScope()).toEqual(expectedScope);
+  });
+
   it("forwards low-risk wrapper arguments to service methods without reshaping them", async () => {
     const { api, services } = await importApiWithMockServices();
-    const mePatch = { displayName: "Synthetic User", avatar: null };
+    const mePatch = {
+      displayName: "Synthetic User",
+      avatar: null,
+      phone: "13800000000",
+      defaultOrganizationId: "org_synthetic_001",
+    };
+    const apiCenterDefaultsPatch = {
+      textModelId: "synthetic-text-model",
+    };
     const file = new File(["synthetic bytes"], "synthetic-upload.png", { type: "image/png" });
     const imageInput = {
       projectId: "synthetic-project",
@@ -306,11 +456,86 @@ describe("api.ts compatibility wrappers", () => {
       target: "synthetic target",
       note: "synthetic note",
     };
+    const passwordChangeInput = {
+      currentPassword: "synthetic-current-password",
+      newPassword: "synthetic-new-password",
+    };
+    const passwordBootstrapInput = {
+      email: "ops@xiaolou.local",
+      password: "synthetic-bootstrap-password",
+    };
+    const passwordAdminResetInput = {
+      email: "synthetic@example.test",
+      newPassword: "synthetic-reset-password",
+    };
+    const passwordResetRequestInput = {
+      email: "synthetic@example.test",
+    };
+    const passwordResetCompleteInput = {
+      resetToken: "synthetic-reset-token",
+      newPassword: "synthetic-token-reset-password",
+    };
+    const storyboardReferences = [
+      {
+        name: "synthetic-reference",
+        url: "https://synthetic.example/reference.png",
+      },
+    ];
 
     await expect(api.updateMe(mePatch)).resolves.toEqual({
       serviceName: "authAccount",
       methodName: "updateMe",
       args: [mePatch],
+    });
+    await expect(api.getApiCenterConfig()).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "getApiCenterConfig",
+      args: [],
+    });
+    await expect(api.updateApiCenterDefaults(apiCenterDefaultsPatch)).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "updateApiCenterDefaults",
+      args: [apiCenterDefaultsPatch],
+    });
+    await expect(api.saveApiCenterVendorApiKey("synthetic-vendor", "synthetic-api-key")).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "saveApiCenterVendorApiKey",
+      args: ["synthetic-vendor", "synthetic-api-key"],
+    });
+    await expect(api.testApiCenterVendorConnection("synthetic-vendor")).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "testApiCenterVendorConnection",
+      args: ["synthetic-vendor"],
+    });
+    await expect(api.updateApiVendorModel("synthetic-vendor", "synthetic-model", { enabled: true })).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "updateApiVendorModel",
+      args: ["synthetic-vendor", "synthetic-model", { enabled: true }],
+    });
+    await expect(api.bootstrapPlatformPassword(passwordBootstrapInput)).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "bootstrapPlatformPassword",
+      args: [passwordBootstrapInput],
+    });
+    await expect(api.changePassword(passwordChangeInput)).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "changePassword",
+      args: [passwordChangeInput],
+    });
+    await expect(api.adminResetPassword(passwordAdminResetInput)).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "adminResetPassword",
+      args: [passwordAdminResetInput],
+    });
+    await expect(api.requestPasswordReset(passwordResetRequestInput)).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "requestPasswordReset",
+      args: [passwordResetRequestInput],
+    });
+    await expect(api.completePasswordReset(passwordResetCompleteInput)).resolves.toEqual({
+      serviceName: "authAccount",
+      methodName: "completePasswordReset",
+      args: [passwordResetCompleteInput],
     });
     await expect(api.listTasks("synthetic-project", "image.render")).resolves.toEqual({
       serviceName: "jobs",
@@ -326,6 +551,21 @@ describe("api.ts compatibility wrappers", () => {
       serviceName: "jobs",
       methodName: "dismissTask",
       args: [taskId],
+    });
+    await expect(api.listWallets()).resolves.toEqual({
+      serviceName: "walletPayment",
+      methodName: "listWallets",
+      args: [undefined, undefined],
+    });
+    await expect(api.getWallet("organization", "synthetic-organization")).resolves.toEqual({
+      serviceName: "walletPayment",
+      methodName: "getWallet",
+      args: ["organization", "synthetic-organization"],
+    });
+    await expect(api.getWalletUsageStats()).resolves.toEqual({
+      serviceName: "walletPayment",
+      methodName: "getWalletUsageStats",
+      args: [undefined, undefined],
     });
     await expect(api.uploadFile(file, "image")).resolves.toEqual({
       serviceName: "media",
@@ -344,13 +584,48 @@ describe("api.ts compatibility wrappers", () => {
     });
     await expect(api.streamPlaygroundChat(chatInput, onChatEvent, signal)).resolves.toEqual({
       serviceName: "playground",
-      methodName: "runPlaygroundChatFacade",
+      methodName: "streamPlaygroundChat",
       args: [chatInput, onChatEvent, signal],
     });
     await expect(api.saveCanvasProject(canvasInput)).resolves.toEqual({
       serviceName: "projectsCanvasCreate",
       methodName: "saveCanvasProject",
       args: [canvasInput],
+    });
+    await expect(api.translateText("Synthetic source text", "zh")).resolves.toEqual({
+      serviceName: "toolbox",
+      methodName: "translateText",
+      args: ["Synthetic source text", "zh"],
+    });
+    await expect(
+      api.generateStoryboardGrid25("Synthetic plot text", {
+        references: storyboardReferences,
+        model: "synthetic-storyboard-model",
+      }),
+    ).resolves.toEqual({
+      serviceName: "toolbox",
+      methodName: "generateStoryboardGrid25",
+      args: [
+        "Synthetic plot text",
+        {
+          references: storyboardReferences,
+          model: "synthetic-storyboard-model",
+        },
+      ],
+    });
+    await expect(
+      api.reverseVideoPrompt("https://synthetic.example/video.mp4", {
+        model: "qwen3.5-omni-plus",
+      }),
+    ).resolves.toEqual({
+      serviceName: "toolbox",
+      methodName: "reverseVideoPrompt",
+      args: [
+        "https://synthetic.example/video.mp4",
+        {
+          model: "qwen3.5-omni-plus",
+        },
+      ],
     });
     await expect(api.runToolboxCapability("character_replace", toolboxInput)).resolves.toEqual({
       serviceName: "toolbox",
@@ -359,16 +634,44 @@ describe("api.ts compatibility wrappers", () => {
     });
 
     expect(services.authAccount.updateMe).toHaveBeenCalledWith(mePatch);
+    expect(services.authAccount.getApiCenterConfig).toHaveBeenCalledWith();
+    expect(services.authAccount.updateApiCenterDefaults).toHaveBeenCalledWith(apiCenterDefaultsPatch);
+    expect(services.authAccount.saveApiCenterVendorApiKey).toHaveBeenCalledWith(
+      "synthetic-vendor",
+      "synthetic-api-key",
+    );
+    expect(services.authAccount.testApiCenterVendorConnection).toHaveBeenCalledWith("synthetic-vendor");
+    expect(services.authAccount.updateApiVendorModel).toHaveBeenCalledWith(
+      "synthetic-vendor",
+      "synthetic-model",
+      { enabled: true },
+    );
+    expect(services.authAccount.bootstrapPlatformPassword).toHaveBeenCalledWith(passwordBootstrapInput);
+    expect(services.authAccount.changePassword).toHaveBeenCalledWith(passwordChangeInput);
+    expect(services.authAccount.adminResetPassword).toHaveBeenCalledWith(passwordAdminResetInput);
+    expect(services.authAccount.requestPasswordReset).toHaveBeenCalledWith(passwordResetRequestInput);
+    expect(services.authAccount.completePasswordReset).toHaveBeenCalledWith(passwordResetCompleteInput);
     expect(services.jobs.listTasks).toHaveBeenCalledWith("synthetic-project", "image.render");
     expect(services.jobs.dismissTask).toHaveBeenCalledTimes(2);
     expect(services.jobs.dismissTask).toHaveBeenCalledWith(taskId);
     expect(services.jobs.deleteTask).not.toHaveBeenCalled();
+    expect(services.walletPayment.listWallets).toHaveBeenCalledWith(undefined, undefined);
+    expect(services.walletPayment.getWallet).toHaveBeenCalledWith("organization", "synthetic-organization");
+    expect(services.walletPayment.getWalletUsageStats).toHaveBeenCalledWith(undefined, undefined);
     expect(services.media.uploadFile).toHaveBeenCalledWith(file, "image");
     expect(services.projectsCanvasCreate.generateCreateImages).toHaveBeenCalledWith(imageInput);
-    expect(services.playground.runPlaygroundChatFacade).toHaveBeenCalledTimes(2);
+    expect(services.playground.runPlaygroundChatFacade).toHaveBeenCalledTimes(1);
     expect(services.playground.runPlaygroundChatFacade).toHaveBeenCalledWith(chatInput, onChatEvent, signal);
-    expect(services.playground.streamPlaygroundChat).not.toHaveBeenCalled();
+    expect(services.playground.streamPlaygroundChat).toHaveBeenCalledWith(chatInput, onChatEvent, signal);
     expect(services.projectsCanvasCreate.saveCanvasProject).toHaveBeenCalledWith(canvasInput);
+    expect(services.toolbox.translateText).toHaveBeenCalledWith("Synthetic source text", "zh");
+    expect(services.toolbox.generateStoryboardGrid25).toHaveBeenCalledWith("Synthetic plot text", {
+      references: storyboardReferences,
+      model: "synthetic-storyboard-model",
+    });
+    expect(services.toolbox.reverseVideoPrompt).toHaveBeenCalledWith("https://synthetic.example/video.mp4", {
+      model: "qwen3.5-omni-plus",
+    });
     expect(services.toolbox.runToolboxCapability).toHaveBeenCalledWith("character_replace", toolboxInput);
   });
 

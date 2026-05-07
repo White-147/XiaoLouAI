@@ -6,10 +6,12 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using XiaoLou.ControlApi.Modules.Accounts;
 using XiaoLou.ControlApi.Modules.Auth;
 using XiaoLou.ControlApi.Modules.InternalJobs;
 using XiaoLou.ControlApi.Modules.Media;
 using XiaoLou.ControlApi.Modules.Payments;
+using XiaoLou.ControlApi.Modules.Playground;
 using XiaoLou.ControlApi.Modules.Toolbox;
 using XiaoLou.Infrastructure.Postgres;
 using XiaoLou.Infrastructure.Storage;
@@ -100,6 +102,134 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
             response.Body);
     }
 
+    [Theory]
+    [InlineData("/api/auth/login")]
+    [InlineData("/api/auth/admin/login")]
+    [InlineData("/api/auth/register/personal")]
+    [InlineData("/api/auth/register/enterprise-admin")]
+    public async Task PasswordAuthHandlers_BlankPassword_ReturnStableBadRequestBeforeSyntheticStores(string path)
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(app, HttpMethods.Post, path, """{"email":"synthetic@example.test","password":""}""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":{"code":"AUTH_INVALID_REQUEST","message":"password is required"}}""",
+            response.Body);
+    }
+
+    [Theory]
+    [InlineData("/api/auth/password/bootstrap-admin", """{"email":"ops@xiaolou.local","password":""}""")]
+    [InlineData("/api/auth/password/change", """{"currentPassword":"synthetic-password","newPassword":""}""")]
+    public async Task PasswordFollowupHandlers_BlankNewPassword_ReturnStableBadRequestBeforeSyntheticStores(
+        string path,
+        string body)
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(app, HttpMethods.Post, path, body);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":{"code":"AUTH_INVALID_REQUEST","message":"password is required"}}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task PasswordResetRequest_BlankEmail_ReturnsStableBadRequestBeforeSyntheticStores()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/auth/password/reset/request",
+            """{"email":""}""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":{"code":"AUTH_INVALID_REQUEST","message":"email is required"}}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task PasswordResetComplete_BlankToken_ReturnsStableBadRequestBeforeSyntheticStores()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/auth/password/reset/complete",
+            """{"resetToken":"","newPassword":"synthetic-new-password"}""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":{"code":"AUTH_INVALID_REQUEST","message":"reset token is required"}}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task PasswordResetComplete_BlankPassword_ReturnsStableBadRequestBeforeSyntheticStores()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/auth/password/reset/complete",
+            """{"resetToken":"synthetic-reset-token","newPassword":""}""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":{"code":"AUTH_INVALID_REQUEST","message":"password is required"}}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task PasswordBootstrap_ExternalForwardedRequest_ReturnsStableForbiddenBeforeSyntheticStores()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/auth/password/bootstrap-admin",
+            """{"email":"ops@xiaolou.local","password":"synthetic-password"}""",
+            new Dictionary<string, string>
+            {
+                ["X-Forwarded-For"] = "203.0.113.10",
+            });
+
+        Assert.Equal(StatusCodes.Status403Forbidden, response.StatusCode);
+        Assert.Equal(
+            """{"error":{"code":"AUTH_LOCAL_OPERATOR_REQUIRED","message":"platform password bootstrap is available only from local loopback access"}}""",
+            response.Body);
+    }
+
+    [Theory]
+    [InlineData("/api/auth/register/personal")]
+    [InlineData("/api/auth/register/enterprise-admin")]
+    public async Task PasswordRegistrationHandlers_ReservedPlatformEmail_ReturnStableBadRequestBeforeSyntheticStores(string path)
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(app, HttpMethods.Post, path, """{"email":"ops@xiaolou.local","password":"synthetic-password"}""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":{"code":"AUTH_INVALID_REQUEST","message":"email is reserved"}}""",
+            response.Body);
+    }
+
     public static IEnumerable<object[]> AccountScopeDeniedPostRoutes()
     {
         yield return RouteBody(
@@ -137,6 +267,16 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
               "payload": {}
             }
             """);
+        yield return RouteBody(
+            "/api/playground/chat",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "message": "synthetic prompt",
+              "model": "qwen-plus"
+            }
+            """);
     }
 
     private static WebApplication BuildSyntheticApp(PaymentCallbackOptions? paymentCallbackOptions = null)
@@ -155,6 +295,7 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
                 "Host=127.0.0.1;Port=1;Username=synthetic;Password=synthetic;Database=xiaolou_synthetic;Timeout=1;Command Timeout=1;Pooling=false")
             .Build());
         builder.Services.AddSingleton<PostgresAccountStore>();
+        builder.Services.AddSingleton<PostgresIdentityConfigStore>();
         builder.Services.AddSingleton<PostgresWalletStore>();
         builder.Services.AddSingleton<PostgresPaymentLedger>();
         builder.Services.AddSingleton<PostgresMediaStore>();
@@ -162,14 +303,18 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
         builder.Services.AddSingleton<PostgresJobNotificationListener>();
         builder.Services.AddSingleton<PostgresOutboxStore>();
         builder.Services.AddSingleton<PostgresToolboxStore>();
+        builder.Services.AddSingleton<PostgresPlaygroundStore>();
+        builder.Services.AddSingleton<PostgresProviderHealthStore>();
         builder.Services.AddSingleton<IObjectStorageSigner, ThrowingObjectStorageSigner>();
         builder.Services.AddSingleton<IPaymentSignatureVerifier, ThrowingPaymentSignatureVerifier>();
 
         var app = builder.Build();
+        app.MapAccountsAuthEndpoints();
         app.MapPaymentEndpoints();
         app.MapMediaEndpoints();
         app.MapInternalJobsEndpoints();
         app.MapToolboxEndpoints();
+        app.MapPlaygroundEndpoints();
         return app;
     }
 
@@ -177,7 +322,8 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
         WebApplication app,
         string method,
         string path,
-        string body)
+        string body,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
         var route = FindRoute(app, method, path);
         var context = new DefaultHttpContext
@@ -190,6 +336,14 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
         context.Request.ContentType = "application/json";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Request.ContentLength = context.Request.Body.Length;
+        if (headers is not null)
+        {
+            foreach (var (name, value) in headers)
+            {
+                context.Request.Headers[name] = value;
+            }
+        }
+
         ApplyRouteValues(context, route, path);
         await using var responseBody = new MemoryStream();
         context.Response.Body = responseBody;

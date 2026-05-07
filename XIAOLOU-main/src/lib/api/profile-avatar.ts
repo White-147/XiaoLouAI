@@ -12,7 +12,12 @@ export function resolveAvatarUploadUrl(uploaded: AvatarUploadResult) {
 
 export function mergeProfileUpdateContext(
   context: PermissionContext,
-  patch: { displayName?: string; avatar?: string | null },
+  patch: {
+    displayName?: string;
+    avatar?: string | null;
+    phone?: string | null;
+    defaultOrganizationId?: string | null;
+  },
 ): PermissionContext {
   return {
     ...context,
@@ -20,6 +25,11 @@ export function mergeProfileUpdateContext(
       ...context.actor,
       displayName: patch.displayName?.trim() || context.actor.displayName,
       avatar: patch.avatar === undefined ? context.actor.avatar : patch.avatar,
+      phone: patch.phone === undefined ? context.actor.phone : patch.phone,
+      defaultOrganizationId:
+        patch.defaultOrganizationId === undefined
+          ? context.actor.defaultOrganizationId
+          : patch.defaultOrganizationId,
     },
   };
 }

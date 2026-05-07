@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS users (
   account_id uuid REFERENCES accounts(id),
   email text,
   phone_hash text,
+  password_hash text,
   display_name text NOT NULL DEFAULT '',
   status text NOT NULL DEFAULT 'active',
   region_code text NOT NULL DEFAULT 'CN',
@@ -66,7 +67,39 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS account_id uuid;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS region_code text NOT NULL DEFAULT 'CN';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text;
 CREATE INDEX IF NOT EXISTS idx_users_account_id ON users(account_id);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_account_id uuid NOT NULL REFERENCES accounts(id),
+  actor_id text NOT NULL,
+  email text NOT NULL,
+  token_hash text NOT NULL,
+  status text NOT NULL DEFAULT 'issued',
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_password_reset_tokens_hash UNIQUE (token_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_actor_status
+  ON password_reset_tokens(actor_id, status, expires_at DESC);
+
+CREATE TABLE IF NOT EXISTS password_auth_audit_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_id text,
+  email_hash text,
+  event_type text NOT NULL,
+  outcome text NOT NULL,
+  data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_auth_audit_actor_created
+  ON password_auth_audit_events(actor_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS organizations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

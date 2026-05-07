@@ -68,10 +68,14 @@ describe("profile avatar helpers", () => {
     const merged = mergeProfileUpdateContext(createPermissionContext(), {
       displayName: "After Name",
       avatar: "https://synthetic-storage.example/read/new-avatar",
+      phone: "13800000000",
+      defaultOrganizationId: "org_profile_001",
     });
 
     expect(merged.actor.displayName).toBe("After Name");
     expect(merged.actor.avatar).toBe("https://synthetic-storage.example/read/new-avatar");
+    expect(merged.actor.phone).toBe("13800000000");
+    expect(merged.actor.defaultOrganizationId).toBe("org_profile_001");
     expect(merged.permissions.canCreateProject).toBe(true);
   });
 });

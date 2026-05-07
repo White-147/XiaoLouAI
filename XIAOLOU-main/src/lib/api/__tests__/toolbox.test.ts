@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Task, ToolboxCapability } from "../../api";
+import type { PermissionContext, Task, ToolboxCapability } from "../../api";
+import { resolveCurrentOwnerScope, type ControlOwnerScope } from "../../control-owner-scope";
 import { createToolboxService } from "../toolbox";
 import {
-  createSyntheticMediaScope,
   parseJsonBody,
   SYNTHETIC_ACTOR_ID,
   SYNTHETIC_CREATED_AT,
@@ -49,23 +49,78 @@ function createSyntheticTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
+function createPersonalPermissionContext(actorId = SYNTHETIC_ACTOR_ID): PermissionContext {
+  return {
+    actor: {
+      id: actorId,
+      displayName: "Synthetic User",
+      email: "synthetic.user@example.test",
+      avatar: null,
+      platformRole: "customer",
+      status: "active",
+      defaultOrganizationId: null,
+    },
+    platformRole: "customer",
+    organizations: [],
+    currentOrganizationId: null,
+    currentOrganizationRole: null,
+    permissions: {
+      canCreateProject: true,
+      canRecharge: true,
+      canUseEnterprise: false,
+      canManageOrganization: false,
+      canManageOps: false,
+      canManageSystem: false,
+    },
+  };
+}
+
+function createOrganizationPermissionContext(organizationId = "synthetic-organization"): PermissionContext {
+  const context = createPersonalPermissionContext();
+  return {
+    ...context,
+    actor: {
+      ...context.actor,
+      defaultOrganizationId: organizationId,
+    },
+    organizations: [
+      {
+        id: organizationId,
+        name: "Synthetic Organization",
+        role: "enterprise_admin",
+        membershipRole: "admin",
+        status: "active",
+      },
+    ],
+    currentOrganizationId: organizationId,
+    currentOrganizationRole: "enterprise_admin",
+    permissions: {
+      ...context.permissions,
+      canUseEnterprise: true,
+      canManageOrganization: true,
+    },
+  };
+}
+
 function createServiceHarness({
   actorId = SYNTHETIC_ACTOR_ID,
   clientId = "synthetic-toolbox-client",
   fallbackCapabilities = [createSyntheticCapability({ code: "synthetic_fallback_capability" })],
   handler = () => ({}),
+  permissionContext = createPersonalPermissionContext(actorId),
 }: {
   actorId?: string;
   clientId?: string;
   fallbackCapabilities?: ToolboxCapability[];
   handler?: RequestHandler;
+  permissionContext?: PermissionContext;
 } = {}) {
   const calls: RequestCall[] = [];
   const clientIdPrefixes: string[] = [];
   const errors: Array<{ message: string; options?: { code?: string; status?: number } }> = [];
   const fallbackCalls: string[] = [];
   const mappedJobs: Record<string, unknown>[] = [];
-  const mediaScopeActorIds: string[] = [];
+  const ownerScopeCalls: ControlOwnerScope[] = [];
   const readRecordCalls: string[][] = [];
   const readStringCalls: string[][] = [];
 
@@ -75,9 +130,10 @@ function createServiceHarness({
       return (await handler(path, init)) as T;
     },
     getCurrentActorId: () => actorId,
-    buildControlMediaScope: (scopeActorId) => {
-      mediaScopeActorIds.push(scopeActorId);
-      return createSyntheticMediaScope(scopeActorId);
+    resolveCurrentOwnerScope: () => {
+      const ownerScope = resolveCurrentOwnerScope(permissionContext);
+      ownerScopeCalls.push(ownerScope);
+      return ownerScope;
     },
     createClientId: (prefix) => {
       clientIdPrefixes.push(prefix);
@@ -129,7 +185,7 @@ function createServiceHarness({
     errors,
     fallbackCalls,
     mappedJobs,
-    mediaScopeActorIds,
+    ownerScopeCalls,
     readRecordCalls,
     readStringCalls,
     service: createToolboxService(deps),
@@ -202,8 +258,8 @@ describe("createToolboxService", () => {
     ]);
   });
 
-  it("queues text translation with scoped body idempotency and snake/camel response normalization", async () => {
-    const { calls, clientIdPrefixes, mediaScopeActorIds, readStringCalls, service } = createServiceHarness({
+  it("queues text translation with default personal owner scope body idempotency", async () => {
+    const { calls, clientIdPrefixes, ownerScopeCalls, readStringCalls, service } = createServiceHarness({
       handler: (path) => {
         expect(path).toBe("/api/toolbox/translate-text");
         return {
@@ -233,7 +289,15 @@ describe("createToolboxService", () => {
       idempotencyKey: "frontend:synthetic-actor:translate-text:synthetic-toolbox-client",
     });
     expect(clientIdPrefixes).toEqual(["toolbox"]);
-    expect(mediaScopeActorIds).toEqual(["synthetic-actor"]);
+    expect(ownerScopeCalls).toEqual([
+      {
+        accountOwnerType: "user",
+        accountOwnerId: "synthetic-actor",
+        organizationId: null,
+        organizationRole: null,
+        source: "personal-default",
+      },
+    ]);
     expect(readStringCalls).toContainEqual(["targetLang", "target_lang"]);
   });
 
@@ -282,10 +346,10 @@ describe("createToolboxService", () => {
     });
   });
 
-  it("queues reverse video prompt runs and keeps fallback prompt/model behavior local", async () => {
-    const { calls, service } = createServiceHarness({
-      actorId: "synthetic-video-actor",
+  it("queues reverse video prompt runs with organization owner scope and local fallback behavior", async () => {
+    const { calls, ownerScopeCalls, service } = createServiceHarness({
       clientId: "synthetic-video-client",
+      permissionContext: createOrganizationPermissionContext(),
       handler: (path) => {
         expect(path).toBe("/api/toolbox/video-reverse-prompt");
         return {
@@ -309,15 +373,24 @@ describe("createToolboxService", () => {
     expect(calls[0].path).toBe("/api/toolbox/video-reverse-prompt");
     expect(calls[0].init?.method).toBe("POST");
     expect(parseJsonBody(calls[0])).toEqual({
-      accountOwnerType: "user",
-      accountOwnerId: "synthetic-video-actor",
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
       regionCode: "CN",
       currency: "CNY",
       videoUrl: "https://synthetic.example/media/video.mp4",
       prompt: "Synthetic requested prompt",
       model: "qwen3.5-omni-plus",
-      idempotencyKey: "frontend:synthetic-video-actor:video-reverse-prompt:synthetic-video-client",
+      idempotencyKey: "frontend:synthetic-actor:video-reverse-prompt:synthetic-video-client",
     });
+    expect(ownerScopeCalls).toEqual([
+      {
+        accountOwnerType: "organization",
+        accountOwnerId: "synthetic-organization",
+        organizationId: "synthetic-organization",
+        organizationRole: "enterprise_admin",
+        source: "current-organization",
+      },
+    ]);
 
     const defaultHarness = createServiceHarness({
       handler: () => ({
@@ -339,7 +412,8 @@ describe("createToolboxService", () => {
       motion_transfer: "/api/toolbox/motion-transfer",
       upscale_restore: "/api/toolbox/upscale-restore",
     };
-    const { calls, clientIdPrefixes, mappedJobs, mediaScopeActorIds, readRecordCalls, service } = createServiceHarness({
+    const { calls, clientIdPrefixes, mappedJobs, ownerScopeCalls, readRecordCalls, service } = createServiceHarness({
+      permissionContext: createOrganizationPermissionContext(),
       handler: (path) => {
         const runType = (Object.entries(routeByType).find(([, route]) => route === path)?.[0] ?? "unknown") as RunType;
         return {
@@ -403,8 +477,8 @@ describe("createToolboxService", () => {
     ]);
     expect(calls.every((call) => call.init?.method === "POST")).toBe(true);
     expect(parseJsonBody(calls[0])).toEqual({
-      accountOwnerType: "user",
-      accountOwnerId: "synthetic-actor",
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
       regionCode: "CN",
       currency: "CNY",
       projectId: "synthetic-project",
@@ -413,8 +487,8 @@ describe("createToolboxService", () => {
       idempotencyKey: "frontend:synthetic-actor:character_replace:synthetic-toolbox-client",
     });
     expect(parseJsonBody(calls[1])).toEqual({
-      accountOwnerType: "user",
-      accountOwnerId: "synthetic-actor",
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
       regionCode: "CN",
       currency: "CNY",
       projectId: "synthetic-project",
@@ -422,8 +496,8 @@ describe("createToolboxService", () => {
       idempotencyKey: "frontend:synthetic-actor:motion_transfer:synthetic-toolbox-client",
     });
     expect(parseJsonBody(calls[2])).toEqual({
-      accountOwnerType: "user",
-      accountOwnerId: "synthetic-actor",
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
       regionCode: "CN",
       currency: "CNY",
       projectId: "synthetic-project",
@@ -431,7 +505,29 @@ describe("createToolboxService", () => {
       idempotencyKey: "frontend:synthetic-actor:upscale_restore:synthetic-toolbox-client",
     });
     expect(clientIdPrefixes).toEqual(["toolbox", "toolbox", "toolbox"]);
-    expect(mediaScopeActorIds).toEqual(["synthetic-actor", "synthetic-actor", "synthetic-actor"]);
+    expect(ownerScopeCalls).toEqual([
+      {
+        accountOwnerType: "organization",
+        accountOwnerId: "synthetic-organization",
+        organizationId: "synthetic-organization",
+        organizationRole: "enterprise_admin",
+        source: "current-organization",
+      },
+      {
+        accountOwnerType: "organization",
+        accountOwnerId: "synthetic-organization",
+        organizationId: "synthetic-organization",
+        organizationRole: "enterprise_admin",
+        source: "current-organization",
+      },
+      {
+        accountOwnerType: "organization",
+        accountOwnerId: "synthetic-organization",
+        organizationId: "synthetic-organization",
+        organizationRole: "enterprise_admin",
+        source: "current-organization",
+      },
+    ]);
     expect(readRecordCalls).toEqual([["job"], ["job"], ["job"]]);
     expect(mappedJobs).toHaveLength(3);
   });

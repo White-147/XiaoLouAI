@@ -37,6 +37,7 @@ describe("Control API route policy", () => {
       "/api/playground/config",
       "/api/playground/models",
       "/api/playground/conversations",
+      "/api/playground/chat",
       "/api/playground/chat-jobs",
       "/api/playground/memories",
       "/api/playground/memories/preference",

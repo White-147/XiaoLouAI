@@ -70,11 +70,7 @@ app.Use(async (context, next) =>
         : ClientAuthenticationResult.Allowed(null);
     if (isPublicClientRequest && !clientAuth.IsAllowed)
     {
-        context.Response.StatusCode = clientAuth.StatusCode;
-        await context.Response.WriteAsJsonAsync(new
-        {
-            error = clientAuth.Error,
-        });
+        await AuthErrorEnvelopeResponses.WriteClientAuthenticationFailureAsync(context, clientAuth);
         return;
     }
 
@@ -85,12 +81,9 @@ app.Use(async (context, next) =>
 
     if (isPublicClientRequest && !isAnonymousIdentityRequest && !IsClientPermissionAllowed(context, clientApiOptions))
     {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        await context.Response.WriteAsJsonAsync(new
-        {
-            error = "client token is missing the required public API permission",
-            requiredPermission = GetRequiredClientPermission(context),
-        });
+        await AuthErrorEnvelopeResponses.WriteClientPermissionFailureAsync(
+            context,
+            GetRequiredClientPermission(context));
         return;
     }
 

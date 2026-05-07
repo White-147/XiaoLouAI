@@ -3,42 +3,59 @@ import type {
   ApiVendor,
   ApiVendorConnectionTestResult,
   ApiVendorModel,
+  AdminResetPasswordInput,
   AuthProvidersResponse,
+  BootstrapPlatformPasswordInput,
+  ChangePasswordInput,
+  CompletePasswordResetInput,
   CreateOrganizationMemberInput,
   LoginInput,
   LoginResult,
   OrganizationMember,
+  PasswordConfiguredResult,
+  PasswordResetRequestResult,
   PermissionContext,
   RegisterEnterpriseAdminInput,
   RegisterPersonalInput,
   RegistrationResult,
+  RequestPasswordResetInput,
+  UpdateMeInput,
   Wallet,
   WalletOwnerType,
 } from "../api";
+import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export type AuthAccountServiceDeps = {
   controlApiJsonRequest: ControlApiJsonRequest;
-  buildControlScopeQuery: (actorId?: string) => string;
+  resolveCurrentOwnerScope: () => ControlOwnerScope;
   getWallet: (ownerType: WalletOwnerType, ownerId: string) => Promise<Wallet>;
   createEmptyWallet: (ownerType: WalletOwnerType, ownerId: string) => Wallet;
   isRouteNotFoundError: (error: unknown) => boolean;
 };
 
+function buildControlScopeQuery(ownerScope: ControlOwnerScope) {
+  const accountOwnerType = ownerScope.accountOwnerType ?? "user";
+  const accountOwnerId = ownerScope.accountOwnerId ?? "guest";
+  return `accountOwnerType=${encodeURIComponent(accountOwnerType)}&accountOwnerId=${encodeURIComponent(accountOwnerId)}`;
+}
+
 export function createAuthAccountService({
   controlApiJsonRequest,
-  buildControlScopeQuery,
+  resolveCurrentOwnerScope,
   getWallet,
   createEmptyWallet,
   isRouteNotFoundError,
 }: AuthAccountServiceDeps) {
+  const buildApiCenterScopeQuery = () => buildControlScopeQuery(resolveCurrentOwnerScope());
+
   return {
     getMe() {
       return controlApiJsonRequest<PermissionContext>("/api/me");
     },
 
-    updateMe(data: { displayName?: string; avatar?: string | null }) {
+    updateMe(data: UpdateMeInput) {
       return controlApiJsonRequest<PermissionContext>("/api/me", {
         method: "PUT",
         body: JSON.stringify(data),
@@ -46,12 +63,12 @@ export function createAuthAccountService({
     },
 
     getApiCenterConfig() {
-      return controlApiJsonRequest<ApiCenterConfig>(`/api/api-center?${buildControlScopeQuery()}`);
+      return controlApiJsonRequest<ApiCenterConfig>(`/api/api-center?${buildApiCenterScopeQuery()}`);
     },
 
     updateApiCenterDefaults(input: Partial<ApiCenterConfig["defaults"]>) {
       return controlApiJsonRequest<ApiCenterConfig["defaults"]>(
-        `/api/api-center/defaults?${buildControlScopeQuery()}`,
+        `/api/api-center/defaults?${buildApiCenterScopeQuery()}`,
         {
           method: "PUT",
           body: JSON.stringify(input),
@@ -61,7 +78,7 @@ export function createAuthAccountService({
 
     saveApiCenterVendorApiKey(vendorId: string, apiKey: string) {
       return controlApiJsonRequest<ApiVendor>(
-        `/api/api-center/vendors/${encodeURIComponent(vendorId)}/api-key?${buildControlScopeQuery()}`,
+        `/api/api-center/vendors/${encodeURIComponent(vendorId)}/api-key?${buildApiCenterScopeQuery()}`,
         {
           method: "PUT",
           body: JSON.stringify({ apiKey }),
@@ -71,7 +88,7 @@ export function createAuthAccountService({
 
     testApiCenterVendorConnection(vendorId: string) {
       return controlApiJsonRequest<ApiVendorConnectionTestResult>(
-        `/api/api-center/vendors/${encodeURIComponent(vendorId)}/test?${buildControlScopeQuery()}`,
+        `/api/api-center/vendors/${encodeURIComponent(vendorId)}/test?${buildApiCenterScopeQuery()}`,
         { method: "POST" },
       );
     },
@@ -82,7 +99,7 @@ export function createAuthAccountService({
       input: Partial<Pick<ApiVendorModel, "enabled">>,
     ) {
       return controlApiJsonRequest<ApiVendorModel>(
-        `/api/api-center/vendors/${encodeURIComponent(vendorId)}/models/${encodeURIComponent(modelId)}?${buildControlScopeQuery()}`,
+        `/api/api-center/vendors/${encodeURIComponent(vendorId)}/models/${encodeURIComponent(modelId)}?${buildApiCenterScopeQuery()}`,
         {
           method: "PUT",
           body: JSON.stringify(input),
@@ -127,6 +144,56 @@ export function createAuthAccountService({
         method: "POST",
         body: JSON.stringify(input),
       });
+    },
+
+    bootstrapPlatformPassword(input: BootstrapPlatformPasswordInput) {
+      return controlApiJsonRequest<PasswordConfiguredResult>(
+        "/api/auth/password/bootstrap-admin",
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
+    },
+
+    changePassword(input: ChangePasswordInput) {
+      return controlApiJsonRequest<PasswordConfiguredResult>(
+        "/api/auth/password/change",
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
+    },
+
+    adminResetPassword(input: AdminResetPasswordInput) {
+      return controlApiJsonRequest<PasswordConfiguredResult>(
+        "/api/auth/password/admin-reset",
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
+    },
+
+    requestPasswordReset(input: RequestPasswordResetInput) {
+      return controlApiJsonRequest<PasswordResetRequestResult>(
+        "/api/auth/password/reset/request",
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
+    },
+
+    completePasswordReset(input: CompletePasswordResetInput) {
+      return controlApiJsonRequest<PasswordConfiguredResult>(
+        "/api/auth/password/reset/complete",
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
     },
 
     startDemoSession(actorId: string) {

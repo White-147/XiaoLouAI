@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -15,7 +15,6 @@ import {
   FolderOpen,
   HelpCircle,
   Image as ImageIcon,
-  Keyboard,
   LayoutDashboard,
   LayoutTemplate,
   LoaderCircle,
@@ -54,6 +53,10 @@ import {
   type RegisterPersonalInput,
   type RegisterEnterpriseAdminInput,
 } from "../lib/api";
+import {
+  getSelectableOrganizations,
+  setCurrentOrganizationSelection,
+} from "../lib/current-organization-context";
 import {
   getKnownActors,
   getKnownActorControlApiClientAssertion,
@@ -285,8 +288,6 @@ export default function Layout() {
   const hasMountedCanvas = isCanvasRoute;
   const hasMountedAgentCanvas = isAgentCanvasRoute;
   const [hasMountedAgentStudioCanvas, setHasMountedAgentStudioCanvas] = useState(isAgentStudioCanvasRoute);
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
 
   // True only for localhost / 127.0.0.1 / ::1 — false on every real external domain
@@ -420,21 +421,6 @@ export default function Layout() {
   }, [isAgentStudioCanvasRoute]);
 
   useEffect(() => {
-    if (!profileMenuOpen) return;
-    const handleClickOutside = (e: globalThis.MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
-        setProfileMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [profileMenuOpen]);
-
-  useEffect(() => {
-    if (isCollapsed) setProfileMenuOpen(false);
-  }, [isCollapsed]);
-
-  useEffect(() => {
     let active = true;
 
     const loadContext = async () => {
@@ -554,9 +540,28 @@ export default function Layout() {
     };
   }, [location.hash, location.pathname, location.search, navigate]);
 
-  const currentOrganizationName =
-    permissionContext?.organizations.find((item) => item.id === permissionContext.currentOrganizationId)?.name ??
-    null;
+  const selectableOrganizations = useMemo(
+    () => getSelectableOrganizations(permissionContext),
+    [permissionContext],
+  );
+  const currentOrganization =
+    permissionContext?.organizations.find((item) => item.id === permissionContext.currentOrganizationId) ?? null;
+  const currentOrganizationName = currentOrganization?.name ?? null;
+  const handleCurrentOrganizationChange = (organizationId: string) => {
+    if (!permissionContext) return;
+    const nextPermissionContext = setCurrentOrganizationSelection(permissionContext, organizationId);
+    setPermissionContext(nextPermissionContext);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("xiaolou:current-organization-changed", {
+          detail: {
+            actorId: nextPermissionContext.actor.id,
+            organizationId: nextPermissionContext.currentOrganizationId,
+          },
+        }),
+      );
+    }
+  };
   const isDark = theme === "dark";
   const themeToggleLabel = isDark ? "切换到浅色" : "切换到深色";
   const canAccessAgentCanvas =
@@ -941,16 +946,16 @@ export default function Layout() {
 
         <div className="border-t border-border p-3">
           {permissionContext && permissionContext.platformRole !== "guest" ? (
-            <div ref={profileMenuRef} className="relative mb-3">
+            <div className="mb-3">
               <button
                 type="button"
-                onClick={() => setProfileMenuOpen((v) => !v)}
+                title="账号与个人资料"
+                onClick={() => setIsProfileModalOpen(true)}
                 className={cn(
                   "w-full rounded-xl border border-border/70 bg-background/40 transition-all hover:border-primary/30 hover:bg-background/60",
                   isCollapsed
                     ? "flex flex-col items-center gap-1.5 p-2"
                     : "flex items-center gap-3 px-2.5 py-2.5",
-                  profileMenuOpen && "border-primary/40 bg-background/60",
                 )}
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-primary/20 bg-primary/10 text-primary">
@@ -972,87 +977,6 @@ export default function Layout() {
                   </div>
                 )}
               </button>
-
-              <AnimatePresence>
-                {profileMenuOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 6, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 6, scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                    className={cn(
-                      "absolute z-50 rounded-xl border border-border bg-card shadow-2xl",
-                      isCollapsed
-                        ? "bottom-full left-0 mb-2 w-56"
-                        : "bottom-full left-0 mb-2 w-full min-w-[200px]",
-                    )}
-                  >
-                    {/* Profile header */}
-                    <button
-                      type="button"
-                      title="账号与个人资料"
-                      onClick={() => {
-                        setProfileMenuOpen(false);
-                        setIsProfileModalOpen(true);
-                      }}
-                      className="w-full border-b border-border p-3 text-left transition-colors hover:bg-accent/50"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-primary/20 bg-primary/10 text-primary">
-                          {permissionContext.actor.avatar ? (
-                            <img src={permissionContext.actor.avatar} alt="Avatar" className="h-full w-full object-cover" />
-                          ) : (
-                            <UserRound className="h-5 w-5" />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium text-primary">账号与个人资料</p>
-                          <p className="truncate text-sm font-semibold text-foreground">
-                            {permissionContext.actor.displayName}
-                          </p>
-                          <div className="flex items-center gap-1.5">
-                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-                            <span className="text-xs text-muted-foreground">
-                              {formatPlatformRole(permissionContext)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-
-                    {/* Menu items */}
-                    <div className="p-1.5">
-                      <ProfileMenuItem
-                        icon={Settings}
-                        label="设置"
-                        onClick={() => {
-                          setProfileMenuOpen(false);
-                          setIsMoreModalOpen(true);
-                        }}
-                      />
-
-                      <div className="my-1.5 border-t border-border/60" />
-
-                      <ProfileMenuItem
-                        icon={CreditCard}
-                        label="积分统计"
-                        onClick={() => {
-                          setProfileMenuOpen(false);
-                          navigate("/wallet/usage");
-                        }}
-                      />
-
-                      <div className="my-1.5 border-t border-border/60" />
-
-                      <ProfileMenuItem
-                        icon={Keyboard}
-                        label="快捷键"
-                        onClick={() => setProfileMenuOpen(false)}
-                      />
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
           ) : (
             <button
@@ -1423,7 +1347,27 @@ export default function Layout() {
                       </div>
                     </div>
 
-                    {currentOrganizationName ? (
+                    {selectableOrganizations.length > 1 ? (
+                      <label className="block rounded-2xl border border-primary/20 bg-primary/8 p-4">
+                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-primary/80">
+                          当前组织
+                        </span>
+                        <select
+                          value={permissionContext?.currentOrganizationId ?? ""}
+                          onChange={(event) => handleCurrentOrganizationChange(event.target.value)}
+                          className="mt-3 h-10 w-full rounded-lg border border-primary/20 bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/50"
+                        >
+                          <option value="" disabled>
+                            选择组织
+                          </option>
+                          {selectableOrganizations.map((organization) => (
+                            <option key={organization.id} value={organization.id}>
+                              {organization.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : currentOrganizationName ? (
                       <div className="rounded-2xl border border-primary/20 bg-primary/8 p-4 text-sm text-primary">
                         当前组织：{currentOrganizationName}
                       </div>

@@ -1,6 +1,6 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-07 09:59 +08
+更新时间：2026-05-07 12:25 +08
 工作目录：`D:\code\XiaoLouAI`
 
 本文件是后续每一棒的第一读取文件。根短棒只保留总进度、固定边界、当前 owner/队列提示词和验证入口；历史细节见 docs handoff：
@@ -82,13 +82,13 @@ G14 refactor-gap closure: active
 G14 source: 2026-05-06 uploaded gap report plus 2026-05-06 14:19 +08 user decisions
 G14 fact: G12/G13 file split, tests, and required synthetic E2E remain valid
 G14 gap: low-coupling closure is not complete
-G14 latest completed: 2026-05-07 09:59 +08 G14x backend auth provider/JWT focused tests and helper split
+G14 latest completed: 2026-05-07 12:45 +08 G14aj password-auth-owner
 ```
 
 ## 当前模块
 
 ```text
-Owner: G14-refactor-gap-closure（下一棒默认从 backend-auth-provider-jwt-focused-tests 开始）
+Owner: G14-refactor-gap-closure（当前无默认 signed runtime owner，等待显式签收）
 
 Current facts:
 - G12/G13 详细阶段记录已归档到 docs\xiaolouai-finalization-handoff.md。
@@ -118,6 +118,18 @@ Current facts:
 - 2026-05-07 09:43 +08 已完成 G14v AuthHelpers header/env helper wave-1。
 - 2026-05-07 09:51 +08 已完成 G14w ClientAssertionFactory focused tests and helper split。
 - 2026-05-07 09:59 +08 已完成 G14x ClientAuthProviderValidator focused tests and helper split。
+- 2026-05-07 10:13 +08 已完成 G14y AuthErrorEnvelopeResponses focused tests and helper split。
+- 2026-05-07 10:22 +08 已完成 G14z backend Auth boundary closeout inventory，无 runtime 行为变化。
+- 2026-05-07 10:36 +08 已完成 G14aa frontend owner-scope remaining services inventory，无 runtime 行为变化。
+- 2026-05-07 10:47 +08 已完成 G14ab frontend owner-scope API-center wave-1。
+- 2026-05-07 10:57 +08 已完成 G14ac frontend owner-scope toolbox wave-1。
+- 2026-05-07 11:03 +08 已完成 G14ad frontend owner-scope closeout inventory，无 runtime 行为变化。
+- 2026-05-07 11:12 +08 已完成 G14ae next-owner calibration，无 runtime 行为变化。
+- 2026-05-07 11:23 +08 已完成 G14af backend Auth ClientApi type file split。
+- 2026-05-07 11:46 +08 已完成 G14ag explicit UI/current organization selector。
+- 2026-05-07 12:02 +08 已完成 G14ah wallet-payment contract change。
+- 2026-05-07 12:25 +08 已完成 G14ai Playground real transport。
+- 2026-05-07 12:45 +08 已完成 G14aj password-auth-owner。
 - active backend/proxy/matrix 只保留 `/api/payments/callbacks/{provider}`。
 - 旧 `/api/payments/{provider}/notify` 只保留在 legacy verifier/evidence 历史记录中。
 - “后端模块和前端服务拆分已完成”仍成立。
@@ -139,11 +151,13 @@ User-confirmed decisions:
 - 积分统计常驻侧边栏资产库下方。
 
 Password baseline:
-- 密码当前只在登录/注册 DTO 接收。
-- PostgreSQL users 表未发现 password_hash。
-- PostgresIdentityConfigStore 注册/登录未存储也未校验密码。
-- Login/Register/CreateOrganizationMember 后端路径当前未读取 request.Password。
-- 密码持久化、哈希、验证、重置后续单独 owner 处理。
+- PostgreSQL users 表已有 `password_hash` 迁移列。
+- `PasswordHashing` 使用 versioned PBKDF2-SHA256 hash，密码明文不写入 profile/permissionContext/registration result。
+- `/api/auth/login` 与 `/api/auth/admin/login` 现在要求 email/password 并校验已存 hash；登录不再隐式 seed 用户。
+- personal/enterprise register 要求 email/password；无 hash 时写入 hash，已有 hash 时必须密码匹配，避免重新注册重置密码。
+- organization member create 会存储提供的初始密码；留空时生成临时密码并通过现有 onboarding.tempPassword/generatedPassword 返回。
+- local-only demo-session 仍保持独立，不走密码。
+- 自助找回/邮件重置 flow 未实现；如需产品化重置需后续独立签收。
 
 Cleanup baseline:
 - `xiaolou` 数据库名称变更是用户修改，后续清理/复核不再检查该项。
@@ -156,17 +170,31 @@ Cleanup baseline:
 - 本轮未删除任何文件。
 
 Still-open structural lines:
-- 账号/设置/头像/钱包额度与组织作用域操作逻辑。
-- 前端 owner scope 统一。
-- api.ts facade wave-1 runtime 拆分。
-- AuthHelpers 后续 error envelope/middleware response-shape 边界。
+- 前端 owner-scope 默认 service runtime 迁移已关闭：
+  jobs/media/projects/canvas/create/playground/API-center/toolbox 均走 resolver-backed scope。
+- api.ts 不再保留全局 user-only buildControlScopeQuery/buildControlMediaScope。
+- wallet-payment 已在 G14ah 改为 resolver-backed 默认 owner contract。
+- wallet-payment 无显式 owner 参数时读取当前 owner scope。
+- wallet-payment getWallet/listWallets/getWalletUsageStats 导出名保持稳定。
+- wallet-payment 显式 ownerType/ownerId 参数仍作为兼容覆盖路径保留。
+- wallet-entitlements 仍只负责可见性、充值资格和钱包过滤规则。
+- 显式 UI/current organization selector 已在 G14ag 完成，属于产品/账号上下文 baseline。
+- api.ts 仍是 compatibility barrel；更深 DTO/barrel 拆分不作为默认 runtime owner。
+- AuthHelpers low-risk helper split 已完成到 G14y；G14z 确认无默认 backend Auth runtime 下一棒。
+- ClientApiOptions/ClientAuthenticationResult/ClientPrincipal 文件拆分已在 G14af 完成。
 - AuthHelpers header/env helper wave-1 已完成，facade 名称稳定。
 - AuthHelpers ClientAssertionFactory helper split 已完成，facade 名称稳定。
 - AuthHelpers ClientAuthProviderValidator helper split 已完成，facade 名称稳定。
-- ProjectEndpoints 后续更深 endpoint filter/MapGroup 收敛（G14q load/404/authorize helper 已完成）。
-- Playground real transport/stream 仍属后续独立 owner（G14r 已完成 non-stream facade 命名收口）。
+- ProjectEndpoints 更深 endpoint filter/MapGroup 收敛仍需独立签收；不作为默认 owner。
+- Playground real transport 已在 G14ai 完成：
+  streamPlaygroundChat 走 `/api/playground/chat` SSE/ReadableStream，
+  runPlaygroundChatFacade 保持非流式 chat-job facade。
+- ClosedApiWorker/provider adapter 仍是 stubbed-simulated；
+  G14ai 未引入真实 provider credentials、DB schema 或 provider adapter 变更。
 - jobs delete/cancel 语义已收口为 dismissTask 主名，deleteTask 兼容 wrapper。
+- password-auth-owner 已在 G14aj 完成初始存储、哈希、登录校验和成员临时密码路径。
 - 穿插清理无关测试数据/配置已完成一轮；后续仍可在实现 owner 之间按需复扫。
+- G14aj 后仍无默认 signed runtime owner；任何候选都必须由用户显式签收。
 
 Rules:
 - inventory first。
@@ -526,21 +554,324 @@ DONE G14x backend-auth-provider-jwt-focused-tests
 - validation passed: targeted AuthHelpersTests 123/123 before/after helper move,
   full ControlApi xUnit 234/234, Release solution build 0 warnings/0 errors
 
-NEXT G14y backend-auth-error-envelope-middleware-focused-tests
-- add focused synthetic tests for backend AuthHelpers/Program.cs error envelope and middleware response shapes
-- cover public-client 401/403 JSON, missing requiredPermission JSON,
-  account-scope 403 JSON, platform-admin 403 JSON,
-  BadRequestError, ForbiddenError, and AccountForbidden shapes
-- move or centralize error envelope/middleware response helpers only after focused tests are green
-- keep AuthHelpers facade names stable
-- keep ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal shape stable
-- do not move endpoint imports outside AuthHelpers, ProjectEndpoints, Playground transport,
+DONE G14y backend-auth-error-envelope-middleware-focused-tests
+- completed 2026-05-07 10:13 +08
+- added AuthErrorEnvelopeResponses under Modules\Auth
+- added focused synthetic tests before helper centralization and kept them green after the move
+- centralized public-client auth failure and permission failure response writers for Program.cs
+- centralized BadRequestError, ForbiddenError, AccountForbidden, and platform-admin envelopes
+  behind the Auth helper while keeping AuthHelpers facade method names stable
+- covered public-client authentication 401 JSON, public-client forwarded-address 403 JSON,
+  client permission 403 JSON with requiredPermission, account-scope 403 JSON,
+  platform-admin 403 JSON, BadRequestError, ForbiddenError, and AccountForbidden shapes
+- kept ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal shape stable
+- did not move endpoint imports outside AuthHelpers, ProjectEndpoints, Playground transport,
   jobs facade, password auth, avatar upload, wallet entitlement, settings shell,
   frontend api.ts, polling/transport/DB, cleanup/delete files, or branch protection
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368, no branch-protection mutation
+- validation passed: targeted Modules.Auth xUnit 128/128 before/after helper move,
+  full ControlApi xUnit 239/239, Release solution build 0 warnings/0 errors,
+  git diff --check clean except LF/CRLF warnings
 
-FUTURE password-auth-owner
-- design password persistence/hash/verification/reset separately
-- do not mix it into account profile or settings navigation owners
+DONE G14z backend-auth-boundary-closeout-inventory
+- completed 2026-05-07 10:22 +08
+- docs/handoff inventory only; no runtime module, import, route, status, response, or Auth behavior changed
+- inventoried Auth module after G14v-G14y:
+  AccountScopeAuthorizer, AuthErrorEnvelopeResponses, ClientApiHeaderEnvHelpers,
+  ClientAssertionFactory, ClientAuthProviderValidator, ClientRoutePolicy, and AuthHelpers facade
+- confirmed AuthHelpers now primarily keeps stable facade methods, actor/platform-admin glue,
+  account-scope facade glue, dictionary/row/json reader glue, normalization helpers,
+  and the ClientApiOptions/ClientAuthenticationResult/ClientPrincipal type declarations
+- confirmed Program.cs still owns HTTP middleware control flow for internal, operational,
+  and public-client request classification
+- confirmed Program.cs public-client 401/403 response bodies now write through AuthErrorEnvelopeResponses
+- confirmed Program.cs internal and operational 403 envelopes remain local Program.cs responses
+- confirmed endpoint modules still import AuthHelpers facade via static imports;
+  no endpoint imports were moved to direct helper imports
+- next Auth decision:
+  no default backend Auth runtime owner remains after G14v-G14y
+- optional low-risk Auth owner if separately signed:
+  move ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal declarations
+  to a dedicated Auth types file with compile/shape tests
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368, no branch-protection mutation
+- validation passed: required docs read, dirty worktree scan,
+  AuthHelpers/Program.cs/callsite inventory, docs whitespace scan,
+  git diff --check clean except LF/CRLF warnings
+
+DONE G14aa frontend-owner-scope-remaining-services-inventory
+- completed 2026-05-07 10:36 +08
+- docs/handoff inventory only; no runtime module, import, route, status, response, or frontend export changed
+- scanned api.ts, control-owner-scope.ts, auth-account.ts, toolbox.ts, wallet-payment.ts,
+  wallet-entitlements.ts, ApiCenter, Home, WalletRecharge, CreditUsage, and current synthetic tests
+- confirmed jobs, media, projects/canvas/create, and playground use ControlOwnerScope/resolveCurrentOwnerScope
+- confirmed at G14aa time that auth-account API-center routes depended on buildControlScopeQuery()
+  and api.ts hardcoded accountOwnerType=user/accountOwnerId=getCurrentActorId for that builder
+- confirmed at G14aa time that toolbox write routes depended on buildControlMediaScope(actorId)
+  and api.ts hardcoded accountOwnerType=user/accountOwnerId=actorId for that body scope
+- confirmed wallet-payment is different: exported wallet APIs take explicit ownerType/ownerId,
+  map platform to accountOwnerType=system, and page callers use wallet-entitlements to provide owner scope
+- confirmed api.ts remains compatibility barrel and service wiring surface;
+  at G14aa time it still owned the legacy user-only scope builders for auth-account/toolbox
+- next owner decision:
+  G14ab should migrate API-center scope first after focused tests,
+  then toolbox can be a later owner; wallet-payment has no default runtime migration owner
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368, no branch-protection mutation
+- validation passed: required docs read, dirty worktree scan,
+  frontend owner-scope static inventory via git grep and file reads,
+  docs whitespace scan, git diff --check clean except LF/CRLF warnings
+
+DONE G14ab frontend-owner-scope-auth-account-api-center-wave-1
+- completed 2026-05-07 10:47 +08
+- added focused synthetic tests before moving API-center scope construction
+- migrated only auth-account/API-center query construction from api.ts user-only buildControlScopeQuery
+  to resolver-backed owner scope via createAuthAccountService deps
+- covered default personal API-center query paths for getApiCenterConfig and updateApiCenterDefaults
+- covered organization API-center query paths through ControlOwnerScope/resolveCurrentOwnerScope
+  for saveApiCenterVendorApiKey, testApiCenterVendorConnection, and updateApiVendorModel
+- kept api.ts compatibility exports stable and covered the five API-center facade names
+- removed api.ts global buildControlScopeQuery because auth-account no longer consumes it
+- kept toolbox, wallet-payment, jobs/media/projects/playground, polling/transport/DB,
+  backend Auth, password/avatar/wallet entitlement rules, cleanup/delete files,
+  route path, status code, response shape, request body shape, required checks,
+  and branch protection unchanged
+- validation passed:
+  targeted API-center/auth-account and api compatibility tests 12/12,
+  full frontend unit 100/100, frontend lint, frontend build,
+  frontend legacy dependency verifier exit 0 with blockers 0 and advisory warnings,
+  git grep confirmed api.ts no longer owns buildControlScopeQuery
+
+DONE G14ac frontend-owner-scope-toolbox-wave-1
+- completed 2026-05-07 10:57 +08
+- added focused synthetic tests before moving toolbox scope body construction
+- first targeted run failed as expected on old buildControlMediaScope/factory deps
+- migrated only toolbox scope body construction from api.ts user-only buildControlMediaScope(actorId)
+  to resolver-backed owner scope via createToolboxService deps
+- covered default personal toolbox body path for translateText
+- covered organization toolbox body paths through ControlOwnerScope/resolveCurrentOwnerScope
+  for reverseVideoPrompt and runToolboxCapability routes
+- covered generateStoryboardGrid25 body path and stable request body/idempotency shape
+- kept api.ts compatibility exports stable and covered translateText,
+  generateStoryboardGrid25, reverseVideoPrompt, and runToolboxCapability facade names
+- removed api.ts global buildControlMediaScope because toolbox no longer consumes it
+- kept G14ab API-center resolver-backed query and wallet-payment explicit owner contract stable
+- kept jobs/media/projects/playground, polling/transport/DB, backend Auth,
+  password/avatar/wallet entitlement rules, cleanup/delete files, route path,
+  status code, response shape, request body shape, required checks,
+  and branch protection unchanged
+- validation passed:
+  targeted toolbox/api compatibility tests 10/10,
+  full frontend unit 100/100, frontend lint, frontend build,
+  frontend legacy dependency verifier exit 0 with blockers 0 and advisory warnings,
+  git grep confirmed api.ts no longer owns buildControlMediaScope
+
+DONE G14ad frontend-owner-scope-closeout-inventory
+- completed 2026-05-07 11:03 +08
+- docs/handoff inventory only; no runtime module, import, route, status, response,
+  frontend export, polling, transport, DB, backend Auth, cleanup, or branch protection changed
+- inventoried api.ts wiring, control-owner-scope.ts, auth-account.ts, toolbox.ts,
+  wallet-payment.ts, wallet-entitlements.ts, and accountOwnerType/accountOwnerId callsites
+- confirmed api.ts wires auth-account, jobs, media, playground,
+  projects/canvas/create, and toolbox to resolveCurrentControlOwnerScope
+- confirmed api.ts no longer owns global user-only buildControlScopeQuery
+  or buildControlMediaScope
+- confirmed remaining buildControlScopeQuery/buildControlMediaScope names are local service helpers
+  in auth-account, jobs, media, playground, projects-canvas-create, and toolbox
+- confirmed those local service helpers receive ControlOwnerScope/resolveCurrentOwnerScope
+  and keep personal fallback compatibility
+- confirmed API-center keeps G14ab resolver-backed query behavior
+- confirmed toolbox keeps G14ac resolver-backed body behavior
+- confirmed wallet-payment remains an explicit ownerType/ownerId contract
+  and maps platform to accountOwnerType=system
+- confirmed wallet-entitlements/page callers still provide wallet owner requests explicitly
+- decision: no default low-risk frontend owner-scope runtime owner remains
+- optional future UI/current organization selector owner requires separate product signoff
+- optional wallet-payment contract change requires separate signed owner and tests
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368, no mutation performed
+- validation:
+  required docs read, dirty worktree scan, git grep/file-read inventory,
+  docs whitespace scan, git diff --check clean except LF/CRLF warnings
+
+DONE G14ae refactor-gap-closure-next-owner-calibration
+- completed 2026-05-07 11:12 +08
+- docs/handoff calibration only; no runtime module, import, route, status, response,
+  frontend export, polling, transport, DB, backend Auth, cleanup, or branch protection changed
+- re-read backend Auth closeout and frontend owner-scope closeout baselines
+- inventoried remaining signed-only structural lines:
+  backend Auth ClientApi type file split,
+  explicit UI/current organization selector,
+  wallet-payment contract change,
+  Playground real transport,
+  password-auth-owner
+- confirmed no default backend Auth runtime owner remains after G14z
+- confirmed no default frontend owner-scope runtime owner remains after G14ad
+- confirmed ClientApiOptions/ClientAuthenticationResult/ClientPrincipal still live in AuthHelpers.cs
+  and are referenced across endpoint modules through existing AuthHelpers/Auth types imports
+- confirmed current organization selection remains permission-context/page-local behavior,
+  not a signed product selector owner
+- confirmed wallet-payment remains explicit ownerType/ownerId contract
+- confirmed Playground remains REST chat-job/non-stream facade; no real EventSource/WebSocket/ReadableStream owner is signed
+- confirmed password fields exist in DTO/UI, but storage/hash/verification/reset remains future standalone work
+- decision:
+  no next signed runtime owner should be default without explicit user signoff
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368, no mutation performed
+- validation:
+  required docs read, dirty worktree scan, signed-owner static inventory,
+  docs whitespace scan, git diff --check clean except LF/CRLF warnings
+
+DONE G14af backend-auth-clientapi-types-file-split
+- completed 2026-05-07 11:23 +08
+- user explicitly signed backend Auth ClientApi type file split after G14ae
+- added focused ClientApi type shape/default tests before moving the types
+- moved ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal
+  from AuthHelpers.cs to Modules\Auth\ClientApiTypes.cs
+- kept type names, internal shape, constructors/properties/static factory methods,
+  ClientPrincipal.ItemKey, ClientPrincipal.ForStaticToken, and StatusCodes mapping stable
+- kept AuthHelpers facade method names stable for Program.cs and endpoint modules
+- did not move HTTP middleware control flow, endpoint imports outside AuthHelpers,
+  route/status/response/auth/permission/account-scope behavior,
+  env option names/defaults/precedence, or branch protection
+- validation:
+  pre-move AuthHelpersTests 126/126,
+  post-move AuthHelpersTests 126/126,
+  full ControlApi xUnit 242/242,
+  Release solution build 0 warnings/0 errors
+
+DONE G14ag explicit-ui-current-organization-selector
+- completed 2026-05-07 11:46 +08
+- user explicitly signed explicit UI/current organization selector after G14af
+- added focused current-organization selector synthetic tests before runtime wiring
+- added CurrentOrganizationSelection helper storage/read/apply/set behavior
+- added settings-modal current organization select for multi-organization customers
+- wired api.ts resolveCurrentControlOwnerScope to honor stored explicit organization selection
+- normalized getMe/updateMe/login/register/demo/google PermissionContext results
+  through the selected current organization without changing facade export names
+- kept API-center/toolbox resolver-backed owner scope baselines stable
+- kept wallet-payment explicit ownerType/ownerId contract unchanged
+- did not move HTTP middleware control flow, backend Auth, ProjectEndpoints,
+  Playground transport, jobs facade semantics, password auth, avatar upload,
+  wallet entitlement rules, polling/transport/DB, deleteTask behavior,
+  cleanup/delete files, required checks, or branch protection
+- validation:
+  pre-helper selector test red as expected,
+  focused selector tests 3/3,
+  api compatibility tests 5/5,
+  full frontend unit 104/104,
+  frontend lint,
+  frontend build
+
+DONE G14ah wallet-payment-contract-change
+- completed 2026-05-07 12:02 +08
+- user explicitly signed wallet-payment contract change after G14ag
+- added focused wallet-payment synthetic tests before runtime wiring
+- pre-change wallet-payment tests failed as expected on old actor-default contract
+- wired createWalletPaymentService to resolveCurrentOwnerScope
+- changed omitted getWallet/listWallets/getWalletUsageStats args to use resolver-backed owner scope
+- kept explicit ownerType/ownerId args as compatibility overrides
+- kept platform owner mapping to accountOwnerType=system
+- wired api.ts walletPaymentService to resolveCurrentControlOwnerScope
+- kept getWallet/listWallets/getWalletUsageStats exported names stable
+- changed Home, WalletRecharge, and CreditUsage wallet reads to omit explicit owner args
+- kept wallet-entitlements as visibility/recharge/filter rules, not request owner construction
+- did not change wallet entitlement rules, payment write closure, payment callback routes,
+  route path, status code, response shape, frontend exported API names,
+  polling/transport/DB, backend Auth, password auth, avatar upload,
+  settings shell, deleteTask behavior, cleanup/delete files,
+  required checks, or branch protection
+- validation:
+  pre-change wallet-payment test red as expected on old default owner behavior,
+  focused wallet-payment tests 10/10,
+  api compatibility tests 5/5,
+  full frontend unit 107/107,
+  frontend lint,
+  frontend build,
+  frontend legacy dependency verifier exit 0 with blockers 0 and existing warnings,
+  git diff --check clean except LF/CRLF warnings
+
+DONE G14ai playground-real-transport
+- completed 2026-05-07 12:25 +08
+- user explicitly signed Playground real transport after G14ah
+- added POST `/api/playground/chat` SSE endpoint over existing PlaygroundChatRequest
+- reused StartChatJobAsync, existing owner scope, auth/permission/account-scope behavior,
+  and chat-job response event shapes
+- added controlApiStreamRequest with shared Control API auth headers
+- changed streamPlaygroundChat to fetch and parse ReadableStream SSE events
+- kept runPlaygroundChatFacade as the stable non-stream chat-job facade
+- changed Playground page submit flow to use streamPlaygroundChat event handling
+  while keeping active-job polling
+- kept frontend exported API names stable
+- did not change password auth, backend Auth middleware, ProjectEndpoints,
+  jobs facade semantics, wallet-payment, API-center, toolbox, avatar upload,
+  wallet entitlement rules, DB schema, provider adapter credentials,
+  cleanup/delete files, required checks, or branch protection
+- validation:
+  focused playground/control-client/route-policy/api compatibility tests 31/31,
+  backend route/response-shape tests 100/100,
+  full frontend unit 110/110,
+  frontend lint,
+  frontend build,
+  full ControlApi xUnit 244/244,
+  Release solution build 0 warnings/0 errors,
+  git diff --check clean except LF/CRLF warnings
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368,
+  no branch-protection mutation
+- blocker: none
+- next default owner: none-await-explicit-owner-signoff
+
+DONE G14aj password-auth-owner
+- completed 2026-05-07 12:45 +08
+- user explicitly signed password-auth-owner after G14ai
+- added `users.password_hash` to canonical PostgreSQL migration
+- added internal versioned PBKDF2-SHA256 password hashing helper
+- login now requires email/password, verifies stored password_hash, and no longer seeds users on login
+- personal/enterprise registration now requires email/password and writes password_hash when missing
+- existing registrations with a password_hash must match the supplied password, preventing re-register reset
+- organization member create stores provided initial passwords, or generates a temporary password when blank
+- generated member passwords are returned only through existing onboarding.tempPassword/generatedPassword shape
+- platform admin/root emails are rejected from self-registration/member-create paths
+- demo-session remains local-only and independent of password auth
+- self-service password reset/email flow remains unimplemented and would need a future explicit owner
+- did not change DTO names, route paths, success response shapes, frontend exported API names,
+  AuthHelpers facade names, Program.cs middleware, ProjectEndpoints, Playground transport,
+  jobs facade semantics, API-center, toolbox, wallet-payment, avatar upload, wallet entitlement rules,
+  settings shell, cleanup/delete files, required checks, or branch protection
+- validation:
+  pre-helper PasswordHashing test red as expected,
+  focused password/auth response-shape tests 9/9,
+  full ControlApi xUnit 253/253,
+  Release solution build 0 warnings/0 errors,
+  targeted frontend auth/api compatibility tests 13/13,
+  git diff --check clean except LF/CRLF warnings
+- required gate/branch protection unchanged:
+  contexts `Build and static gates` and `Synthetic browser E2E advisory`,
+  source GitHub Actions app id 15368,
+  no branch-protection mutation
+- blocker: none
+- next default owner: none-await-explicit-owner-signoff
+
+NO DEFAULT signed runtime owner
+- backend Auth ClientApi type split is complete
+- explicit UI/current organization selector is complete
+- wallet-payment contract change is complete
+- Playground real transport is complete
+- password-auth-owner is complete for initial storage/hash/login verification/member temporary password
+- no default signed runtime owner remains
+- required-synthetic-e2e-stability-monitor remains conditional only
+
+FUTURE password-reset-owner
+- only if explicitly signed, design self-service password reset/email recovery separately
+- do not mix it into account profile, settings navigation, or existing member initial-password owner
 
 CONDITIONAL required-synthetic-e2e-stability-monitor
 - run only after push/PR, required check instability, or required-gate/branch-protection mutation
@@ -556,18 +887,17 @@ DONE archived advisory/preflight owners
 ### 推荐下一棒顺序
 
 ```text
-1. G14y backend-auth-error-envelope-middleware-focused-tests.
-2. Future Playground real transport only with separate signed owner and tests.
+1. No default signed runtime owner after G14aj.
+2. Self-service password reset/email recovery remains future standalone work only if explicitly signed.
 3. Do not re-check the user-confirmed `xiaolou` database-name change.
-4. password-auth-owner remains future standalone work.
-5. required-synthetic-e2e-stability-monitor only when its conditional trigger applies.
+4. required-synthetic-e2e-stability-monitor only when its conditional trigger applies.
 ```
 
 ### 下一棒提示词
 
 ```text
 当前默认下一棒：
-- `G14y backend-auth-error-envelope-middleware-focused-tests`
+- `none-await-explicit-owner-signoff`
 
 下一棒先读取：
 - 根 handoff
@@ -576,14 +906,12 @@ DONE archived advisory/preflight owners
 - docs\xiaolouai-deep-research-structured.md
 - 当前 dirty worktree
 
-G14y 只处理：
-- add focused synthetic tests for backend AuthHelpers/Program.cs error envelope and middleware response shapes
-- move or centralize error envelope/middleware response helpers only after focused tests are in place and green
-- cover public-client authentication 401 JSON envelope
-- cover client permission 403 JSON envelope and requiredPermission shape
-- cover account-scope 403 JSON envelope
-- cover platform-admin 403 JSON envelope
-- cover BadRequestError, ForbiddenError, and AccountForbidden helper shapes
+当前状态：
+- G14aj 已完成 password-auth-owner
+- no default signed runtime owner remains
+- 下一棒必须由用户显式签收具体 owner 后才能开始
+- optional signed-only owners:
+  none currently queued
 - keep AuthHelpers facade method names stable for Program.cs and endpoint modules
 - keep ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal public/internal shape stable
 - preserve route path, status code, response shape, auth/permission/account-scope behavior, exported API names, polling behavior, branch protection, and required checks
@@ -598,9 +926,21 @@ G14y 只处理：
 - keep G14v ClientApiHeaderEnvHelpers header/env split as current backend Auth baseline
 - keep G14w ClientAssertionFactory split as current backend Auth baseline
 - keep G14x ClientAuthProviderValidator split as current backend Auth baseline
-- do not move AuthHelpers facade names, endpoint imports outside AuthHelpers, ProjectEndpoints helpers, Playground transport, jobs facade semantics, password auth, avatar upload, wallet entitlement, settings shell, frontend api.ts moves, polling/transport/DB, real SSE/WS/ReadableStream, deleteTask behavior, or cleanup/delete files
+- keep G14y AuthErrorEnvelopeResponses split as current backend Auth baseline
+- keep G14z backend Auth closeout inventory/no-default-runtime-owner decision as current backend Auth baseline
+- keep G14aa frontend owner-scope remaining services inventory as current frontend planning baseline
+- keep G14ab API-center resolver-backed query behavior as current frontend API-center baseline
+- keep G14ac toolbox resolver-backed body behavior as current frontend toolbox baseline
+- keep G14ad frontend owner-scope closeout/no-default-runtime-owner decision as current frontend owner-scope baseline
+- keep G14ae no-default-signed-runtime-owner decision as current G14 closeout baseline
+- keep G14af ClientApiTypes.cs split as current backend Auth type baseline
+- keep G14ag explicit UI/current organization selector as current frontend account context baseline
+- keep G14ah wallet-payment resolver-backed default owner contract as current wallet baseline
+- keep G14ai Playground real transport as current transport baseline
+- keep G14aj password auth storage/hash/login verification/member temporary password as current password baseline
+- do not move HTTP middleware control flow, AuthHelpers facade names, endpoint imports outside AuthHelpers, ProjectEndpoints helpers, Playground transport beyond the G14ai `/api/playground/chat` SSE boundary, jobs facade semantics, API-center, toolbox, wallet-payment, password auth beyond the G14aj baseline, avatar upload, wallet entitlement rules, settings shell, frontend exported API names, polling/transport/DB outside Playground stream route, deleteTask behavior, or cleanup/delete files
 
-G14b-G14x 已完成：
+G14b-G14aj 已完成：
 - 账号资料/设置/头像/钱包额度/组织作用域操作逻辑
 - 头像入口和设置二级菜单都可进入“账号与个人资料”
 - 左下角“更多”改“设置”
@@ -632,10 +972,28 @@ G14b-G14x 已完成：
 - G14v ClientApiHeaderEnvHelpers header/env helper wave-1 已完成，并覆盖 bearer fallback、env/config aliases、provider alias、clock-skew clamp synthetic tests
 - G14w ClientAssertionFactory focused tests/helper split 已完成，并覆盖 local auth token、JWT header/payload/signature、null secret、issuer/audience、permissions、organization grants、current organization、TTL synthetic tests
 - G14x ClientAuthProviderValidator focused tests/helper split 已完成，并覆盖 invalid JWT、alg/signature、valid provider principal、subject grants、issuer/audience、exp/nbf/skew、scope/scp、required-provider、static fallback、permission filtering synthetic tests
+- G14y AuthErrorEnvelopeResponses focused tests/helper split 已完成，并覆盖 public-client 401/403、permission requiredPermission、account-scope、platform-admin、BadRequestError、ForbiddenError、AccountForbidden synthetic tests
+- G14z backend Auth boundary closeout inventory 已完成；无默认 backend Auth runtime 下一棒，ClientApi types 文件拆分仅为可选独立签收项
+- G14aa frontend owner-scope remaining services inventory 已完成；API-center/toolbox 后续 owner 已记录，wallet-payment 保持 explicit ownerType/ownerId contract
+- G14ab API-center 已迁移到 resolver-backed owner scope，并覆盖 personal/organization query 与五个稳定 facade 名称 synthetic tests
+- G14ac toolbox 已迁移到 resolver-backed owner scope，并覆盖 personal/organization body 与四个稳定 facade 名称 synthetic tests
+- G14ad frontend owner-scope closeout inventory 已完成；无默认 low-risk frontend owner-scope runtime 下一棒
+- wallet-payment 保持 explicit ownerType/ownerId contract；如要改需单独签收
+- G14ae next-owner calibration 已完成；无默认 signed runtime 下一棒，等待显式签收
+- G14af backend Auth ClientApi type file split 已完成；ClientApiOptions、ClientAuthenticationResult、ClientPrincipal 已移到 ClientApiTypes.cs，并覆盖 type shape/default synthetic tests
+- G14ag explicit UI/current organization selector 已完成；设置面板多组织下可显式选择当前组织，api.ts resolver-backed services 会读取该选择
+- G14ah wallet-payment contract change 已完成；wallet-payment 默认读取 resolver-backed owner scope，显式 ownerType/ownerId 参数保留兼容覆盖
+- G14ai Playground real transport 已完成；streamPlaygroundChat 走 `/api/playground/chat` SSE/ReadableStream，runPlaygroundChatFacade 保持非流式 chat-job facade
+- G14aj password-auth-owner 已完成；users.password_hash、PBKDF2-SHA256 hash、登录校验、注册写入、成员临时密码均已落地
 
 Password:
-- 当前只记录未持久化/未校验事实
-- 存储、哈希、验证、重置走 future password-auth-owner
+- users.password_hash 已加入 canonical migration
+- PasswordHashing 使用 versioned PBKDF2-SHA256
+- login/admin-login 要求 email/password 并校验 hash；登录不再 seed 用户
+- register personal/enterprise 写入或验证已有 hash；不能用重新注册重置密码
+- organization member create 可存储初始密码，空密码会生成 onboarding.tempPassword
+- demo-session 不走密码
+- self-service reset/email recovery 未实现；如需产品化重置必须另行签收
 
 Keep stable unless current owner signs the boundary:
 - DTO
@@ -720,4 +1078,150 @@ Select-String -Path .\XIAOLOU_REFACTOR_HANDOFF.md,.\docs\xiaolouai-finalization-
 
 # git 空白检查
 git diff --check
+```
+
+## 2026-05-07 G14ak-G14am follow-up closeout
+
+```text
+Owner:
+- G14ak current-organization-stale-selection-cleanup
+- G14al password-auth-followup-bootstrap-change-reset
+- G14am password-auth-db-backed-integration-layer
+
+User signoff:
+- User requested current organization stale local selection cleanup.
+- User requested password-auth-owner follow-up.
+- User requested DB-backed integration coverage for the password flow.
+
+Completed:
+- Current organization local selection now validates stored localStorage choice
+  against the latest PermissionContext for that actor.
+- Malformed stored current organization selections are removed.
+- Stale organization selections are removed when the latest context no longer
+  grants that organization.
+- Stored owner scope now uses the latest organization role instead of stale
+  local data.
+- Password follow-up added local-only platform password bootstrap for
+  reserved admin actors.
+- Password follow-up added authenticated self password change.
+- Password follow-up added platform-admin password reset for existing users.
+- Frontend API facade exports were extended for bootstrap/change/admin-reset
+  without removing compatibility wrappers.
+- DB-backed password integration tests were added behind the explicit
+  XIAOLOU_TEST_POSTGRES_CONNECTION_STRING opt-in.
+
+Stable boundaries:
+- Route paths/status/success response shape stay stable except for the newly
+  signed password routes.
+- AuthHelpers facade names and Program.cs middleware control flow stay stable.
+- ClientApiOptions, ClientAuthenticationResult, and ClientPrincipal shape stay
+  stable.
+- api.ts compatibility wrappers remain.
+- No branch-protection, required check, workflow, provider credential,
+  payment material, real object storage, production dump/snapshot, or real DB
+  fixture was read or changed.
+
+Validation:
+- current-organization focused red pre-check failed as expected before helper
+  implementation.
+- current-organization focused tests passed 5/5 after implementation.
+- focused backend auth/response/password tests passed 151/151.
+- focused frontend current-organization/auth/API compatibility tests passed
+  19/19.
+- full frontend unit passed 113/113.
+- full backend xUnit passed 262/262.
+- frontend lint passed.
+- frontend build passed.
+- backend Release solution build passed with 0 warnings and 0 errors.
+
+DB-backed test note:
+- The new integration test is guarded by
+  XIAOLOU_TEST_POSTGRES_CONNECTION_STRING.
+- It refuses database names that do not include test or synthetic.
+- Without that env var, local validation does not touch a database.
+
+Blocker:
+- none for G14ak-G14am.
+
+Next default:
+- none-await-explicit-owner-signoff.
+
+Optional future owner:
+- password-recovery-audit-owner for self-service recovery, reset tokens,
+  rate limiting, audit log, and operator documentation.
+```
+
+## 2026-05-07 G14an password-recovery-audit-owner
+
+```text
+completed: 2026-05-07
+owner: G14an password-recovery-audit-owner
+scope: signed password recovery token/audit/rate-limit foundation
+
+password storage note:
+- There is no plaintext password column by design.
+- The column is users.password_hash.
+- If an existing database does not show users.password_hash, the canonical
+  PostgreSQL migration has not been applied to that database.
+
+changed:
+- control-plane-dotnet\db\migrations\20260501_windows_native_core.sql
+- control-plane-dotnet\src\XiaoLou.Domain\ControlPlaneContracts.cs
+- control-plane-dotnet\src\XiaoLou.ControlApi\Modules\Accounts\AccountsAuthEndpoints.cs
+- control-plane-dotnet\src\XiaoLou.ControlApi\Modules\Auth\ClientRoutePolicy.cs
+- control-plane-dotnet\src\XiaoLou.Infrastructure.Postgres\PasswordHashing.cs
+- control-plane-dotnet\src\XiaoLou.Infrastructure.Postgres\PostgresIdentityConfigStore.cs
+- control-plane-dotnet\tests\XiaoLou.ControlApi.Tests\Modules\Auth\AuthHelpersTests.cs
+- control-plane-dotnet\tests\XiaoLou.ControlApi.Tests\Modules\Auth\PasswordAuthPostgresIntegrationTests.cs
+- control-plane-dotnet\tests\XiaoLou.ControlApi.Tests\Modules\BackendAdvisory\BackendAdvisoryEndpointResponseShapeTests.cs
+- XIAOLOU-main\src\lib\api.ts
+- XIAOLOU-main\src\lib\api\auth-account.ts
+- XIAOLOU-main\src\lib\api\__tests__\auth-account.test.ts
+- XIAOLOU-main\src\lib\api\__tests__\api-compatibility-wrappers.test.ts
+
+result:
+- Added password_reset_tokens table.
+- Reset tokens are stored only as token_hash.
+- Reset token plaintext is generated only for delivery.
+- External reset-request responses do not echo resetToken.
+- Local loopback reset-request responses may echo resetToken for dev/test
+  while no email adapter exists.
+- Reset complete consumes exactly one issued, unexpired token.
+- Successful reset revokes other issued tokens for the actor.
+- Added password_auth_audit_events table.
+- Audit rows store event_type, outcome, actor_id, email_hash, and jsonb data.
+- Added simple reset-request rate limit: 3 requests per actor per 15 minutes.
+- Added frontend facade exports requestPasswordReset and completePasswordReset.
+
+not changed:
+- No plaintext password storage.
+- No real email/provider credential/operator material.
+- No production dump/snapshot, real DB fixture, or real object storage.
+- No branch protection, required check, or workflow mutation.
+- Existing login/register/change/admin-reset exported names remain stable.
+
+validation:
+- focused backend auth/response/password tests passed 156/156.
+- focused frontend auth/API compatibility tests passed 14/14.
+- full backend xUnit passed 267/267.
+- full frontend unit passed 113/113.
+- frontend lint passed.
+- frontend build passed.
+- backend Release solution build passed with 0 warnings and 0 errors.
+
+DB-backed note:
+- PasswordAuthPostgresIntegrationTests still require explicit
+  XIAOLOU_TEST_POSTGRES_CONNECTION_STRING.
+- The test refuses non-test/non-synthetic database names.
+- Without that env var, local validation does not touch a database.
+
+blocker:
+- none for G14an.
+
+next default:
+- none-await-explicit-owner-signoff.
+
+optional future owners:
+- password-email-delivery-owner for real mail adapter and templates.
+- password-auth-admin-ui-owner for management UI.
 ```

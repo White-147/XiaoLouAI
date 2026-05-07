@@ -63,8 +63,19 @@ internal static class AccountsAuthEndpoints
             PostgresIdentityConfigStore identity,
             CancellationToken ct) =>
         {
-            var permissionContext = await identity.LoginWithEmailAsync(request, "personal", ct);
-            return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
+            try
+            {
+                var permissionContext = await identity.LoginWithEmailAsync(request, "personal", ct);
+                return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
         });
 
         endpoints.MapPost("/api/auth/admin/login", async (
@@ -73,8 +84,130 @@ internal static class AccountsAuthEndpoints
             PostgresIdentityConfigStore identity,
             CancellationToken ct) =>
         {
-            var permissionContext = await identity.LoginWithEmailAsync(request, "ops_admin", ct);
-            return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
+            try
+            {
+                var permissionContext = await identity.LoginWithEmailAsync(request, "ops_admin", ct);
+                return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
+        });
+
+        endpoints.MapPost("/api/auth/password/bootstrap-admin", async (
+            BootstrapPlatformPasswordRequest request,
+            HttpContext httpContext,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (!IsLocalDemoSessionRequest(httpContext))
+            {
+                return AuthError(
+                    "AUTH_LOCAL_OPERATOR_REQUIRED",
+                    "platform password bootstrap is available only from local loopback access",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            try
+            {
+                return Results.Ok(await identity.BootstrapPlatformPasswordAsync(request, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
+        });
+
+        endpoints.MapPost("/api/auth/password/change", async (
+            ChangePasswordRequest request,
+            HttpContext httpContext,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await identity.ChangePasswordAsync(ResolveActorId(httpContext), request, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
+        });
+
+        endpoints.MapPost("/api/auth/password/admin-reset", async (
+            AdminResetPasswordRequest request,
+            HttpContext httpContext,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (await AuthorizePlatformAdminAsync(httpContext, identity, ct) is { } denied)
+            {
+                return denied;
+            }
+
+            try
+            {
+                return Results.Ok(await identity.AdminResetPasswordAsync(request, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
+        });
+
+        endpoints.MapPost("/api/auth/password/reset/request", async (
+            RequestPasswordResetRequest request,
+            HttpContext httpContext,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await identity.RequestPasswordResetAsync(
+                    request,
+                    CanEchoLocalPasswordResetToken(httpContext),
+                    ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        endpoints.MapPost("/api/auth/password/reset/complete", async (
+            CompletePasswordResetRequest request,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(await identity.CompletePasswordResetAsync(request, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
         });
 
         endpoints.MapPost("/api/auth/demo-session", async (
@@ -119,8 +252,19 @@ internal static class AccountsAuthEndpoints
             PostgresIdentityConfigStore identity,
             CancellationToken ct) =>
         {
-            var registration = await identity.RegisterPersonalAsync(request, ct);
-            return Results.Json(AttachSessionCredentials(registration, clientApi.Value), statusCode: StatusCodes.Status201Created);
+            try
+            {
+                var registration = await identity.RegisterPersonalAsync(request, ct);
+                return Results.Json(AttachSessionCredentials(registration, clientApi.Value), statusCode: StatusCodes.Status201Created);
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
         });
 
         endpoints.MapPost("/api/auth/register/enterprise-admin", async (
@@ -129,8 +273,19 @@ internal static class AccountsAuthEndpoints
             PostgresIdentityConfigStore identity,
             CancellationToken ct) =>
         {
-            var registration = await identity.RegisterEnterpriseAdminAsync(request, ct);
-            return Results.Json(AttachSessionCredentials(registration, clientApi.Value), statusCode: StatusCodes.Status201Created);
+            try
+            {
+                var registration = await identity.RegisterEnterpriseAdminAsync(request, ct);
+                return Results.Json(AttachSessionCredentials(registration, clientApi.Value), statusCode: StatusCodes.Status201Created);
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
         });
 
         endpoints.MapGet("/api/me", async (
@@ -158,7 +313,14 @@ internal static class AccountsAuthEndpoints
                 return denied;
             }
 
-            return Results.Ok(await identity.UpdateProfileAsync(actorId, request, ct));
+            try
+            {
+                return Results.Ok(await identity.UpdateProfileAsync(actorId, request, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
         });
 
         endpoints.MapGet("/api/organizations/{organizationId}/members", async (
@@ -200,7 +362,18 @@ internal static class AccountsAuthEndpoints
                 return denied;
             }
 
-            return Results.Json(await identity.CreateOrganizationMemberAsync(organizationId, request, ct), statusCode: StatusCodes.Status201Created);
+            try
+            {
+                return Results.Json(await identity.CreateOrganizationMemberAsync(organizationId, request, ct), statusCode: StatusCodes.Status201Created);
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
         });
 
         endpoints.MapGet("/api/api-center", async (
@@ -330,6 +503,18 @@ internal static class AccountsAuthEndpoints
         };
     }
 
+    private static IResult AuthError(string code, string message, int statusCode)
+    {
+        return Results.Json(new
+        {
+            error = new
+            {
+                code,
+                message,
+            },
+        }, statusCode: statusCode);
+    }
+
     private static Dictionary<string, object?> AttachSessionCredentials(
         Dictionary<string, object?> registration,
         ClientApiOptions options)
@@ -364,6 +549,14 @@ internal static class AccountsAuthEndpoints
 
         return IsLocalOriginHeader(context, "Origin")
             && IsLocalOriginHeader(context, "Referer");
+    }
+
+    private static bool CanEchoLocalPasswordResetToken(HttpContext context)
+    {
+        var remoteIp = context.Connection.RemoteIpAddress;
+        return remoteIp is not null
+            && IPAddress.IsLoopback(remoteIp)
+            && IsLocalDemoSessionRequest(context);
     }
 
     private static bool IsLocalOriginHeader(HttpContext context, string headerName)

@@ -4,6 +4,7 @@ import type {
   Task,
   ToolboxCapability,
 } from "../api";
+import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -13,7 +14,7 @@ type ApiRequestErrorOptions = {
 };
 
 type ControlMediaRequestScope = {
-  accountOwnerType: "user";
+  accountOwnerType: NonNullable<ControlOwnerScope["accountOwnerType"]>;
   accountOwnerId: string;
   regionCode: "CN";
   currency: "CNY";
@@ -41,7 +42,7 @@ type ToolboxCapabilityRunType =
 export type ToolboxServiceDeps = {
   controlApiJsonRequest: ControlApiJsonRequest;
   getCurrentActorId: () => string;
-  buildControlMediaScope: (actorId: string) => ControlMediaRequestScope;
+  resolveCurrentOwnerScope: () => ControlOwnerScope;
   createClientId: (prefix: string) => string;
   createApiRequestError: (message: string, options?: ApiRequestErrorOptions) => Error;
   readString: (record: Record<string, unknown>, ...keys: string[]) => string | null;
@@ -50,10 +51,22 @@ export type ToolboxServiceDeps = {
   getFallbackToolboxCapabilities: () => ToolboxCapability[];
 };
 
+function buildControlMediaScope(
+  actorId: string,
+  ownerScope: ControlOwnerScope,
+): ControlMediaRequestScope {
+  return {
+    accountOwnerType: ownerScope.accountOwnerType ?? "user",
+    accountOwnerId: ownerScope.accountOwnerId ?? actorId,
+    regionCode: "CN",
+    currency: "CNY",
+  };
+}
+
 export function createToolboxService({
   controlApiJsonRequest,
   getCurrentActorId,
-  buildControlMediaScope,
+  resolveCurrentOwnerScope,
   createClientId,
   createApiRequestError,
   readString,
@@ -66,10 +79,11 @@ export function createToolboxService({
     input: Record<string, unknown>,
   ): Promise<ToolboxRunResponse> => {
     const actorId = getCurrentActorId();
+    const ownerScope = resolveCurrentOwnerScope();
     return controlApiJsonRequest<ToolboxRunResponse>(path, {
       method: "POST",
       body: JSON.stringify({
-        ...buildControlMediaScope(actorId),
+        ...buildControlMediaScope(actorId, ownerScope),
         ...input,
       }),
     });

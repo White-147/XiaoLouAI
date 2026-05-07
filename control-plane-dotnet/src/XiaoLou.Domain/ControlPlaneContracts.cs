@@ -198,6 +198,35 @@ public sealed record LoginRequest
     public string? Password { get; init; }
 }
 
+public sealed record BootstrapPlatformPasswordRequest
+{
+    public string? Email { get; init; }
+    public string? Password { get; init; }
+}
+
+public sealed record ChangePasswordRequest
+{
+    public string? CurrentPassword { get; init; }
+    public string? NewPassword { get; init; }
+}
+
+public sealed record AdminResetPasswordRequest
+{
+    public string? Email { get; init; }
+    public string? NewPassword { get; init; }
+}
+
+public sealed record RequestPasswordResetRequest
+{
+    public string? Email { get; init; }
+}
+
+public sealed record CompletePasswordResetRequest
+{
+    public string? ResetToken { get; init; }
+    public string? NewPassword { get; init; }
+}
+
 public sealed record RegisterPersonalRequest
 {
     public string? DisplayName { get; init; }
@@ -279,6 +308,8 @@ public sealed record UpdateMeRequest
 {
     public string? DisplayName { get; init; }
     public string? Avatar { get; init; }
+    public string? Phone { get; init; }
+    public string? DefaultOrganizationId { get; init; }
 }
 
 public sealed record CreateOrganizationMemberRequest

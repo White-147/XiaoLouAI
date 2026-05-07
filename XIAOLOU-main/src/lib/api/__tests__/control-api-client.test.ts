@@ -16,6 +16,7 @@ import {
   ApiRequestError,
   assertNoLegacyMutatingRequest,
   controlApiJsonRequest,
+  controlApiStreamRequest,
   request,
 } from "../control-api-client";
 
@@ -97,6 +98,27 @@ describe("control-api-client", () => {
 
     const requestInfo = getLastRequest(fetchMock);
     expect(requestInfo.headers.has("Content-Type")).toBe(false);
+  });
+
+  it("uses the shared Control API auth headers for stream requests", async () => {
+    sessionState.token = "synthetic-user-token";
+    sessionState.clientAssertion = "synthetic-client-assertion";
+    const response = createResponse("");
+    fetchMock.mockResolvedValueOnce(response);
+
+    await expect(
+      controlApiStreamRequest("/api/playground/chat", {
+        method: "POST",
+        body: JSON.stringify({ synthetic: true }),
+      }),
+    ).resolves.toBe(response);
+
+    const requestInfo = getLastRequest(fetchMock);
+    expect(requestInfo.url).toBe("/api/playground/chat");
+    expect(requestInfo.headers.get("X-Actor-Id")).toBe("synthetic-actor");
+    expect(requestInfo.headers.get("Authorization")).toBe("Bearer synthetic-client-assertion");
+    expect(requestInfo.headers.get("Content-Type")).toBe("application/json");
+    expect(requestInfo.headers.get("Accept")).toBe("text/event-stream");
   });
 
   it("preserves the envelope request helper behavior", async () => {

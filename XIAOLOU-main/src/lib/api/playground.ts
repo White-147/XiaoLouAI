@@ -12,6 +12,7 @@ import type {
 import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+type ControlApiStreamRequest = (path: string, init?: RequestInit) => Promise<Response>;
 
 type ApiRequestErrorOptions = {
   code?: string;
@@ -43,6 +44,7 @@ const WINDOWS_NATIVE_PLAYGROUND_MODELS: PlaygroundModel[] = [
 
 export type PlaygroundServiceDeps = {
   controlApiJsonRequest: ControlApiJsonRequest;
+  controlApiStreamRequest: ControlApiStreamRequest;
   getCurrentActorId: () => string;
   resolveCurrentOwnerScope: () => ControlOwnerScope;
   createApiRequestError: (message: string, options?: ApiRequestErrorOptions) => Error;
@@ -76,6 +78,7 @@ function buildControlScopeQuery(actorId: string, ownerScope: ControlOwnerScope) 
 
 export function createPlaygroundService({
   controlApiJsonRequest,
+  controlApiStreamRequest,
   getCurrentActorId,
   resolveCurrentOwnerScope,
   createApiRequestError,
@@ -172,6 +175,178 @@ export function createPlaygroundService({
       memories,
       job: result.job,
     });
+  };
+
+  const parseStreamEvent = (block: string): PlaygroundChatEvent | null => {
+    const lines = block.split(/\r?\n/);
+    let eventName = "";
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (!line || line.startsWith(":")) continue;
+      if (line.startsWith("event:")) {
+        eventName = line.slice("event:".length).trim();
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        const value = line.slice("data:".length);
+        dataLines.push(value.startsWith(" ") ? value.slice(1) : value);
+      }
+    }
+
+    const data = dataLines.join("\n").trim();
+    if (!data || data === "[DONE]") {
+      return null;
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      throw createApiRequestError("Control API returned an invalid Playground stream event", {
+        code: "PLAYGROUND_STREAM_INVALID_EVENT",
+        status: 502,
+      });
+    }
+
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return null;
+    }
+
+    const record = payload as Record<string, unknown>;
+    const type = typeof record.type === "string" ? record.type : eventName;
+    if (!type) {
+      return null;
+    }
+
+    return {
+      ...record,
+      type,
+    } as PlaygroundChatEvent;
+  };
+
+  const consumeStreamEvents = async (
+    body: ReadableStream<Uint8Array>,
+    onEvent: (event: PlaygroundChatEvent) => void,
+  ) => {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        for (;;) {
+          const separator = buffer.search(/\r?\n\r?\n/);
+          if (separator === -1) break;
+          const block = buffer.slice(0, separator);
+          buffer = buffer.slice(buffer[separator] === "\r" ? separator + 4 : separator + 2);
+          const event = parseStreamEvent(block);
+          if (!event) continue;
+          onEvent(event);
+          if (event.type === "error") {
+            throw createApiRequestError(event.message, {
+              code: event.code,
+              status: 500,
+            });
+          }
+        }
+      }
+
+      buffer += decoder.decode();
+      const event = parseStreamEvent(buffer);
+      if (!event) return;
+      onEvent(event);
+      if (event.type === "error") {
+        throw createApiRequestError(event.message, {
+          code: event.code,
+          status: 500,
+        });
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  };
+
+  const throwStreamResponseError = async (response: Response): Promise<never> => {
+    const text = await response.text().catch(() => "");
+    let payload: { error?: { code?: string; message?: string } | string; title?: string; detail?: string } | null = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        // Non-JSON stream failures still carry the HTTP status below.
+      }
+    }
+    const error = payload?.error;
+    const errorMessage = typeof error === "string" ? error : error?.message;
+    const errorCode = typeof error === "string" ? undefined : error?.code;
+
+    throw createApiRequestError(
+      errorMessage ||
+        payload?.detail ||
+        payload?.title ||
+        text ||
+        "Control API Playground stream request failed",
+      {
+        code: errorCode,
+        status: response.status || 500,
+      },
+    );
+  };
+
+  const streamPlaygroundChat = async (
+    input: PlaygroundChatInput,
+    onEvent: (event: PlaygroundChatEvent) => void,
+    signal?: AbortSignal,
+  ) => {
+    if (signal?.aborted) {
+      throw createApiRequestError("Playground chat request was aborted", {
+        code: "PLAYGROUND_CHAT_ABORTED",
+        status: 499,
+      });
+    }
+
+    if (!hasSessionCredentials()) {
+      throw authRequiredError();
+    }
+
+    const message = input.message.trim();
+    if (!message) {
+      throw createApiRequestError("Playground message is required", {
+        code: "PLAYGROUND_MESSAGE_REQUIRED",
+        status: 400,
+      });
+    }
+
+    const model = input.model?.trim() || playgroundDefaultModel();
+    const actorId = getCurrentActorId();
+    const ownerScope = resolveCurrentOwnerScope();
+    const response = await controlApiStreamRequest("/api/playground/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        ...buildControlMediaScope(actorId, ownerScope),
+        conversationId: input.conversationId,
+        message,
+        model,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      await throwStreamResponseError(response);
+    }
+    if (!response.body) {
+      throw createApiRequestError("Control API Playground stream response was empty", {
+        code: "PLAYGROUND_STREAM_EMPTY_RESPONSE",
+        status: response.status || 500,
+      });
+    }
+
+    await consumeStreamEvents(response.body, onEvent);
   };
 
   return {
@@ -394,6 +569,6 @@ export function createPlaygroundService({
 
     runPlaygroundChatFacade,
 
-    streamPlaygroundChat: runPlaygroundChatFacade,
+    streamPlaygroundChat,
   };
 }

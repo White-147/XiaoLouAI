@@ -44,7 +44,6 @@ import { cn } from "../lib/utils";
 import {
   filterWalletsForEntitlement,
   resolveWalletEntitlement,
-  resolveWalletListRequest,
 } from "../lib/wallet-entitlements";
 
 const RUNNABLE_TOOLBOX_CODES = [
@@ -531,15 +530,20 @@ export default function Home() {
               setDashboardIssues((prev) => ({ ...prev, projects: !suppressIssue }));
             });
           });
-    const walletRequest = useSignedOutFallback ? null : resolveWalletListRequest(permissionContext);
-    const walletsPromise = useSignedOutFallback || !walletRequest
+    const walletLoadEntitlement = useSignedOutFallback
+      ? null
+      : resolveWalletEntitlement(permissionContext);
+    const shouldLoadWallets = Boolean(
+      walletLoadEntitlement?.ownerType && walletLoadEntitlement.ownerId,
+    );
+    const walletsPromise = useSignedOutFallback || !shouldLoadWallets
       ? Promise.resolve(
           commitIfCurrent(() => {
             setWallets([]);
             setDashboardIssues((prev) => ({ ...prev, wallets: false }));
           }),
         )
-      : listWallets(walletRequest.ownerType, walletRequest.ownerId)
+      : listWallets()
           .then((value) => {
             commitIfCurrent(() => {
               setWallets(value.items);

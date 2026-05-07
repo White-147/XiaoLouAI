@@ -5,6 +5,7 @@ import type {
   WalletLedgerEntry,
   WalletOwnerType,
 } from "../../api";
+import type { ControlOwnerScope } from "../../control-owner-scope";
 import { createWalletPaymentService } from "../wallet-payment";
 import {
   SYNTHETIC_ACTOR_ID,
@@ -86,21 +87,35 @@ function createSyntheticUsageStats(overrides: Partial<CreditUsageStats> = {}): C
   };
 }
 
+function createOwnerScope(overrides: Partial<ControlOwnerScope> = {}): ControlOwnerScope {
+  return {
+    accountOwnerType: "user",
+    accountOwnerId: SYNTHETIC_ACTOR_ID,
+    organizationId: null,
+    organizationRole: null,
+    source: "personal-default",
+    ...overrides,
+  };
+}
+
 function createServiceHarness({
   actorId = SYNTHETIC_ACTOR_ID,
   handler = () => createSyntheticWallet(),
   localLoopback = false,
   superAdminDemoActorId = "synthetic-super-admin",
+  ownerScope = createOwnerScope({ accountOwnerId: actorId }),
 }: {
   actorId?: string;
   handler?: RequestHandler;
   localLoopback?: boolean;
   superAdminDemoActorId?: string;
+  ownerScope?: ControlOwnerScope;
 } = {}) {
   const calls: RequestCall[] = [];
   const emptyWalletCalls: Array<{ ownerType: WalletOwnerType; ownerId: string }> = [];
   const localLoopbackChecks: string[] = [];
   const normalizedWallets: Array<{ wallet: Wallet; actorId: string }> = [];
+  const ownerScopeCalls: ControlOwnerScope[] = [];
   const retiredFlows: string[] = [];
 
   const deps: WalletPaymentServiceDeps = {
@@ -109,6 +124,10 @@ function createServiceHarness({
       return (await handler(path, init)) as T;
     },
     getCurrentActorId: () => actorId,
+    resolveCurrentOwnerScope: () => {
+      ownerScopeCalls.push(ownerScope);
+      return ownerScope;
+    },
     isRouteNotFoundError: (error) => error === SYNTHETIC_NOT_FOUND,
     isLocalLoopbackAccess: () => {
       localLoopbackChecks.push("checked");
@@ -147,12 +166,123 @@ function createServiceHarness({
     emptyWalletCalls,
     localLoopbackChecks,
     normalizedWallets,
+    ownerScopeCalls,
     retiredFlows,
     service: createWalletPaymentService(deps),
   };
 }
 
 describe("createWalletPaymentService", () => {
+  it("uses resolver-backed owner scope when list wallet owner is omitted", async () => {
+    const ownerScope = createOwnerScope({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
+      organizationId: "synthetic-organization",
+      organizationRole: "enterprise_admin",
+      source: "current-organization",
+    });
+    const wallet = createSyntheticWallet({
+      id: "synthetic-organization-wallet",
+      ownerType: "organization",
+      walletOwnerType: "organization",
+      ownerId: "synthetic-organization",
+    });
+    const { calls, normalizedWallets, ownerScopeCalls, service } = createServiceHarness({
+      ownerScope,
+      handler: () => ({
+        items: [wallet],
+      }),
+    });
+
+    await expect(service.listWallets()).resolves.toEqual({
+      items: [
+        {
+          ...wallet,
+          displayName: "Synthetic Wallet normalized for synthetic-organization",
+        },
+      ],
+    });
+
+    expect(calls).toEqual([
+      {
+        path: "/api/wallets?accountOwnerType=organization&accountOwnerId=synthetic-organization",
+        init: undefined,
+      },
+    ]);
+    expect(normalizedWallets).toEqual([
+      {
+        wallet,
+        actorId: "synthetic-organization",
+      },
+    ]);
+    expect(ownerScopeCalls).toEqual([ownerScope]);
+  });
+
+  it("derives organization usage stats from resolver-backed owner scope when args are omitted", async () => {
+    const ownerScope = createOwnerScope({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
+      organizationId: "synthetic-organization",
+      organizationRole: "enterprise_member",
+      source: "current-organization",
+    });
+    const stats = createSyntheticUsageStats({
+      mode: "organization",
+      subject: {
+        type: "organization",
+        id: "synthetic-organization",
+        label: "Organization synthetic-organization",
+        detail: "synthetic fixture",
+      },
+    });
+    const { calls, ownerScopeCalls, service } = createServiceHarness({
+      ownerScope,
+      handler: () => stats,
+    });
+
+    await expect(service.getWalletUsageStats()).resolves.toBe(stats);
+    expect(calls).toEqual([
+      {
+        path: "/api/wallet/usage-stats?accountOwnerType=organization&accountOwnerId=synthetic-organization&mode=organization",
+        init: undefined,
+      },
+    ]);
+    expect(ownerScopeCalls).toEqual([ownerScope]);
+  });
+
+  it("keeps explicit owner arguments as a compatibility override", async () => {
+    const ownerScope = createOwnerScope({
+      accountOwnerType: "organization",
+      accountOwnerId: "synthetic-organization",
+      organizationId: "synthetic-organization",
+      organizationRole: "enterprise_admin",
+      source: "current-organization",
+    });
+    const wallet = createSyntheticWallet({
+      id: "synthetic-platform-wallet",
+      ownerType: "platform",
+      walletOwnerType: "platform",
+      ownerId: "synthetic-platform",
+    });
+    const { calls, ownerScopeCalls, service } = createServiceHarness({
+      ownerScope,
+      handler: () => wallet,
+    });
+
+    await expect(service.getWallet("platform", "synthetic-platform")).resolves.toMatchObject({
+      id: "synthetic-platform-wallet",
+      displayName: "Synthetic Wallet normalized for synthetic-platform",
+    });
+
+    expect(calls).toEqual([
+      {
+        path: "/api/wallet?accountOwnerType=system&accountOwnerId=synthetic-platform",
+        init: undefined,
+      },
+    ]);
+    expect(ownerScopeCalls).toEqual([]);
+  });
+
   it("reads and normalizes a wallet through the stable Control API query", async () => {
     const wallet = createSyntheticWallet({
       id: "synthetic-organization-wallet",

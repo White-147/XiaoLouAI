@@ -152,3 +152,20 @@ export async function controlApiJsonRequest<T>(path: string, init?: RequestInit)
 
   return payload as T;
 }
+
+export async function controlApiStreamRequest(path: string, init?: RequestInit): Promise<Response> {
+  assertNoLegacyMutatingRequest(path, init);
+
+  const isFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const headers = buildRequestHeaders(path, init, {
+    allowBodyContentType: Boolean(init?.body && !isFormDataBody),
+  });
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "text/event-stream");
+  }
+
+  return fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
+}

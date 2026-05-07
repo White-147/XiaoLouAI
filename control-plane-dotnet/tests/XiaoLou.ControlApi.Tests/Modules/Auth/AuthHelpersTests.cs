@@ -9,6 +9,7 @@ using Xunit;
 
 namespace XiaoLou.ControlApi.Tests.Modules.Auth;
 
+[Collection("ClientAuthEnvironment")]
 public sealed class AuthHelpersTests
 {
     [Theory]
@@ -75,6 +76,62 @@ public sealed class AuthHelpersTests
         Assert.Null(AuthHelpers.ReadJsonString(root, "empty"));
         Assert.Null(AuthHelpers.ReadJsonString(root, "nil"));
         Assert.Null(AuthHelpers.ReadJsonString(root, "missing"));
+    }
+
+    [Fact]
+    public void ClientApiOptions_DefaultShapeRemainsStable()
+    {
+        var options = new ClientApiOptions();
+
+        Assert.Null(options.Token);
+        Assert.Equal("X-XiaoLou-Client-Token", options.TokenHeader);
+        Assert.Null(options.AuthProvider);
+        Assert.Null(options.AuthProviderSecret);
+        Assert.Null(options.AuthProviderIssuer);
+        Assert.Null(options.AuthProviderAudience);
+        Assert.Equal(60, options.AuthProviderClockSkewSeconds);
+        Assert.False(options.RequireAuthProvider);
+        Assert.True(options.RequireAccountScope);
+        Assert.False(options.RequireConfiguredAccountGrant);
+        Assert.Null(options.AllowedAccountIds);
+        Assert.Null(options.AllowedAccountOwnerIds);
+        Assert.Null(options.AllowedPermissions);
+    }
+
+    [Fact]
+    public void ClientAuthenticationResult_FactoryShapeRemainsStable()
+    {
+        var principal = ClientPrincipal.ForStaticToken(
+            "account-1",
+            "organization:tenant-1",
+            "jobs:read");
+
+        var allowed = ClientAuthenticationResult.Allowed(principal);
+        var unauthorized = ClientAuthenticationResult.Unauthorized("missing token");
+        var forbidden = ClientAuthenticationResult.Forbidden("denied");
+
+        Assert.True(allowed.IsAllowed);
+        Assert.Equal(StatusCodes.Status200OK, allowed.StatusCode);
+        Assert.Equal("", allowed.Error);
+        Assert.Same(principal, allowed.Principal);
+        AssertClientError(unauthorized, StatusCodes.Status401Unauthorized, "missing token");
+        AssertClientError(forbidden, StatusCodes.Status403Forbidden, "denied");
+    }
+
+    [Fact]
+    public void ClientPrincipal_StaticTokenShapeRemainsStable()
+    {
+        var principal = ClientPrincipal.ForStaticToken(
+            "account-1",
+            "user:actor-1 organization:tenant-1",
+            "jobs:read toolbox:*");
+
+        Assert.Equal("xiaolou.client.principal", ClientPrincipal.ItemKey);
+        Assert.Null(principal.Subject);
+        Assert.False(principal.FromAuthProvider);
+        Assert.Equal("account-1", principal.AllowedAccountIds);
+        Assert.Equal("user:actor-1 organization:tenant-1", principal.AllowedAccountOwnerIds);
+        Assert.Equal("jobs:read toolbox:*", principal.AllowedPermissions);
     }
 
     [Theory]
@@ -367,6 +424,11 @@ public sealed class AuthHelpersTests
     [InlineData("GET", "/api/auth/providers", true)]
     [InlineData("GET", "/api/me", true)]
     [InlineData("POST", "/api/auth/login", true)]
+    [InlineData("POST", "/api/auth/password/bootstrap-admin", true)]
+    [InlineData("POST", "/api/auth/password/reset/request", true)]
+    [InlineData("POST", "/api/auth/password/reset/complete", true)]
+    [InlineData("POST", "/api/auth/password/change", false)]
+    [InlineData("POST", "/api/auth/password/admin-reset", false)]
     [InlineData("POST", "/api/auth/demo-session", true)]
     [InlineData("POST", "/api/enterprise-applications", true)]
     [InlineData("POST", "/api/projects", false)]
@@ -721,6 +783,8 @@ public sealed class AuthHelpersTests
     [InlineData("POST", "/api/accounts/ensure", "accounts:ensure")]
     [InlineData("GET", "/api/me", "identity:read")]
     [InlineData("PUT", "/api/me", "identity:write")]
+    [InlineData("POST", "/api/auth/password/change", "identity:write")]
+    [InlineData("POST", "/api/auth/password/admin-reset", "identity:write")]
     [InlineData("GET", "/api/organizations", "organization:read")]
     [InlineData("POST", "/api/organizations", "organization:write")]
     [InlineData("GET", "/api/api-center/providers", "api-center:read")]

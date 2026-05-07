@@ -28,7 +28,7 @@ import {
   listPlaygroundMemories,
   listPlaygroundMessages,
   listPlaygroundModels,
-  startPlaygroundChatJob,
+  streamPlaygroundChat,
   updatePlaygroundConversation,
   updatePlaygroundMemory,
   updatePlaygroundMemoryPreference,
@@ -285,19 +285,70 @@ export default function Playground() {
     setSending(true);
 
     try {
-      const result = await startPlaygroundChatJob({
-        conversationId: activeConversation?.id || null,
-        message,
-        model: selectedModel,
-      });
-      setActiveConversation(result.conversation);
-      setSelectedModel(result.conversation.model || selectedModel);
-      setMessages((items) =>
-        upsertMessage(upsertMessage(items, result.userMessage), result.assistantMessage),
+      await streamPlaygroundChat(
+        {
+          conversationId: activeConversation?.id || null,
+          message,
+          model: selectedModel,
+        },
+        (chatEvent) => {
+          if (chatEvent.type === "conversation") {
+            setActiveConversation(chatEvent.conversation);
+            setSelectedModel(chatEvent.conversation.model || selectedModel);
+            setConversations((items) => upsertConversation(items, chatEvent.conversation));
+            return;
+          }
+
+          if (chatEvent.type === "user_message" || chatEvent.type === "assistant_message") {
+            setMessages((items) => upsertMessage(items, chatEvent.message));
+            return;
+          }
+
+          if (chatEvent.type === "delta") {
+            setMessages((items) =>
+              items.map((item) =>
+                item.id === chatEvent.messageId
+                  ? {
+                      ...item,
+                      content: `${item.content}${chatEvent.delta}`,
+                      status: "running",
+                    }
+                  : item,
+              ),
+            );
+            return;
+          }
+
+          if (chatEvent.type === "job") {
+            setActiveJobs((items) => [
+              chatEvent.job,
+              ...items.filter((item) => item.id !== chatEvent.job.id),
+            ]);
+            return;
+          }
+
+          if (chatEvent.type === "done") {
+            setActiveConversation(chatEvent.conversation);
+            setSelectedModel(chatEvent.conversation.model || selectedModel);
+            setConversations((items) => upsertConversation(items, chatEvent.conversation));
+            if (chatEvent.message) {
+              setMessages((items) => upsertMessage(items, chatEvent.message!));
+            }
+            setMemories(chatEvent.memories);
+            if (chatEvent.job) {
+              setActiveJobs((items) => [
+                chatEvent.job!,
+                ...items.filter((item) => item.id !== chatEvent.job?.id),
+              ]);
+            }
+            return;
+          }
+
+          setError(chatEvent.message || "Playground 流式传输失败");
+        },
       );
-      setConversations((items) => upsertConversation(items, result.conversation));
-      setActiveJobs((items) => [result.job, ...items.filter((item) => item.id !== result.job.id)]);
       void loadConversations();
+      void loadActiveJobs();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "发送失败");
     } finally {

@@ -11,6 +11,8 @@ namespace XiaoLou.Infrastructure.Postgres;
 public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, PostgresAccountStore accounts)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan PasswordResetTokenTtl = TimeSpan.FromMinutes(30);
+    private const int PasswordResetRateLimit = 3;
 
     public async Task<Dictionary<string, object?>> GetPermissionContextAsync(
         string actorId,
@@ -30,16 +32,34 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
     {
         var normalizedActorId = NormalizeActorId(actorId);
         var current = await GetOrSeedUserAsync(normalizedActorId, null, null, null, cancellationToken);
+        var organizations = await ListOrganizationSummariesAsync(normalizedActorId, cancellationToken);
         var displayName = NormalizeBlank(request.DisplayName) ?? AsString(current, "displayName") ?? DefaultDisplayName(normalizedActorId);
         var avatar = request.Avatar is null ? AsString(current, "avatar") : NormalizeBlank(request.Avatar);
+        var phone = request.Phone is null ? AsString(current, "phone") : NormalizeBlank(request.Phone);
+        var defaultOrganizationId = request.DefaultOrganizationId is null
+            ? AsString(current, "defaultOrganizationId")
+            : NormalizeBlank(request.DefaultOrganizationId);
+        if (defaultOrganizationId is not null)
+        {
+            var defaultOrganization = organizations.FirstOrDefault(item =>
+                string.Equals(AsString(item, "id"), defaultOrganizationId, StringComparison.Ordinal));
+            var defaultOrganizationRole = defaultOrganization is null ? null : AsString(defaultOrganization, "role");
+            if (defaultOrganization is null || defaultOrganizationRole is not ("enterprise_admin" or "enterprise_member"))
+            {
+                throw new ArgumentException("defaultOrganizationId must belong to an enterprise organization for the current user");
+            }
+        }
+
         await EnsureUserAsync(
             normalizedActorId,
             displayName,
             AsString(current, "email"),
-            null,
+            phone,
             AsString(current, "platformRole") ?? InferPlatformRole(normalizedActorId),
-            AsString(current, "defaultOrganizationId"),
+            defaultOrganizationId,
             avatar,
+            null,
+            false,
             cancellationToken);
 
         return await GetPermissionContextAsync(normalizedActorId, cancellationToken);
@@ -50,27 +70,341 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         string mode,
         CancellationToken cancellationToken)
     {
-        var email = NormalizeBlank(request.Email) ?? "user@xiaolou.local";
+        var email = RequireEmail(request.Email);
+        var password = RequirePassword(request.Password);
         var actorId = ActorIdFromEmail(email, mode);
-        var displayName = mode == "ops_admin"
-            ? "Ops Admin"
-            : mode == "enterprise_admin"
-                ? "Enterprise Admin"
-                : EmailLocalPart(email);
-        var platformRole = mode == "ops_admin" ? "ops_admin" : InferPlatformRole(actorId);
-        await EnsureUserAsync(actorId, displayName, email, null, platformRole, null, null, cancellationToken);
+        var passwordHash = await GetPasswordHashAsync(actorId, cancellationToken);
+        if (!PasswordHashing.VerifyPassword(password, passwordHash))
+        {
+            throw InvalidCredentials();
+        }
+
+        var permissionContext = await GetPermissionContextAsync(actorId, cancellationToken);
+        var resolvedPlatformRole = AsString(permissionContext, "platformRole") ?? "guest";
+        if (mode == "ops_admin")
+        {
+            if (resolvedPlatformRole is not "ops_admin" and not "super_admin")
+            {
+                throw InvalidCredentials();
+            }
+        }
+        else if (resolvedPlatformRole is "ops_admin" or "super_admin")
+        {
+            throw InvalidCredentials();
+        }
+
+        return permissionContext;
+    }
+
+    public async Task<Dictionary<string, object?>> BootstrapPlatformPasswordAsync(
+        BootstrapPlatformPasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        var email = RequireEmail(request.Email);
+        var password = RequirePassword(request.Password);
+        var actorId = ActorIdFromEmail(email, "ops_admin");
+        RequireReservedPlatformActor(actorId);
+
         await EnsureDemoIdentityAsync(actorId, cancellationToken);
-        return await GetPermissionContextAsync(actorId, cancellationToken);
+        var existingHash = await GetPasswordHashAsync(actorId, cancellationToken);
+        if (existingHash is not null)
+        {
+            if (!PasswordHashing.VerifyPassword(password, existingHash))
+            {
+                throw InvalidCredentials();
+            }
+
+            return await BuildPasswordConfiguredResultAsync(actorId, false, cancellationToken);
+        }
+
+        await EnsureUserAsync(
+            actorId,
+            DefaultDisplayName(actorId),
+            email,
+            null,
+            InferPlatformRole(actorId),
+            null,
+            null,
+            PasswordHashing.HashPassword(password),
+            false,
+            cancellationToken);
+
+        return await BuildPasswordConfiguredResultAsync(actorId, true, cancellationToken);
+    }
+
+    public async Task<Dictionary<string, object?>> ChangePasswordAsync(
+        string actorId,
+        ChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedActorId = NormalizeActorId(actorId);
+        var currentPassword = RequirePassword(request.CurrentPassword);
+        var newPassword = RequirePassword(request.NewPassword);
+        var existingHash = await GetPasswordHashAsync(normalizedActorId, cancellationToken);
+        if (!PasswordHashing.VerifyPassword(currentPassword, existingHash))
+        {
+            throw InvalidCredentials();
+        }
+
+        await UpdatePasswordHashAsync(
+            normalizedActorId,
+            PasswordHashing.HashPassword(newPassword),
+            cancellationToken);
+        return await BuildPasswordConfiguredResultAsync(normalizedActorId, true, cancellationToken);
+    }
+
+    public async Task<Dictionary<string, object?>> AdminResetPasswordAsync(
+        AdminResetPasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        var email = RequireEmail(request.Email);
+        var newPassword = RequirePassword(request.NewPassword);
+        var actorId = ActorIdFromEmail(email, "personal");
+        if (await GetUserAsync(actorId, cancellationToken) is null)
+        {
+            throw new ArgumentException("account is not available");
+        }
+
+        await UpdatePasswordHashAsync(
+            actorId,
+            PasswordHashing.HashPassword(newPassword),
+            cancellationToken);
+        return await BuildPasswordConfiguredResultAsync(actorId, true, cancellationToken);
+    }
+
+    public async Task<Dictionary<string, object?>> RequestPasswordResetAsync(
+        RequestPasswordResetRequest request,
+        bool includeResetToken,
+        CancellationToken cancellationToken)
+    {
+        var email = RequireEmail(request.Email);
+        var actorId = ActorIdFromEmail(email, "personal");
+        var user = await GetPasswordUserRecordAsync(actorId, cancellationToken);
+        if (user is null || InferPlatformRole(actorId) is "ops_admin" or "super_admin")
+        {
+            await RecordPasswordAuditAsync(
+                "password.reset.request",
+                "accepted_without_account",
+                null,
+                email,
+                new JsonObject { ["tokenIssued"] = false },
+                cancellationToken);
+            return BuildPasswordResetRequestResult(email, null, null, includeResetToken);
+        }
+
+        if (await CountRecentPasswordResetRequestsAsync(actorId, cancellationToken) >= PasswordResetRateLimit)
+        {
+            await RecordPasswordAuditAsync(
+                "password.reset.request",
+                "rate_limited",
+                actorId,
+                email,
+                new JsonObject { ["tokenIssued"] = false },
+                cancellationToken);
+            return BuildPasswordResetRequestResult(email, null, null, includeResetToken);
+        }
+
+        var token = PasswordHashing.GenerateResetToken();
+        var expiresAt = DateTimeOffset.UtcNow.Add(PasswordResetTokenTtl);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO password_reset_tokens (
+              user_account_id,
+              actor_id,
+              email,
+              token_hash,
+              status,
+              expires_at,
+              data
+            )
+            VALUES (
+              @accountId,
+              @actorId,
+              @email,
+              @tokenHash,
+              'issued',
+              @expiresAt,
+              jsonb_build_object('delivery', @delivery)
+            )
+            """,
+            connection);
+        command.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, (Guid)user["account_id"]!);
+        command.Parameters.AddWithValue("actorId", NpgsqlDbType.Text, actorId);
+        command.Parameters.AddWithValue("email", NpgsqlDbType.Text, email);
+        command.Parameters.AddWithValue("tokenHash", NpgsqlDbType.Text, PasswordResetTokenHash(token));
+        command.Parameters.AddWithValue("expiresAt", NpgsqlDbType.TimestampTz, expiresAt);
+        command.Parameters.AddWithValue(
+            "delivery",
+            NpgsqlDbType.Text,
+            includeResetToken ? "local_token" : "email_unconfigured");
+        await command.ExecuteNonQueryAsync(cancellationToken);
+
+        await RecordPasswordAuditAsync(
+            "password.reset.request",
+            "issued",
+            actorId,
+            email,
+            new JsonObject
+            {
+                ["delivery"] = includeResetToken ? "local_token" : "email_unconfigured",
+                ["tokenIssued"] = true,
+            },
+            cancellationToken);
+        return BuildPasswordResetRequestResult(email, token, expiresAt, includeResetToken);
+    }
+
+    public async Task<Dictionary<string, object?>> CompletePasswordResetAsync(
+        CompletePasswordResetRequest request,
+        CancellationToken cancellationToken)
+    {
+        var resetToken = RequireResetToken(request.ResetToken);
+        var newPassword = RequirePassword(request.NewPassword);
+        var resetTokenHash = PasswordResetTokenHash(resetToken);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        await using var findToken = new NpgsqlCommand(
+            """
+            SELECT
+              id,
+              user_account_id,
+              actor_id,
+              email,
+              status,
+              expires_at,
+              consumed_at
+            FROM password_reset_tokens
+            WHERE token_hash = @tokenHash
+            LIMIT 1
+            FOR UPDATE
+            """,
+            connection,
+            transaction);
+        findToken.Parameters.AddWithValue("tokenHash", NpgsqlDbType.Text, resetTokenHash);
+        var row = await PostgresRows.ReadSingleAsync(findToken, cancellationToken);
+        if (row is null)
+        {
+            await InsertPasswordAuditAsync(
+                connection,
+                transaction,
+                null,
+                null,
+                "password.reset.complete",
+                "invalid_token",
+                new JsonObject(),
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            throw InvalidCredentials();
+        }
+
+        var actorId = AsString(row, "actor_id") ?? "guest";
+        var email = AsString(row, "email");
+        var status = AsString(row, "status");
+        var expiresAt = ToDateTimeOffset(row["expires_at"]);
+        if (!string.Equals(status, "issued", StringComparison.Ordinal)
+            || row["consumed_at"] is not null
+            || expiresAt <= DateTimeOffset.UtcNow)
+        {
+            await MarkExpiredPasswordResetTokenAsync(
+                connection,
+                transaction,
+                (Guid)row["id"]!,
+                expiresAt <= DateTimeOffset.UtcNow,
+                cancellationToken);
+            await InsertPasswordAuditAsync(
+                connection,
+                transaction,
+                actorId,
+                email,
+                "password.reset.complete",
+                expiresAt <= DateTimeOffset.UtcNow ? "expired" : "invalid_token",
+                new JsonObject(),
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            throw InvalidCredentials();
+        }
+
+        await using var updatePassword = new NpgsqlCommand(
+            """
+            UPDATE users
+            SET password_hash = @passwordHash,
+                updated_at = now()
+            WHERE account_id = @accountId
+            """,
+            connection,
+            transaction);
+        updatePassword.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, (Guid)row["user_account_id"]!);
+        updatePassword.Parameters.AddWithValue("passwordHash", NpgsqlDbType.Text, PasswordHashing.HashPassword(newPassword));
+        var updated = await updatePassword.ExecuteNonQueryAsync(cancellationToken);
+        if (updated == 0)
+        {
+            await InsertPasswordAuditAsync(
+                connection,
+                transaction,
+                actorId,
+                email,
+                "password.reset.complete",
+                "account_missing",
+                new JsonObject(),
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            throw InvalidCredentials();
+        }
+
+        await using var consumeToken = new NpgsqlCommand(
+            """
+            UPDATE password_reset_tokens
+            SET status = 'consumed',
+                consumed_at = now(),
+                updated_at = now()
+            WHERE id = @id
+            """,
+            connection,
+            transaction);
+        consumeToken.Parameters.AddWithValue("id", NpgsqlDbType.Uuid, (Guid)row["id"]!);
+        await consumeToken.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var revokeOtherTokens = new NpgsqlCommand(
+            """
+            UPDATE password_reset_tokens
+            SET status = 'revoked',
+                updated_at = now()
+            WHERE actor_id = @actorId
+              AND id <> @id
+              AND status = 'issued'
+            """,
+            connection,
+            transaction);
+        revokeOtherTokens.Parameters.AddWithValue("actorId", NpgsqlDbType.Text, actorId);
+        revokeOtherTokens.Parameters.AddWithValue("id", NpgsqlDbType.Uuid, (Guid)row["id"]!);
+        await revokeOtherTokens.ExecuteNonQueryAsync(cancellationToken);
+
+        await InsertPasswordAuditAsync(
+            connection,
+            transaction,
+            actorId,
+            email,
+            "password.reset.complete",
+            "updated",
+            new JsonObject(),
+            cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return await BuildPasswordConfiguredResultAsync(actorId, true, cancellationToken);
     }
 
     public async Task<Dictionary<string, object?>> RegisterPersonalAsync(
         RegisterPersonalRequest request,
         CancellationToken cancellationToken)
     {
-        var email = NormalizeBlank(request.Email) ?? "user@xiaolou.local";
+        var email = RequireEmail(request.Email);
+        var password = RequirePassword(request.Password);
         var actorId = ActorIdFromEmail(email, "personal");
+        RejectReservedPlatformActor(actorId);
         var displayName = NormalizeBlank(request.DisplayName) ?? EmailLocalPart(email);
-        await EnsureUserAsync(actorId, displayName, email, request.Phone, "customer", null, null, cancellationToken);
+        var passwordHash = await PasswordHashForRegistrationAsync(actorId, password, cancellationToken);
+        await EnsureUserAsync(actorId, displayName, email, request.Phone, "customer", null, null, passwordHash, false, cancellationToken);
         var permissionContext = await GetPermissionContextAsync(actorId, cancellationToken);
         return BuildRegistrationResult(actorId, permissionContext, "personal", null);
     }
@@ -79,13 +413,16 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         RegisterEnterpriseAdminRequest request,
         CancellationToken cancellationToken)
     {
-        var email = NormalizeBlank(request.Email) ?? "admin@xiaolou.local";
+        var email = RequireEmail(request.Email);
+        var password = RequirePassword(request.Password);
         var actorId = ActorIdFromEmail(email, "enterprise_admin");
+        RejectReservedPlatformActor(actorId);
         var companyName = NormalizeBlank(request.CompanyName) ?? "XiaoLou Enterprise";
         var organizationId = OrganizationIdFromName(companyName);
         var adminName = NormalizeBlank(request.AdminName) ?? EmailLocalPart(email);
+        var passwordHash = await PasswordHashForRegistrationAsync(actorId, password, cancellationToken);
         await EnsureOrganizationAsync(organizationId, companyName, cancellationToken);
-        await EnsureUserAsync(actorId, adminName, email, request.Phone, "customer", organizationId, null, cancellationToken);
+        await EnsureUserAsync(actorId, adminName, email, request.Phone, "customer", organizationId, null, passwordHash, false, cancellationToken);
         await EnsureMembershipAsync(
             organizationId,
             actorId,
@@ -148,15 +485,20 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
     {
         var normalizedOrganizationId = NormalizeOwnerId(organizationId, "org_demo_001");
         await EnsureDemoOrganizationAsync(normalizedOrganizationId, cancellationToken);
-        var email = NormalizeBlank(request.Email) ?? "member@xiaolou.local";
+        var email = RequireEmail(request.Email);
+        var requestedPassword = NormalizeBlank(request.Password);
+        var generatedPassword = requestedPassword is null ? PasswordHashing.GenerateTemporaryPassword() : null;
+        var password = requestedPassword ?? generatedPassword ?? throw new InvalidOperationException("Failed to generate member password.");
+        var passwordHash = PasswordHashing.HashPassword(password);
         var membershipRole = string.Equals(request.MembershipRole, "admin", StringComparison.OrdinalIgnoreCase)
             ? "admin"
             : "member";
         var role = membershipRole == "admin" ? "enterprise_admin" : "enterprise_member";
         var actorMode = role == "enterprise_admin" ? "enterprise_admin" : "personal";
         var actorId = ActorIdFromEmail(email, actorMode);
+        RejectReservedPlatformActor(actorId);
         var displayName = NormalizeBlank(request.DisplayName) ?? EmailLocalPart(email);
-        await EnsureUserAsync(actorId, displayName, email, request.Phone, "customer", normalizedOrganizationId, null, cancellationToken);
+        await EnsureUserAsync(actorId, displayName, email, request.Phone, "customer", normalizedOrganizationId, null, passwordHash, true, cancellationToken);
         await EnsureMembershipAsync(
             normalizedOrganizationId,
             actorId,
@@ -175,7 +517,7 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         var members = await ListOrganizationMembersAsync(normalizedOrganizationId, cancellationToken);
         var member = members.First(item => string.Equals(AsString(item, "userId"), actorId, StringComparison.Ordinal));
         var permissionContext = await GetPermissionContextAsync(actorId, cancellationToken);
-        return BuildRegistrationResult(actorId, permissionContext, role, member);
+        return BuildRegistrationResult(actorId, permissionContext, role, member, generatedPassword, generatedPassword is not null);
     }
 
     public async Task<JsonObject> GetApiCenterConfigAsync(AccountScope scope, CancellationToken cancellationToken)
@@ -285,6 +627,8 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
                 "customer",
                 "org_demo_001",
                 null,
+                null,
+                false,
                 cancellationToken);
             await EnsureMembershipAsync(
                 "org_demo_001",
@@ -301,11 +645,11 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         }
         else if (actorId == "ops_demo_001")
         {
-            await EnsureUserAsync(actorId, "Ops Admin", "ops@xiaolou.local", null, "ops_admin", null, null, cancellationToken);
+            await EnsureUserAsync(actorId, "Ops Admin", "ops@xiaolou.local", null, "ops_admin", null, null, null, false, cancellationToken);
         }
         else if (InferPlatformRole(actorId) == "super_admin")
         {
-            await EnsureUserAsync(actorId, "Super Admin", "root@xiaolou.local", null, "super_admin", null, null, cancellationToken);
+            await EnsureUserAsync(actorId, "Super Admin", "root@xiaolou.local", null, "super_admin", null, null, null, false, cancellationToken);
         }
     }
 
@@ -338,6 +682,8 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             platformRole ?? InferPlatformRole(actorId),
             null,
             null,
+            null,
+            false,
             cancellationToken);
         return await GetUserAsync(actorId, cancellationToken)
             ?? throw new InvalidOperationException("Failed to seed canonical user profile.");
@@ -367,6 +713,215 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         return row is null ? null : ToUserProfile(row);
     }
 
+    private async Task<string?> GetPasswordHashAsync(string actorId, CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT u.password_hash
+            FROM accounts user_account
+            JOIN users u ON u.account_id = user_account.id
+            WHERE user_account.legacy_owner_type = 'user'
+              AND user_account.legacy_owner_id = @actorId
+            LIMIT 1
+            """,
+            connection);
+        command.Parameters.AddWithValue("actorId", NpgsqlDbType.Text, actorId);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? null : Convert.ToString(value);
+    }
+
+    private async Task UpdatePasswordHashAsync(
+        string actorId,
+        string passwordHash,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            UPDATE users u
+            SET password_hash = @passwordHash,
+                updated_at = now()
+            FROM accounts user_account
+            WHERE u.account_id = user_account.id
+              AND user_account.legacy_owner_type = 'user'
+              AND user_account.legacy_owner_id = @actorId
+            """,
+            connection);
+        command.Parameters.AddWithValue("actorId", NpgsqlDbType.Text, actorId);
+        command.Parameters.AddWithValue("passwordHash", NpgsqlDbType.Text, passwordHash);
+        var updated = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (updated == 0)
+        {
+            throw InvalidCredentials();
+        }
+    }
+
+    private async Task<Dictionary<string, object?>> BuildPasswordConfiguredResultAsync(
+        string actorId,
+        bool passwordUpdated,
+        CancellationToken cancellationToken)
+    {
+        var permissionContext = await GetPermissionContextAsync(actorId, cancellationToken);
+        var actor = permissionContext.TryGetValue("actor", out var actorValue)
+            ? actorValue as Dictionary<string, object?>
+            : null;
+        return new Dictionary<string, object?>
+        {
+            ["actorId"] = actorId,
+            ["email"] = actor is null ? null : AsString(actor, "email"),
+            ["platformRole"] = AsString(permissionContext, "platformRole") ?? (actor is null ? null : AsString(actor, "platformRole")),
+            ["passwordConfigured"] = true,
+            ["passwordUpdated"] = passwordUpdated,
+        };
+    }
+
+    private static Dictionary<string, object?> BuildPasswordResetRequestResult(
+        string email,
+        string? resetToken,
+        DateTimeOffset? expiresAt,
+        bool includeResetToken)
+    {
+        var canReturnToken = includeResetToken && resetToken is not null && expiresAt is not null;
+        var resetTokenExpiresAt = canReturnToken
+            ? expiresAt.GetValueOrDefault().ToString("O")
+            : null;
+        return new Dictionary<string, object?>
+        {
+            ["email"] = email,
+            ["accepted"] = true,
+            ["delivery"] = canReturnToken ? "local_token" : "email_unconfigured",
+            ["resetToken"] = canReturnToken ? resetToken : null,
+            ["expiresAt"] = resetTokenExpiresAt,
+        };
+    }
+
+    private async Task<Dictionary<string, object?>?> GetPasswordUserRecordAsync(
+        string actorId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              user_account.id AS account_id,
+              user_account.legacy_owner_id AS actor_id,
+              u.email,
+              u.password_hash
+            FROM accounts user_account
+            JOIN users u ON u.account_id = user_account.id
+            WHERE user_account.legacy_owner_type = 'user'
+              AND user_account.legacy_owner_id = @actorId
+            LIMIT 1
+            """,
+            connection);
+        command.Parameters.AddWithValue("actorId", NpgsqlDbType.Text, actorId);
+        return await PostgresRows.ReadSingleAsync(command, cancellationToken);
+    }
+
+    private async Task<int> CountRecentPasswordResetRequestsAsync(
+        string actorId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT COUNT(*)
+            FROM password_reset_tokens
+            WHERE actor_id = @actorId
+              AND created_at >= now() - interval '15 minutes'
+            """,
+            connection);
+        command.Parameters.AddWithValue("actorId", NpgsqlDbType.Text, actorId);
+        var count = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(count);
+    }
+
+    private static async Task MarkExpiredPasswordResetTokenAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid tokenId,
+        bool expired,
+        CancellationToken cancellationToken)
+    {
+        if (!expired)
+        {
+            return;
+        }
+
+        await using var command = new NpgsqlCommand(
+            """
+            UPDATE password_reset_tokens
+            SET status = 'expired',
+                updated_at = now()
+            WHERE id = @id
+              AND status = 'issued'
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("id", NpgsqlDbType.Uuid, tokenId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task RecordPasswordAuditAsync(
+        string eventType,
+        string outcome,
+        string? actorId,
+        string? email,
+        JsonObject data,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await InsertPasswordAuditAsync(
+            connection,
+            transaction,
+            actorId,
+            email,
+            eventType,
+            outcome,
+            data,
+            cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task InsertPasswordAuditAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string? actorId,
+        string? email,
+        string eventType,
+        string outcome,
+        JsonObject data,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO password_auth_audit_events (
+              actor_id,
+              email_hash,
+              event_type,
+              outcome,
+              data
+            )
+            VALUES (
+              @actorId,
+              @emailHash,
+              @eventType,
+              @outcome,
+              CAST(@data AS jsonb)
+            )
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("actorId", NpgsqlDbType.Text, DbNullable(actorId));
+        command.Parameters.AddWithValue("emailHash", NpgsqlDbType.Text, DbNullable(HashOptional(email)));
+        command.Parameters.AddWithValue("eventType", NpgsqlDbType.Text, eventType);
+        command.Parameters.AddWithValue("outcome", NpgsqlDbType.Text, outcome);
+        command.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, data.ToJsonString(JsonOptions));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private async Task EnsureUserAsync(
         string actorId,
         string displayName,
@@ -375,6 +930,8 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         string platformRole,
         string? defaultOrganizationId,
         string? avatar,
+        string? passwordHash,
+        bool overwritePasswordHash,
         CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
@@ -404,6 +961,11 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             UPDATE users
             SET email = COALESCE(@email, email),
                 phone_hash = COALESCE(@phoneHash, phone_hash),
+                password_hash = CASE
+                    WHEN @passwordHash IS NULL THEN password_hash
+                    WHEN @overwritePasswordHash THEN @passwordHash
+                    ELSE COALESCE(password_hash, @passwordHash)
+                END,
                 display_name = COALESCE(NULLIF(@displayName, ''), display_name),
                 status = 'active',
                 region_code = 'CN',
@@ -416,6 +978,8 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         update.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId);
         update.Parameters.AddWithValue("email", NpgsqlDbType.Text, DbNullable(email));
         update.Parameters.AddWithValue("phoneHash", NpgsqlDbType.Text, DbNullable(HashOptional(phone)));
+        update.Parameters.AddWithValue("passwordHash", NpgsqlDbType.Text, DbNullable(passwordHash));
+        update.Parameters.AddWithValue("overwritePasswordHash", NpgsqlDbType.Boolean, overwritePasswordHash);
         update.Parameters.AddWithValue("displayName", NpgsqlDbType.Text, displayName);
         update.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, data.ToJsonString(JsonOptions));
         var updated = await update.ExecuteNonQueryAsync(cancellationToken);
@@ -423,14 +987,15 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         {
             await using var insert = new NpgsqlCommand(
                 """
-                INSERT INTO users (account_id, email, phone_hash, display_name, status, region_code, data, created_at, updated_at)
-                VALUES (@accountId, @email, @phoneHash, @displayName, 'active', 'CN', CAST(@data AS jsonb), now(), now())
+                INSERT INTO users (account_id, email, phone_hash, password_hash, display_name, status, region_code, data, created_at, updated_at)
+                VALUES (@accountId, @email, @phoneHash, @passwordHash, @displayName, 'active', 'CN', CAST(@data AS jsonb), now(), now())
                 """,
                 connection,
                 transaction);
             insert.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId);
             insert.Parameters.AddWithValue("email", NpgsqlDbType.Text, DbNullable(email));
             insert.Parameters.AddWithValue("phoneHash", NpgsqlDbType.Text, DbNullable(HashOptional(phone)));
+            insert.Parameters.AddWithValue("passwordHash", NpgsqlDbType.Text, DbNullable(passwordHash));
             insert.Parameters.AddWithValue("displayName", NpgsqlDbType.Text, displayName);
             insert.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, data.ToJsonString(JsonOptions));
             await insert.ExecuteNonQueryAsync(cancellationToken);
@@ -724,7 +1289,9 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         string actorId,
         Dictionary<string, object?> permissionContext,
         string mode,
-        Dictionary<string, object?>? member)
+        Dictionary<string, object?>? member,
+        string? tempPassword = null,
+        bool generatedPassword = false)
     {
         var organizations = permissionContext.TryGetValue("organizations", out var value)
             ? value as IReadOnlyList<Dictionary<string, object?>>
@@ -754,8 +1321,8 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
                 ["mode"] = mode,
                 ["title"] = mode == "personal" ? "Personal account ready" : "Enterprise account ready",
                 ["detail"] = "Created in the Windows-native canonical identity surface.",
-                ["tempPassword"] = null,
-                ["generatedPassword"] = false,
+                ["tempPassword"] = tempPassword,
+                ["generatedPassword"] = generatedPassword,
             },
             ["displayName"] = actor?["displayName"],
             ["email"] = actor?["email"],
@@ -932,27 +1499,96 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
+    private static string RequireEmail(string? email)
+    {
+        return NormalizeBlank(email)
+            ?? throw new ArgumentException("email is required");
+    }
+
+    private static string RequirePassword(string? password)
+    {
+        return NormalizeBlank(password)
+            ?? throw new ArgumentException("password is required");
+    }
+
+    private static string RequireResetToken(string? resetToken)
+    {
+        return NormalizeBlank(resetToken)
+            ?? throw new ArgumentException("reset token is required");
+    }
+
+    private async Task<string?> PasswordHashForRegistrationAsync(
+        string actorId,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        var existingHash = await GetPasswordHashAsync(actorId, cancellationToken);
+        if (existingHash is null)
+        {
+            return PasswordHashing.HashPassword(password);
+        }
+
+        if (!PasswordHashing.VerifyPassword(password, existingHash))
+        {
+            throw InvalidCredentials();
+        }
+
+        return null;
+    }
+
+    private static UnauthorizedAccessException InvalidCredentials()
+    {
+        return new UnauthorizedAccessException("email or password is incorrect");
+    }
+
+    private static void RejectReservedPlatformActor(string actorId)
+    {
+        if (actorId is "ops_demo_001" or "root_demo_001")
+        {
+            throw new ArgumentException("email is reserved");
+        }
+    }
+
+    private static void RequireReservedPlatformActor(string actorId)
+    {
+        if (actorId is not "ops_demo_001" and not "root_demo_001")
+        {
+            throw new ArgumentException("email is not a platform admin");
+        }
+    }
+
     private static string ActorIdFromEmail(string email, string mode)
     {
         var normalized = email.Trim().ToLowerInvariant();
-        if (mode == "ops_admin" || normalized.Contains("ops", StringComparison.Ordinal))
+        if (normalized == "root@xiaolou.local")
+        {
+            return "root_demo_001";
+        }
+
+        if (normalized == "ops@xiaolou.local")
         {
             return "ops_demo_001";
         }
 
-        if (mode == "enterprise_admin" || normalized.Contains("admin", StringComparison.Ordinal))
+        if (normalized == "admin@xiaolou.local")
         {
             return "user_demo_001";
         }
 
-        if (normalized.Contains("member", StringComparison.Ordinal))
+        if (normalized == "member@xiaolou.local")
         {
             return "user_member_001";
         }
 
         var segment = new string(normalized.Select(ch => char.IsAsciiLetterOrDigit(ch) ? ch : '_').ToArray())
             .Trim('_');
-        return string.IsNullOrWhiteSpace(segment) ? "user_demo_001" : $"user_{segment[..Math.Min(segment.Length, 48)]}";
+        if (string.IsNullOrWhiteSpace(segment))
+        {
+            return mode == "ops_admin" ? "ops_demo_001" : "user_demo_001";
+        }
+
+        var prefix = mode == "ops_admin" ? "ops" : "user";
+        return $"{prefix}_{segment[..Math.Min(segment.Length, 48)]}";
     }
 
     private static string OrganizationIdFromName(string name)
@@ -1031,6 +1667,11 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
+    private static string PasswordResetTokenHash(string token)
+    {
+        return Sha256Hex($"password-reset-token:{token}");
+    }
+
     private static object DbNullable<T>(T? value)
     {
         return value is null ? DBNull.Value : value;
@@ -1049,6 +1690,16 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             DateTime dt => DateTime.SpecifyKind(dt, DateTimeKind.Utc).ToString("O"),
             null => DateTimeOffset.UtcNow.ToString("O"),
             _ => Convert.ToString(value) ?? DateTimeOffset.UtcNow.ToString("O"),
+        };
+    }
+
+    private static DateTimeOffset ToDateTimeOffset(object? value)
+    {
+        return value switch
+        {
+            DateTimeOffset dto => dto,
+            DateTime dt => DateTime.SpecifyKind(dt, DateTimeKind.Utc),
+            _ => DateTimeOffset.MinValue,
         };
     }
 }

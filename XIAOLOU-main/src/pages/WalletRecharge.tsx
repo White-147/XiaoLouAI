@@ -287,7 +287,7 @@ export default function WalletRecharge() {
       const entitlement = resolveWalletEntitlement(meResponse);
       const walletResponse =
         entitlement.canRecharge && entitlement.ownerType && entitlement.ownerId
-          ? await listWallets(entitlement.ownerType, entitlement.ownerId)
+          ? await listWallets()
           : { items: [] as WalletInfo[] };
 
       setMe(meResponse);

@@ -33,10 +33,7 @@ internal static class AuthHelpers
 
         return allowed
             ? null
-            : Results.Json(new
-            {
-                error = "platform admin permission is required",
-            }, statusCode: StatusCodes.Status403Forbidden);
+            : AuthErrorEnvelopeResponses.PlatformAdminForbidden();
     }
 
     internal static string CreateLocalAuthToken(string actorId)
@@ -362,12 +359,12 @@ internal static class AuthHelpers
 
     internal static IResult BadRequestError(Exception exception)
     {
-        return Results.BadRequest(new { error = exception.Message });
+        return AuthErrorEnvelopeResponses.BadRequestError(exception);
     }
 
     internal static IResult ForbiddenError(Exception exception)
     {
-        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status403Forbidden);
+        return AuthErrorEnvelopeResponses.ForbiddenError(exception);
     }
 
     internal static bool ContainsCsvGrant(string? csv, string value)
@@ -390,10 +387,7 @@ internal static class AuthHelpers
 
     private static IResult AccountForbidden()
     {
-        return Results.Json(new
-        {
-            error = "account scope is not authorized for this client token",
-        }, statusCode: StatusCodes.Status403Forbidden);
+        return AuthErrorEnvelopeResponses.AccountForbidden();
     }
 
     private static string? GetConfiguredClientToken(ClientApiOptions options)
@@ -454,73 +448,4 @@ internal static class AuthHelpers
             ownerId);
     }
 
-}
-
-internal sealed class ClientApiOptions
-{
-    public string? Token { get; init; }
-
-    public string TokenHeader { get; init; } = "X-XiaoLou-Client-Token";
-
-    public string? AuthProvider { get; init; }
-
-    public string? AuthProviderSecret { get; init; }
-
-    public string? AuthProviderIssuer { get; init; }
-
-    public string? AuthProviderAudience { get; init; }
-
-    public int AuthProviderClockSkewSeconds { get; init; } = 60;
-
-    public bool RequireAuthProvider { get; init; }
-
-    public bool RequireAccountScope { get; init; } = true;
-
-    public bool RequireConfiguredAccountGrant { get; init; }
-
-    public string? AllowedAccountIds { get; init; }
-
-    public string? AllowedAccountOwnerIds { get; init; }
-
-    public string? AllowedPermissions { get; init; }
-}
-
-internal sealed record ClientAuthenticationResult(
-    bool IsAllowed,
-    int StatusCode,
-    string Error,
-    ClientPrincipal? Principal)
-{
-    public static ClientAuthenticationResult Allowed(ClientPrincipal? principal)
-    {
-        return new ClientAuthenticationResult(true, StatusCodes.Status200OK, "", principal);
-    }
-
-    public static ClientAuthenticationResult Unauthorized(string error)
-    {
-        return new ClientAuthenticationResult(false, StatusCodes.Status401Unauthorized, error, null);
-    }
-
-    public static ClientAuthenticationResult Forbidden(string error)
-    {
-        return new ClientAuthenticationResult(false, StatusCodes.Status403Forbidden, error, null);
-    }
-}
-
-internal sealed record ClientPrincipal(
-    string? Subject,
-    bool FromAuthProvider,
-    string? AllowedAccountIds,
-    string? AllowedAccountOwnerIds,
-    string? AllowedPermissions)
-{
-    public const string ItemKey = "xiaolou.client.principal";
-
-    public static ClientPrincipal ForStaticToken(
-        string? allowedAccountIds,
-        string? allowedAccountOwnerIds,
-        string? allowedPermissions)
-    {
-        return new ClientPrincipal(null, false, allowedAccountIds, allowedAccountOwnerIds, allowedPermissions);
-    }
 }
