@@ -107,14 +107,14 @@ const pathMatches = (path: string, route: string) =>
   path === route || path.startsWith(`${route}/`);
 
 const routePrefetchEntries: RoutePrefetchEntry[] = [
-  { matches: (path) => pathMatches(path, "/playground"), loaders: [() => import("../pages/Playground")] },
-  { matches: (path) => pathMatches(path, "/enterprise"), loaders: [() => import("../pages/EnterpriseConsole")] },
-  { matches: (path) => pathMatches(path, "/wallet/recharge"), loaders: [() => import("../pages/WalletRecharge")] },
-  { matches: (path) => pathMatches(path, "/wallet/usage"), loaders: [() => import("../pages/CreditUsage")] },
+  { matches: (path) => pathMatches(path, "/playground"), loaders: [() => import("../features/playground/Playground")] },
+  { matches: (path) => pathMatches(path, "/enterprise"), loaders: [() => import("../features/account-admin-enterprise/enterprise-console/EnterpriseConsole")] },
+  { matches: (path) => pathMatches(path, "/wallet/recharge"), loaders: [() => import("../features/wallet-payments-api-center/wallet-recharge/WalletRecharge")] },
+  { matches: (path) => pathMatches(path, "/wallet/usage"), loaders: [() => import("../features/wallet-payments-api-center/credit-usage/CreditUsage")] },
   { matches: (path) => pathMatches(path, "/admin"), loaders: [() => import("../pages/SuperAdminConsole")] },
-  { matches: (path) => pathMatches(path, "/script-plaza"), loaders: [() => import("../pages/ScriptPlaza")] },
-  { matches: (path) => pathMatches(path, "/create/image"), loaders: [() => import("../pages/create/ImageCreate")] },
-  { matches: (path) => pathMatches(path, "/create/video"), loaders: [() => import("../pages/create/VideoCreate")] },
+  { matches: (path) => pathMatches(path, "/script-plaza"), loaders: [() => import("../features/comic-production/script-plaza/ScriptPlaza")] },
+  { matches: (path) => pathMatches(path, "/create/image"), loaders: [() => import("../features/create-image/image-create/ImageCreate")] },
+  { matches: (path) => pathMatches(path, "/create/video"), loaders: [() => import("../features/create-video/video-create/VideoCreate")] },
   { matches: (path) => pathMatches(path, "/create/video-replace"), loaders: [() => import("../features/toolbox/video-replace/VideoReplace")] },
   { matches: (path) => pathMatches(path, "/create/script-breakdown"), loaders: [() => import("../features/toolbox/script-breakdown/ScriptBreakdown")] },
   { matches: (path) => pathMatches(path, "/create/video-reverse"), loaders: [() => import("../features/toolbox/video-reverse/VideoReverse")] },
@@ -150,7 +150,7 @@ const routePrefetchEntries: RoutePrefetchEntry[] = [
     matches: (path) => pathMatches(path, "/comic/preview"),
     loaders: [() => import("../pages/comic/ComicShell"), () => import("../pages/comic/Preview")],
   },
-  { matches: (path) => pathMatches(path, "/assets"), loaders: [() => import("../pages/Assets")] },
+  { matches: (path) => pathMatches(path, "/assets"), loaders: [() => import("../features/assets-media-projects/assets/Assets")] },
 ];
 
 const prefetchedRouteModules = new Set<string>();

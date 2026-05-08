@@ -3,15 +3,15 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import Home from "./features/home/Home";
 
-const ScriptPlaza = lazy(() => import("./pages/ScriptPlaza"));
-const ImageCreate = lazy(() => import("./pages/create/ImageCreate"));
-const VideoCreate = lazy(() => import("./pages/create/VideoCreate"));
+const ScriptPlaza = lazy(() => import("./features/comic-production/script-plaza/ScriptPlaza"));
+const ImageCreate = lazy(() => import("./features/create-image/image-create/ImageCreate"));
+const VideoCreate = lazy(() => import("./features/create-video/video-create/VideoCreate"));
 const VideoReplace = lazy(() => import("./features/toolbox/video-replace/VideoReplace"));
 const ScriptBreakdown = lazy(() => import("./features/toolbox/script-breakdown/ScriptBreakdown"));
 const VideoReverse = lazy(() => import("./features/toolbox/video-reverse/VideoReverse"));
 const StoryboardGrid25 = lazy(() => import("./features/toolbox/storyboard-25/StoryboardGrid25"));
-const Playground = lazy(() => import("./pages/Playground"));
-const CreditUsage = lazy(() => import("./pages/CreditUsage"));
+const Playground = lazy(() => import("./features/playground/Playground"));
+const CreditUsage = lazy(() => import("./features/wallet-payments-api-center/credit-usage/CreditUsage"));
 const ComicShell = lazy(() => import("./pages/comic/ComicShell"));
 const GlobalSettings = lazy(() => import("./pages/comic/GlobalSettings"));
 const StoryScript = lazy(() => import("./pages/comic/StoryScript"));
@@ -20,10 +20,10 @@ const Storyboard = lazy(() => import("./pages/comic/Storyboard"));
 const Video = lazy(() => import("./pages/comic/Video"));
 const Dubbing = lazy(() => import("./pages/comic/Dubbing"));
 const Preview = lazy(() => import("./pages/comic/Preview"));
-const Assets = lazy(() => import("./pages/Assets"));
-const WalletRecharge = lazy(() => import("./pages/WalletRecharge"));
-const ApiCenter = lazy(() => import("./pages/ApiCenter"));
-const EnterpriseConsole = lazy(() => import("./pages/EnterpriseConsole"));
+const Assets = lazy(() => import("./features/assets-media-projects/assets/Assets"));
+const WalletRecharge = lazy(() => import("./features/wallet-payments-api-center/wallet-recharge/WalletRecharge"));
+const ApiCenter = lazy(() => import("./features/wallet-payments-api-center/api-center/ApiCenter"));
+const EnterpriseConsole = lazy(() => import("./features/account-admin-enterprise/enterprise-console/EnterpriseConsole"));
 const SuperAdminConsole = lazy(() => import("./pages/SuperAdminConsole"));
 // Placeholder components for other routes
 const Placeholder = ({ title }: { title: string }) => (

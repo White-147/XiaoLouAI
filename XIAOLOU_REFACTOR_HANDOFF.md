@@ -1,6 +1,6 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-08 14:17 +08
+更新时间：2026-05-08 15:30 +08
 工作目录：`D:\code\XiaoLouAI`
 
 本文件只保留下一棒需要立刻接住的上下文。G14 详细历史已归档到：
@@ -63,10 +63,12 @@ Get-Content .\deploy\records\xiaolouai-refactor-gap-verification.md -Encoding UT
 ## 当前接棒
 
 ```text
-Owner: G14an repository-root-and-feature-owner-layout
+Phase: H feature-layout-cleanup
+Owner: H9 create-video-feature-layout
 Status: done; next owner should continue function-owner inventory and migration
 
 Done:
+- New layout-cleanup work now records as lightweight H-stage entries rather than continuing G14 numbering.
 - Root handoff G14 long history was moved to deploy\records\xiaolouai-finalization-handoff.md.
 - Root handoff now keeps only first-read commands, fixed route, forbidden restore rules, current baton, and verification entrypoints.
 - README.md remains the only project README after prior consolidation.
@@ -81,20 +83,79 @@ Done:
 - Former legacy-surface-evidence moved to deploy\retained\legacy-surface-evidence.
 - Python video-replace sidecar was kept and moved out of tools into:
   backend\services\toolbox\video-replace-sidecar.
+- Python local-model worker sidecar was moved out of the flat services root into:
+  backend\services\model-runtime\local-model-worker-sidecar.
 - The root tools directory was removed after the sidecar move.
 - setup_video_replace.cmd and start_core_api.cmd now use backend\services\toolbox\video-replace-sidecar.
+- start-local-model-worker.ps1, publish/restore runtime scripts, P0 verification,
+  legacy runtime dependency scan, and the .NET supervisor now use
+  backend\services\model-runtime\local-model-worker-sidecar.
+- Playground frontend page moved to XIAOLOU-main\src\features\playground\Playground.tsx.
+- Playground frontend API service moved to XIAOLOU-main\src\features\playground\api\playground.ts.
+- Old Playground page/API paths are thin compatibility re-exports.
+- Playground service test moved with the feature; Vitest now includes feature-local tests.
+- Script Plaza moved to XIAOLOU-main\src\features\comic-production\script-plaza\ScriptPlaza.tsx.
+- Old Script Plaza page path is a thin compatibility re-export.
+- API Center moved to XIAOLOU-main\src\features\wallet-payments-api-center\api-center\ApiCenter.tsx.
+- API Center now has a feature-local API wrapper at
+  XIAOLOU-main\src\features\wallet-payments-api-center\api-center\api\api-center.ts.
+- Old API Center page path is a thin compatibility re-export.
+- Credit Usage moved to XIAOLOU-main\src\features\wallet-payments-api-center\credit-usage\CreditUsage.tsx.
+- Credit Usage now has a feature-local API wrapper at
+  XIAOLOU-main\src\features\wallet-payments-api-center\credit-usage\api\credit-usage.ts.
+- Old Credit Usage page path is a thin compatibility re-export.
+- Wallet Recharge moved to XIAOLOU-main\src\features\wallet-payments-api-center\wallet-recharge\WalletRecharge.tsx.
+- Wallet Recharge now has a feature-local API wrapper at
+  XIAOLOU-main\src\features\wallet-payments-api-center\wallet-recharge\api\wallet-recharge.ts.
+- Old Wallet Recharge page path is a thin compatibility re-export.
+- Assets moved to XIAOLOU-main\src\features\assets-media-projects\assets\Assets.tsx.
+- Assets now has a feature-local API wrapper at
+  XIAOLOU-main\src\features\assets-media-projects\assets\api\assets.ts.
+- Old Assets page path is a thin compatibility re-export.
+- Enterprise Console moved to XIAOLOU-main\src\features\account-admin-enterprise\enterprise-console\EnterpriseConsole.tsx.
+- Enterprise Console now has a feature-local API wrapper at
+  XIAOLOU-main\src\features\account-admin-enterprise\enterprise-console\api\enterprise-console.ts.
+- Old Enterprise Console page path is a thin compatibility re-export.
+- Create Image moved to XIAOLOU-main\src\features\create-image\image-create\ImageCreate.tsx.
+- Create Image now has a feature-local API wrapper at
+  XIAOLOU-main\src\features\create-image\image-create\api\create-image.ts.
+- Old pages\create\ImageCreate.tsx is a thin compatibility re-export.
+- App route lazy import and Layout route prefetch now load Create Image from the feature path.
+- Create Video moved to XIAOLOU-main\src\features\create-video\video-create\VideoCreate.tsx.
+- Create Video now has a feature-local API wrapper at
+  XIAOLOU-main\src\features\create-video\video-create\api\create-video.ts.
+- Old pages\create\VideoCreate.tsx is a thin compatibility re-export.
+- App route lazy import and Layout route prefetch now load Create Video from the feature path.
 - .gitignore now allows committable deploy configs and retained evidence while ignoring:
   deploy\local-secrets, deploy\records, deploy temp/output, sidecar .venv/data/weights.
 
 Current layout check:
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\toolbox is frontend TS/TSX code:
   api wrapper, pages, presets, and prompt module.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\playground is frontend Playground page/API/test code.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\comic-production\script-plaza is the script template plaza route.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\wallet-payments-api-center\api-center is the API Center route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\wallet-payments-api-center\credit-usage is the wallet usage statistics route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\wallet-payments-api-center\wallet-recharge is the wallet recharge route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\assets-media-projects\assets is the assets route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\enterprise-console is the enterprise console route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\create-image\image-create is the create image route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\create-video\video-create is the create video route and feature-local API wrapper.
 - D:\code\XiaoLouAI\backend\services\toolbox\video-replace-sidecar is Python sidecar/runtime code:
   app, scripts, pyproject, local data, weights, sqlite, and venv/runtime artifacts.
+- D:\code\XiaoLouAI\backend\services\model-runtime\local-model-worker-sidecar is Python local model queue-worker sidecar code:
+  app package and canonical queue skeleton worker.
 - The sidecar is service-side now, not retired.
 - Existing first-class frontend feature roots are only:
   XIAOLOU-main\src\features\home
+  XIAOLOU-main\src\features\account-admin-enterprise
+  XIAOLOU-main\src\features\assets-media-projects
+  XIAOLOU-main\src\features\comic-production
+  XIAOLOU-main\src\features\create-image
+  XIAOLOU-main\src\features\create-video
+  XIAOLOU-main\src\features\playground
   XIAOLOU-main\src\features\toolbox
+  XIAOLOU-main\src\features\wallet-payments-api-center
 - Remaining route implementations still need owner-by-owner review under:
   XIAOLOU-main\src\pages
   XIAOLOU-main\src\pages\create

@@ -269,7 +269,7 @@ async function importApiWithMockServices() {
   vi.doMock("../../api/media", () => ({
     createMediaService: factories.createMediaService,
   }));
-  vi.doMock("../../api/playground", () => ({
+  vi.doMock("../../../features/playground/api/playground", () => ({
     createPlaygroundService: factories.createPlaygroundService,
   }));
   vi.doMock("../../api/projects-canvas-create", () => ({

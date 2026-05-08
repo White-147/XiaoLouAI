@@ -60,7 +60,7 @@ internal sealed class LocalModelWorkerProcessService(
     {
         var root = RequireEnvironment("XIAOLOU_ROOT");
         var pythonExe = ResolvePythonExe();
-        var workerRoot = Path.Combine(root, "services", "local-model-worker");
+        var workerRoot = Path.Combine(root, "backend", "services", "model-runtime", "local-model-worker-sidecar");
         if (!Directory.Exists(workerRoot))
         {
             throw new DirectoryNotFoundException($"Local model worker directory not found: {workerRoot}");

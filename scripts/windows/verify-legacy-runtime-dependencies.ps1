@@ -205,7 +205,7 @@ $allowlist = New-List
 $findings = New-List
 
 $dotnetFiles = @(Get-SourceFiles (Join-Path $RepoRoot "backend\dotnet\control-plane\src") @("*.cs", "*.json"))
-$workerFiles = @(Get-SourceFiles (Join-Path $RepoRoot "backend\services\local-model-worker\app") @("*.py"))
+$workerFiles = @(Get-SourceFiles (Join-Path $RepoRoot "backend\services\model-runtime\local-model-worker-sidecar\app") @("*.py"))
 $frontendFiles = @(Get-SourceFiles (Join-Path $RepoRoot "XIAOLOU-main\src") @("*.ts", "*.tsx", "*.js", "*.jsx"))
 $coreApiSourceRoot = Join-Path $CoreApiRoot "src"
 $script:CoreApiSourceDisplayRoot = Get-DisplayPath $coreApiSourceRoot
@@ -217,7 +217,7 @@ $legacyRoutePattern = "(?<route>/(?:api/tasks|api/wallet/recharge(?:-orders)?|ap
 
 foreach ($sourceGroup in @(
   [ordered]@{ name = "dotnet"; files = $dotnetFiles; runtime = "backend/dotnet/control-plane/src" },
-  [ordered]@{ name = "worker"; files = $workerFiles; runtime = "backend/services/local-model-worker/app" },
+  [ordered]@{ name = "worker"; files = $workerFiles; runtime = "backend/services/model-runtime/local-model-worker-sidecar/app" },
   [ordered]@{ name = "frontend"; files = $frontendFiles; runtime = "XIAOLOU-main/src" },
   [ordered]@{ name = "core-api"; files = $coreApiFiles; runtime = $script:CoreApiSourceDisplayRoot }
 )) {

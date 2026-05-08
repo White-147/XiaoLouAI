@@ -257,7 +257,7 @@ $restoreItems = @(
   "XIAOLOU-main\dist",
   "scripts\windows",
   "deploy",
-  "backend\services\local-model-worker"
+  "backend\services\model-runtime\local-model-worker-sidecar"
 )
 
 if ($SnapshotPath -and (Test-Path -LiteralPath $SnapshotPath)) {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ControlOwnerScope } from "../../control-owner-scope";
+import type { ControlOwnerScope } from "../../../../lib/control-owner-scope";
 import { createPlaygroundService } from "../playground";
 import {
   parseJsonBody,
@@ -8,7 +8,7 @@ import {
   SYNTHETIC_UPDATED_AT,
   type RequestCall,
   type RequestHandler,
-} from "./synthetic-fixtures";
+} from "../../../../lib/api/__tests__/synthetic-fixtures";
 
 type PlaygroundServiceDeps = Parameters<typeof createPlaygroundService>[0];
 type StreamHandler = (path: string, init?: RequestInit) => Promise<Response> | Response;

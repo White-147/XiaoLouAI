@@ -34,16 +34,21 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | 模块 | 路径 | 当前说明 |
 | --- | --- | --- |
 | 首页 / AI 工具箱 | `/home`、`/` | 能力卡片、工具箱任务入口和项目导航。 |
-| 图片创作 | `/create/image` | 图片生成主入口，支持参考图和素材库引用；Vertex 图片链路已接入真实 provider。 |
-| 视频创作 | `/create/video` | 视频生成主入口，保留队列和参数面；Vertex/Veo 视频 adapter 待接入。 |
+| 图片创作 | `/create/image` | 前端位于 `XIAOLOU-main/src/features/create-image/image-create/`，支持参考图和素材库引用；Vertex 图片链路已接入真实 provider。 |
+| 视频创作 | `/create/video` | 前端位于 `XIAOLOU-main/src/features/create-video/video-create/`，保留队列和参数面；Vertex/Veo 视频 adapter 待接入。 |
+| 剧本广场 | `/script-plaza` | 前端位于 `XIAOLOU-main/src/features/comic-production/script-plaza/`，用于从剧本模板创建漫剧项目。 |
 | 剧本拆解 | `/create/script-breakdown` | 前端位于 `XIAOLOU-main/src/features/toolbox/script-breakdown/`，通过 toolbox job API 排队。 |
 | 人物替换 | `/create/video-replace` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-replace/`，Python sidecar 位于 `backend/services/toolbox/video-replace-sidecar/`。 |
 | 视频反推提示词 | `/create/video-reverse` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-reverse/`，通过 toolbox job API 排队。 |
 | 25 格分镜 | `/create/storyboard-25` | 前端位于 `XIAOLOU-main/src/features/toolbox/storyboard-25/`，通过 toolbox job API 排队。 |
 | 原生画布 | `/create/canvas` | XiaoLou 原生画布，直接编译进主前端。 |
 | 智能体画布 | `/create/agent-canvas` | XiaoLou 智能体画布入口；历史 Jaaz embed 只作本地对照。 |
-| 资产管理 | `/assets` | 项目资产与画布资产。 |
-| Playground | `/playground` | canonical 会话、消息、记忆和聊天任务调试。 |
+| 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`，用于项目资产、画布资产、上传、同步和预览。 |
+| 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`，用于组织成员、企业钱包和项目权限管理。 |
+| Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；canonical 会话、消息、记忆和聊天任务调试。 |
+| 积分统计 | `/wallet/usage` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/credit-usage/`，用于个人或平台视角的积分消耗统计。 |
+| API 中心 | `/api-center` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/api-center/`，用于供应商模型、默认链路和 API Key 配置。 |
+| 钱包充值 | `/wallet/recharge` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/wallet-recharge/`，用于钱包充值订单、支付方式、凭证上传和最近流水。 |
 
 ## Technical Positioning
 
@@ -70,10 +75,16 @@ locks, `FOR UPDATE SKIP LOCKED`, and `LISTEN/NOTIFY`.
 
 ```text
 XIAOLOU-main/          React + Vite SPA; production output is dist/
+XIAOLOU-main/src/features/account-admin-enterprise/ account/admin/enterprise frontend surfaces
+XIAOLOU-main/src/features/create-image/ create image frontend surface
+XIAOLOU-main/src/features/create-video/ create video frontend surface
 XIAOLOU-main/src/features/home/     home product surface
+XIAOLOU-main/src/features/playground/ Playground frontend surface and API wrapper
+XIAOLOU-main/src/features/wallet-payments-api-center/ wallet/payment/API-center frontend surfaces
 XIAOLOU-main/src/features/toolbox/  toolbox frontend surfaces grouped by capability
 backend/dotnet/control-plane/  .NET control plane and Windows worker projects
 backend/services/toolbox/video-replace-sidecar/ local Python sidecar for video replacement
+backend/services/model-runtime/local-model-worker-sidecar/ local model queue worker sidecar
 deploy/caddy/          Windows Caddy static site + API proxy config
 deploy/windows/        Windows reverse-proxy examples and operations runbooks
 scripts/windows/       Windows install, service, backup, and runtime scripts
@@ -168,9 +179,10 @@ VITE_JAAZ_API_PROXY_TARGET=http://127.0.0.1:57988
 Current frontend canonical route batches call `.NET` source endpoints for
 projects, canvas projects, agent-canvas projects, create image/video lists,
 identity/config, project-adjacent assets/storyboards/videos/dubbings/exports,
-admin reads, Playground, capabilities, and Toolbox. New route-owned code should
-live under `XIAOLOU-main/src/features/<product-area>/`; old page/lib paths may
-remain thin compatibility re-exports during refactors.
+admin reads, Playground, capabilities, and Toolbox. Playground and Toolbox now
+live under feature-owned paths. New route-owned code should live under
+`XIAOLOU-main/src/features/<product-area>/`; old page/lib paths may remain thin
+compatibility re-exports during refactors.
 
 ### Toolbox Frontend Layout
 
@@ -215,7 +227,7 @@ by PostgreSQL canonical tables and explicit client permissions.
 
 ### Local Model Worker Boundary
 
-`backend/services/local-model-worker/` is the only production architecture area that may
+`backend/services/model-runtime/local-model-worker-sidecar/` is the only production architecture area that may
 supervise Python for local model adapters and inference runners. It talks back
 through the Control API internal jobs endpoint, while PostgreSQL remains the
 source of truth through Control API writes. It is currently a canonical queue
@@ -225,6 +237,7 @@ are explicitly attached.
 Single-run validation shape:
 
 ```powershell
+cd backend\services\model-runtime\local-model-worker-sidecar
 .\.venv\Scripts\python -m app.worker --control-api http://127.0.0.1:4100 --lane account-media --provider-route local-model --run-once
 ```
 

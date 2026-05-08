@@ -222,7 +222,7 @@ $ClosedApiProviderRoute = "closed-api-$RunId"
 $LocalModelProviderRoute = "local-model-$RunId"
 $ClosedApiWorkerDll = Join-Path $RepoRoot "backend\dotnet\control-plane\src\XiaoLou.ClosedApiWorker\bin\Debug\net8.0\XiaoLou.ClosedApiWorker.dll"
 $SolutionPath = Join-Path $RepoRoot "backend\dotnet\control-plane\XiaoLou.ControlPlane.sln"
-$LocalWorkerRoot = Join-Path $RepoRoot "backend\services\local-model-worker"
+$LocalWorkerRoot = Join-Path $RepoRoot "backend\services\model-runtime\local-model-worker-sidecar"
 $script:VerifiedAccountId = $null
 $script:KnownJobAccounts = @{}
 
