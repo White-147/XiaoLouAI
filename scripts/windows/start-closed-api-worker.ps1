@@ -16,9 +16,25 @@ if (-not $env:CLOSED_API_WORKER_DLL) {
   $env:CLOSED_API_WORKER_DLL = "$Root\publish\closed-api-worker\XiaoLou.ClosedApiWorker.dll"
 }
 
-$env:ObjectStorage__Provider = $env:OBJECT_STORAGE_PROVIDER
-$env:ObjectStorage__Bucket = $env:OBJECT_STORAGE_BUCKET
-$env:ObjectStorage__PublicBaseUrl = $env:OBJECT_STORAGE_PUBLIC_BASE_URL
+$env:ObjectStorage__Provider = if ($env:OBJECT_STORAGE_PROVIDER) { $env:OBJECT_STORAGE_PROVIDER } else { "local" }
+$env:ObjectStorage__Bucket = if ($env:OBJECT_STORAGE_BUCKET) { $env:OBJECT_STORAGE_BUCKET } else { "xiaolou-staging" }
+$env:ObjectStorage__PublicBaseUrl = if ($env:OBJECT_STORAGE_PUBLIC_BASE_URL) { $env:OBJECT_STORAGE_PUBLIC_BASE_URL } else { "http://127.0.0.1:4100" }
+if ($env:OBJECT_STORAGE_LOCAL_ROOT) {
+  $env:ObjectStorage__LocalRootPath = $env:OBJECT_STORAGE_LOCAL_ROOT
+}
+$env:Vertex__ProjectId = if ($env:VERTEX_PROJECT_ID) { $env:VERTEX_PROJECT_ID } else { $env:GOOGLE_CLOUD_PROJECT }
+$env:Vertex__GeminiLocation = if ($env:VERTEX_GEMINI_LOCATION) { $env:VERTEX_GEMINI_LOCATION } elseif ($env:GOOGLE_CLOUD_LOCATION) { $env:GOOGLE_CLOUD_LOCATION } else { "global" }
+$vertexCredentialsPath = $env:GOOGLE_APPLICATION_CREDENTIALS
+if ($vertexCredentialsPath -and -not (Test-Path -LiteralPath $vertexCredentialsPath)) {
+  $repoSecretCredentials = Join-Path $env:XIAOLOU_REPO_ROOT "deploy\local-secrets\legacy\core-api\vertex-sa.json"
+  if (Test-Path -LiteralPath $repoSecretCredentials) {
+    $vertexCredentialsPath = $repoSecretCredentials
+  }
+}
+$env:GOOGLE_APPLICATION_CREDENTIALS = $vertexCredentialsPath
+$env:Vertex__CredentialsPath = $vertexCredentialsPath
+$env:Vertex__AccessToken = $env:VERTEX_ACCESS_TOKEN
+$env:Vertex__ApiKey = $env:VERTEX_API_KEY
 $env:Worker__Lane = if ($env:CLOSED_API_WORKER_LANE) { $env:CLOSED_API_WORKER_LANE } else { "account-media" }
 $env:Worker__ProviderRoute = if ($env:CLOSED_API_WORKER_PROVIDER_ROUTE) { $env:CLOSED_API_WORKER_PROVIDER_ROUTE } else { "closed-api" }
 

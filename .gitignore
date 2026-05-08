@@ -69,15 +69,27 @@ legacy/core-api/uploads/
 legacy/core-api/video-replace-service/
 legacy/jaaz/server/user_data/
 legacy/jaaz/react/.tanstack/
-video-replace-service/data/
-video-replace-service/weights/
+backend/services/toolbox/video-replace-sidecar/data/
+backend/services/toolbox/video-replace-sidecar/weights/
+backend/services/toolbox/video-replace-sidecar/scripts/_tmp/
+backend/services/toolbox/video-replace-sidecar/*.pt
 jaaz/.git/
 jaaz/server/user_data/
-deploy/local-secrets/
 
-# Downloaded binaries and local tooling payloads
-tools/cuda/
-tools/flash-attn-src/
+# Deploy tree policy:
+# safe to commit: deploy/caddy, deploy/windows, deploy/grafana,
+# deploy/prometheus, deploy/pgbouncer, and sanitized deploy/retained material.
+# keep checkout-local records, secrets, and generated deploy output off GitHub.
+deploy/local-secrets/
+deploy/records/
+deploy/tmp/
+deploy/work/
+deploy/output/
+deploy/**/*.local
+deploy/**/*.local.*
+deploy/**/vertex-sa.json
+deploy/**/credentials/
+deploy/**/secrets/
 
 # Legacy canvas iframe runtime artifacts (canvas now compiled into src/canvas/)
 XIAOLOU-main/internal/
@@ -92,13 +104,11 @@ scripts/playwright_*.cjs
 scripts/verify_*.cjs
 scripts/verify_*.mjs
 scripts/vr_cleanup_stale_thumbs.cjs
-video-replace-service/scripts/_tmp/
 local_canvas*.png
 lovart_canvas*.png
 yunwu-*.js
 
-# Local-only docs and reference exports
-/docs/
+# Local-only reference exports
 lovartai/
 .codex-backups/
 AI*.md

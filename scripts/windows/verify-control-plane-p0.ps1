@@ -220,9 +220,9 @@ $PoisonProviderRoute = "verify-poison-$RunId"
 $ConcurrencyProviderRoute = "verify-concurrency-$RunId"
 $ClosedApiProviderRoute = "closed-api-$RunId"
 $LocalModelProviderRoute = "local-model-$RunId"
-$ClosedApiWorkerDll = Join-Path $RepoRoot "control-plane-dotnet\src\XiaoLou.ClosedApiWorker\bin\Debug\net8.0\XiaoLou.ClosedApiWorker.dll"
-$SolutionPath = Join-Path $RepoRoot "control-plane-dotnet\XiaoLou.ControlPlane.sln"
-$LocalWorkerRoot = Join-Path $RepoRoot "services\local-model-worker"
+$ClosedApiWorkerDll = Join-Path $RepoRoot "backend\dotnet\control-plane\src\XiaoLou.ClosedApiWorker\bin\Debug\net8.0\XiaoLou.ClosedApiWorker.dll"
+$SolutionPath = Join-Path $RepoRoot "backend\dotnet\control-plane\XiaoLou.ControlPlane.sln"
+$LocalWorkerRoot = Join-Path $RepoRoot "backend\services\local-model-worker"
 $script:VerifiedAccountId = $null
 $script:KnownJobAccounts = @{}
 

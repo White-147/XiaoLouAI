@@ -96,9 +96,9 @@ function Add-TermCheck {
   }
 }
 
-$programPath = Join-Path $RepoRoot "control-plane-dotnet\src\XiaoLou.ControlApi\Program.cs"
-$modulesRoot = Join-Path $RepoRoot "control-plane-dotnet\src\XiaoLou.ControlApi\Modules"
-$authHelpersPath = Join-Path $RepoRoot "control-plane-dotnet\src\XiaoLou.ControlApi\Modules\Auth\AuthHelpers.cs"
+$programPath = Join-Path $RepoRoot "backend\dotnet\control-plane\src\XiaoLou.ControlApi\Program.cs"
+$modulesRoot = Join-Path $RepoRoot "backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules"
+$authHelpersPath = Join-Path $RepoRoot "backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Auth\AuthHelpers.cs"
 $p0Path = Join-Path $RepoRoot "scripts\windows\verify-control-plane-p0.ps1"
 $frontendApiPath = Join-Path $RepoRoot "XIAOLOU-main\src\lib\api.ts"
 $frontendGatePath = Join-Path $RepoRoot "scripts\windows\verify-frontend-legacy-dependencies.ps1"

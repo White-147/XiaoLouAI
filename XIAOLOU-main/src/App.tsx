@@ -1,15 +1,15 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
-import Home from "./pages/Home";
+import Home from "./features/home/Home";
 
 const ScriptPlaza = lazy(() => import("./pages/ScriptPlaza"));
 const ImageCreate = lazy(() => import("./pages/create/ImageCreate"));
 const VideoCreate = lazy(() => import("./pages/create/VideoCreate"));
-const VideoReplace = lazy(() => import("./pages/create/VideoReplace"));
-const ScriptBreakdown = lazy(() => import("./pages/create/ScriptBreakdown"));
-const VideoReverse = lazy(() => import("./pages/create/VideoReverse"));
-const StoryboardGrid25 = lazy(() => import("./pages/create/StoryboardGrid25"));
+const VideoReplace = lazy(() => import("./features/toolbox/video-replace/VideoReplace"));
+const ScriptBreakdown = lazy(() => import("./features/toolbox/script-breakdown/ScriptBreakdown"));
+const VideoReverse = lazy(() => import("./features/toolbox/video-reverse/VideoReverse"));
+const StoryboardGrid25 = lazy(() => import("./features/toolbox/storyboard-25/StoryboardGrid25"));
 const Playground = lazy(() => import("./pages/Playground"));
 const CreditUsage = lazy(() => import("./pages/CreditUsage"));
 const ComicShell = lazy(() => import("./pages/comic/ComicShell"));

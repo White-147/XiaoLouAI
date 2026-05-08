@@ -20,7 +20,7 @@ $Lane = if ($env:LOCAL_MODEL_WORKER_LANE) { $env:LOCAL_MODEL_WORKER_LANE } else 
 $ProviderRoute = if ($env:LOCAL_MODEL_WORKER_PROVIDER_ROUTE) { $env:LOCAL_MODEL_WORKER_PROVIDER_ROUTE } else { "local-model" }
 $InternalToken = if ($env:LOCAL_MODEL_WORKER_INTERNAL_TOKEN) { $env:LOCAL_MODEL_WORKER_INTERNAL_TOKEN } else { $env:INTERNAL_API_TOKEN }
 
-Set-Location "$Root\services\local-model-worker"
+Set-Location "$Root\backend\services\local-model-worker"
 & "$env:PYTHON_EXE" -m app.worker `
   --control-api "$env:CONTROL_API_BASE_URL" `
   --lane "$Lane" `

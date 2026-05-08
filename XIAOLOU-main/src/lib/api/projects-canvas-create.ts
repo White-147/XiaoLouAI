@@ -458,6 +458,7 @@ export function createProjectsCanvasCreateService({
       return createCanonicalJob({
         jobType: "create_image_generate",
         domain: "create",
+        lane: "account-media",
         idempotencyKey,
         actionCode: "create_image_generate",
         inputSummary: body.prompt,
@@ -496,6 +497,7 @@ export function createProjectsCanvasCreateService({
       return createCanonicalJob({
         jobType: "create_video_generate",
         domain: "create",
+        lane: "account-media",
         idempotencyKey,
         actionCode: "create_video_generate",
         inputSummary: body.prompt,

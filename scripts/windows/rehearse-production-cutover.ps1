@@ -251,7 +251,7 @@ if ($RegisterServices -or $StartServices) {
 }
 
 foreach ($path in @(
-  "$SourceRoot\control-plane-dotnet\XiaoLou.ControlPlane.sln",
+  "$SourceRoot\backend\dotnet\control-plane\XiaoLou.ControlPlane.sln",
   "$SourceRoot\XIAOLOU-main\package.json",
   "$SourceRoot\scripts\windows\.env.windows.example",
   "$SourceRoot\deploy\windows\Caddyfile.windows.example",
@@ -277,7 +277,7 @@ foreach ($path in @(
   "$SourceRoot\scripts\windows\verify-postgres-backup.ps1",
   "$SourceRoot\scripts\windows\audit-wallet-ledger.ps1",
   "$SourceRoot\scripts\windows\rebuild-wallet-balances-from-ledger.ps1",
-  "$SourceRoot\docs\core-api-cutover.md",
+  "$SourceRoot\deploy\records\core-api-cutover.md",
   "$SourceRoot\deploy\windows\legacy-canonical-projection-checklist.md",
   "$SourceRoot\deploy\windows\payment-provider-replay-checklist.md"
 )) {

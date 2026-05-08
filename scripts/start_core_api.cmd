@@ -33,7 +33,7 @@ if not exist "%LEGACY_CORE_API_ROOT%\node_modules\pg\package.json" (
 )
 
 REM video-replace Python venv is used by core-api subprocesses. No sidecar is required.
-set "VR_SERVICE_DIR=%ROOT%\tools\video\video-replace-service"
+set "VR_SERVICE_DIR=%ROOT%\backend\services\toolbox\video-replace-sidecar"
 if not exist "%VR_SERVICE_DIR%\vr_probe_cli.py" (
     if exist "%LEGACY_CORE_API_ROOT%\video-replace-service\vr_probe_cli.py" set "VR_SERVICE_DIR=%LEGACY_CORE_API_ROOT%\video-replace-service"
 )

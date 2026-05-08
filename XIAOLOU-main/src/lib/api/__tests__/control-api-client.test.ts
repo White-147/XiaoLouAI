@@ -242,6 +242,13 @@ describe("control-api-client", () => {
       message: "Synthetic forbidden",
       status: 403,
     });
+
+    fetchMock.mockResolvedValueOnce(createResponse(JSON.stringify({ error: "Synthetic string error" }), 403));
+
+    await expect(controlApiJsonRequest("/api/jobs")).rejects.toMatchObject({
+      message: "Synthetic string error",
+      status: 403,
+    });
   });
 
   it("throws the stable legacy write disabled error for blocked legacy mutations", () => {

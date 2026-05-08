@@ -184,6 +184,18 @@ $pgBin = if ($env:PG_BIN) { $env:PG_BIN } else { "D:\soft\program\PostgreSQL\18\
 $objectStorageProvider = if ($env:OBJECT_STORAGE_PROVIDER) { $env:OBJECT_STORAGE_PROVIDER } else { "local" }
 $objectStorageBucket = if ($env:OBJECT_STORAGE_BUCKET) { $env:OBJECT_STORAGE_BUCKET } else { "xiaolou-staging" }
 $objectStoragePublicBaseUrl = if ($env:OBJECT_STORAGE_PUBLIC_BASE_URL) { $env:OBJECT_STORAGE_PUBLIC_BASE_URL } else { "http://127.0.0.1:4100" }
+$objectStorageLocalRoot = if ($env:OBJECT_STORAGE_LOCAL_ROOT) { $env:OBJECT_STORAGE_LOCAL_ROOT } else { Join-Path $cacheRoot "object-storage" }
+$vertexProjectId = if ($env:VERTEX_PROJECT_ID) { $env:VERTEX_PROJECT_ID } elseif ($env:GOOGLE_CLOUD_PROJECT) { $env:GOOGLE_CLOUD_PROJECT } else { "" }
+$vertexGeminiLocation = if ($env:VERTEX_GEMINI_LOCATION) { $env:VERTEX_GEMINI_LOCATION } elseif ($env:GOOGLE_CLOUD_LOCATION) { $env:GOOGLE_CLOUD_LOCATION } else { "global" }
+$vertexCredentialsPath = if ($env:GOOGLE_APPLICATION_CREDENTIALS) { $env:GOOGLE_APPLICATION_CREDENTIALS } else { "" }
+if ($vertexCredentialsPath -and -not (Test-Path -LiteralPath $vertexCredentialsPath)) {
+  $repoSecretCredentials = Join-Path $repoRoot "deploy\local-secrets\legacy\core-api\vertex-sa.json"
+  if (Test-Path -LiteralPath $repoSecretCredentials) {
+    $vertexCredentialsPath = $repoSecretCredentials
+  }
+}
+$vertexAccessToken = if ($env:VERTEX_ACCESS_TOKEN) { $env:VERTEX_ACCESS_TOKEN } else { "" }
+$vertexApiKey = if ($env:VERTEX_API_KEY) { $env:VERTEX_API_KEY } else { "" }
 $paymentWebhookSecret = if ($env:PAYMENT_WEBHOOK_SECRET) { $env:PAYMENT_WEBHOOK_SECRET } else { "change-me" }
 $paymentCallbackAllowedProviders = if ($env:PAYMENT_CALLBACK_ALLOWED_PROVIDERS) { $env:PAYMENT_CALLBACK_ALLOWED_PROVIDERS } elseif ($env:Payments__AllowedProviders) { $env:Payments__AllowedProviders } else { "testpay,alipay,wechat" }
 $paymentCallbackRequireAllowedProvider = if ($env:PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER) { $env:PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER } elseif ($env:Payments__RequireAllowedProvider) { $env:Payments__RequireAllowedProvider } else { "true" }
@@ -256,6 +268,7 @@ $machineEnv = [ordered]@{
   ObjectStorage__Provider = $objectStorageProvider
   ObjectStorage__Bucket = $objectStorageBucket
   ObjectStorage__PublicBaseUrl = $objectStoragePublicBaseUrl
+  ObjectStorage__LocalRootPath = $objectStorageLocalRoot
   Payments__WebhookSecret = $paymentWebhookSecret
   Payments__AllowedProviders = $paymentCallbackAllowedProviders
   Payments__RequireAllowedProvider = $paymentCallbackRequireAllowedProvider
@@ -332,6 +345,16 @@ $machineEnv = [ordered]@{
   ClientApi__AllowedPermissions = $clientApiAllowedPermissions
   Worker__Lane = $closedApiWorkerLane
   Worker__ProviderRoute = $closedApiWorkerProviderRoute
+  Vertex__ProjectId = $vertexProjectId
+  Vertex__GeminiLocation = $vertexGeminiLocation
+  Vertex__CredentialsPath = $vertexCredentialsPath
+  Vertex__AccessToken = $vertexAccessToken
+  Vertex__ApiKey = $vertexApiKey
+  VERTEX_PROJECT_ID = $vertexProjectId
+  VERTEX_GEMINI_LOCATION = $vertexGeminiLocation
+  GOOGLE_APPLICATION_CREDENTIALS = $vertexCredentialsPath
+  VERTEX_ACCESS_TOKEN = $vertexAccessToken
+  VERTEX_API_KEY = $vertexApiKey
   LOCAL_MODEL_WORKER_LANE = $localModelWorkerLane
   LOCAL_MODEL_WORKER_PROVIDER_ROUTE = $localModelWorkerProviderRoute
   LOCAL_MODEL_WORKER_INTERNAL_TOKEN = $localModelWorkerInternalToken

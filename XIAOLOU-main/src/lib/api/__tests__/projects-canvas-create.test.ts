@@ -577,6 +577,7 @@ describe("createProjectsCanvasCreateService", () => {
       {
         jobType: "create_image_generate",
         domain: "create",
+        lane: "account-media",
         idempotencyKey: "synthetic-image-key",
         actionCode: "create_image_generate",
         inputSummary: "Synthetic image prompt",
@@ -589,6 +590,7 @@ describe("createProjectsCanvasCreateService", () => {
       {
         jobType: "create_video_generate",
         domain: "create",
+        lane: "account-media",
         idempotencyKey: "synthetic-video-key",
         actionCode: "create_video_generate",
         inputSummary: "Synthetic video prompt",
@@ -668,6 +670,7 @@ describe("createProjectsCanvasCreateService", () => {
       regionCode: "CN",
       currency: "CNY",
       jobType: "create_image_generate",
+      lane: "account-media",
       createdByUserId: "synthetic-org-actor",
       idempotencyKey: "synthetic-image-key",
       payload: {
@@ -682,6 +685,7 @@ describe("createProjectsCanvasCreateService", () => {
       regionCode: "CN",
       currency: "CNY",
       jobType: "create_video_generate",
+      lane: "account-media",
       createdByUserId: "synthetic-org-actor",
       idempotencyKey: "synthetic-video-key",
       payload: {

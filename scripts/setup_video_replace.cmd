@@ -7,8 +7,7 @@ for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI"
 if not defined LEGACY_CORE_API_ROOT set "LEGACY_CORE_API_ROOT=%ROOT%\legacy\core-api"
 if not defined XIAOLOU_RUNTIME_ROOT set "XIAOLOU_RUNTIME_ROOT=%ROOT%\.runtime"
 
-set "SERVICE_DIR=%ROOT%\tools\video\video-replace-service"
-if not exist "%SERVICE_DIR%\pyproject.toml" if exist "%LEGACY_CORE_API_ROOT%\video-replace-service\pyproject.toml" set "SERVICE_DIR=%LEGACY_CORE_API_ROOT%\video-replace-service"
+set "SERVICE_DIR=%ROOT%\backend\services\toolbox\video-replace-sidecar"
 set "VENV_DIR=%SERVICE_DIR%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "ENV_FILE=%SERVICE_DIR%\.env.local"
@@ -31,7 +30,7 @@ set "FLASHATTN_LOG=%SERVICE_DIR%\.install-flash-attn.log"
 
 set "CUDA124_HOME=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
 set "CUDA124_URL=https://developer.download.nvidia.com/compute/cuda/12.4.1/network_installers/cuda_12.4.1_windows_network.exe"
-set "CUDA_CACHE_DIR=%ROOT%\tools\cuda"
+set "CUDA_CACHE_DIR=%XIAOLOU_RUNTIME_ROOT%\xiaolou-cache\cuda"
 set "CUDA_NET_EXE=%CUDA_CACHE_DIR%\cuda_12.4.1_windows_network.exe"
 set "CUDA_NET_DIR=%TEMP%\cuda124-network-full"
 set "CUDA124_COMPONENTS=thrust_12.4 cudart_12.4 cupti_12.4 nvcc_12.4 nvrtc_12.4 nvrtc_dev_12.4 nvtx_12.4 cublas_12.4 cublas_dev_12.4 cufft_12.4 cufft_dev_12.4 curand_12.4 curand_dev_12.4 cusolver_12.4 cusolver_dev_12.4 cusparse_12.4 cusparse_dev_12.4 npp_12.4 npp_dev_12.4 nvjpeg_12.4 nvjpeg_dev_12.4 nvjitlink_12.4 visual_studio_integration_12.4"
@@ -494,11 +493,11 @@ exit /b 0
 if defined ASCII_VENV_PYTHON if exist "%ASCII_VENV_PYTHON%" exit /b 0
 for %%L in (X Y Z W V U T S R Q P O) do (
     if not defined ASCII_ROOT (
-        if exist "%%L:\tools\video\video-replace-service\.venv\Scripts\python.exe" (
+        if exist "%%L:\backend\services\toolbox\video-replace-sidecar\.venv\Scripts\python.exe" (
             set "ASCII_ROOT=%%L:\"
         ) else (
             subst %%L: "%ROOT%" >nul 2>&1
-            if exist "%%L:\tools\video\video-replace-service\.venv\Scripts\python.exe" set "ASCII_ROOT=%%L:\"
+            if exist "%%L:\backend\services\toolbox\video-replace-sidecar\.venv\Scripts\python.exe" set "ASCII_ROOT=%%L:\"
         )
     )
 )
@@ -506,7 +505,7 @@ if not defined ASCII_ROOT (
     echo [error] Could not create an ASCII alias for %ROOT%
     exit /b 1
 )
-set "ASCII_SERVICE_DIR=%ASCII_ROOT%tools\video\video-replace-service"
+set "ASCII_SERVICE_DIR=%ASCII_ROOT%backend\services\toolbox\video-replace-sidecar"
 set "ASCII_VENV_PYTHON=%ASCII_SERVICE_DIR%\.venv\Scripts\python.exe"
 set "ASCII_SITE_PACKAGES=%ASCII_SERVICE_DIR%\.venv\Lib\site-packages"
 if not exist "%ASCII_VENV_PYTHON%" (

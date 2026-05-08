@@ -1,4 +1,4 @@
-﻿# XiaoLouAI Windows Native Ops Runbook
+# XiaoLouAI Windows Native Ops Runbook
 
 ## Services
 
@@ -156,7 +156,7 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 - In read-only mode, unspecified `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST` now defaults to `GET /healthz;GET /api/windows-native/status`; all other legacy public GET routes are closed unless deliberately allowlisted.
 - Read-only mode must not seed or project legacy snapshots into the Windows-native canonical test database. Use `scripts/windows/verify-core-api-compat-readonly.ps1` to start the full process and verify `/healthz`, `/api/windows-native/status`, closed legacy reads, and blocked writes. The default closed-read smoke covers wallet, jobs, projects/assets, chat model discovery, auth providers, legacy payment checkout, canvas/agent-canvas project reads, canvas library reads, and `/uploads/*`.
 - Use `CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST=*` only for local debugging, not production cutover.
-- Keep `docs/core-api-cutover.md` current whenever a legacy alias is added or retired.
+- Keep `deploy/records/core-api-cutover.md` current whenever a legacy alias is added or retired.
 
 ### Legacy Physical Archive Contract (G2b)
 

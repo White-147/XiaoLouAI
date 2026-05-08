@@ -204,8 +204,8 @@ $reviewItems = New-List
 $allowlist = New-List
 $findings = New-List
 
-$dotnetFiles = @(Get-SourceFiles (Join-Path $RepoRoot "control-plane-dotnet\src") @("*.cs", "*.json"))
-$workerFiles = @(Get-SourceFiles (Join-Path $RepoRoot "services\local-model-worker\app") @("*.py"))
+$dotnetFiles = @(Get-SourceFiles (Join-Path $RepoRoot "backend\dotnet\control-plane\src") @("*.cs", "*.json"))
+$workerFiles = @(Get-SourceFiles (Join-Path $RepoRoot "backend\services\local-model-worker\app") @("*.py"))
 $frontendFiles = @(Get-SourceFiles (Join-Path $RepoRoot "XIAOLOU-main\src") @("*.ts", "*.tsx", "*.js", "*.jsx"))
 $coreApiSourceRoot = Join-Path $CoreApiRoot "src"
 $script:CoreApiSourceDisplayRoot = Get-DisplayPath $coreApiSourceRoot
@@ -216,8 +216,8 @@ $legacyHelperPattern = 'DeleteProjectItemAsync\("(?<table>storyboards|videos|dub
 $legacyRoutePattern = "(?<route>/(?:api/tasks|api/wallet/recharge(?:-orders)?|api/admin/recharge|api/billing|api/uploads|uploads/|api/video-replace|vr-[A-Za-z0-9_-]+|api/chat/models|api/auth/google/start|api/agent-canvas/chat(?:/stream)?|api/canvas-library|jaaz-api|jaaz)(?:[A-Za-z0-9_./:?=&%-]*)?)"
 
 foreach ($sourceGroup in @(
-  [ordered]@{ name = "dotnet"; files = $dotnetFiles; runtime = "control-plane-dotnet/src" },
-  [ordered]@{ name = "worker"; files = $workerFiles; runtime = "services/local-model-worker/app" },
+  [ordered]@{ name = "dotnet"; files = $dotnetFiles; runtime = "backend/dotnet/control-plane/src" },
+  [ordered]@{ name = "worker"; files = $workerFiles; runtime = "backend/services/local-model-worker/app" },
   [ordered]@{ name = "frontend"; files = $frontendFiles; runtime = "XIAOLOU-main/src" },
   [ordered]@{ name = "core-api"; files = $coreApiFiles; runtime = $script:CoreApiSourceDisplayRoot }
 )) {

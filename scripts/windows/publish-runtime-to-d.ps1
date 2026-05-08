@@ -111,7 +111,7 @@ if (-not $SkipRollbackSnapshot) {
     [ordered]@{ path = "scripts\windows"; exclude = @(".env.windows") },
     [ordered]@{ path = "docs"; exclude = @() },
     [ordered]@{ path = "deploy"; exclude = @() },
-    [ordered]@{ path = "services\local-model-worker"; exclude = @() }
+    [ordered]@{ path = "backend\services\local-model-worker"; exclude = @() }
   )) {
     $copied = Copy-RuntimeSnapshotDirectory `
       -RelativePath $item.path `
@@ -146,7 +146,7 @@ $paths = @(
   "$RuntimeRoot\publish\local-model-worker-service",
   "$RuntimeRoot\scripts\windows",
   "$RuntimeRoot\docs",
-  "$RuntimeRoot\services\local-model-worker",
+  "$RuntimeRoot\backend\services\local-model-worker",
   "$RuntimeRoot\XIAOLOU-main\dist",
   "$runtimeStateRoot\xiaolou-cache",
   "$runtimeStateRoot\xiaolou-temp",
@@ -224,7 +224,7 @@ function Invoke-DotnetBuildServerShutdown {
 }
 
 if (-not $SkipDotnetPublish) {
-  Push-Location "$SourceRoot\control-plane-dotnet"
+  Push-Location "$SourceRoot\backend\dotnet\control-plane"
   try {
     Invoke-NativeTool -FilePath $DotnetExe -Arguments @("restore", ".\XiaoLou.ControlPlane.sln") -Name "dotnet restore"
 
@@ -257,7 +257,7 @@ if (Test-Path -LiteralPath "$SourceRoot\docs") {
   Copy-Item -Path "$SourceRoot\docs" -Destination "$RuntimeRoot" -Recurse -Force
 }
 Copy-Item -Path "$SourceRoot\deploy" -Destination "$RuntimeRoot" -Recurse -Force
-Copy-Item -Path "$SourceRoot\services\local-model-worker\*" -Destination "$RuntimeRoot\services\local-model-worker" -Recurse -Force
+Copy-Item -Path "$SourceRoot\backend\services\local-model-worker\*" -Destination "$RuntimeRoot\backend\services\local-model-worker" -Recurse -Force
 
 if (-not (Test-Path -LiteralPath "$RuntimeRoot\scripts\windows\.env.windows")) {
   Copy-Item -LiteralPath "$RuntimeRoot\scripts\windows\.env.windows.example" -Destination "$RuntimeRoot\scripts\windows\.env.windows"

@@ -35,10 +35,10 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Restore .NET solution
-        run: dotnet restore .\control-plane-dotnet\XiaoLou.ControlPlane.sln
+        run: dotnet restore .\backend\dotnet\control-plane\XiaoLou.ControlPlane.sln
 
       - name: Build .NET solution
-        run: dotnet build .\control-plane-dotnet\XiaoLou.ControlPlane.sln --configuration Release --no-restore
+        run: dotnet build .\backend\dotnet\control-plane\XiaoLou.ControlPlane.sln --configuration Release --no-restore
 
       - name: Run .NET tests when present
         shell: pwsh
@@ -46,12 +46,12 @@ jobs:
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
           $testProjects = @(
-            Get-ChildItem -Path .\control-plane-dotnet -Recurse -Filter "*Tests*.csproj" -File |
+            Get-ChildItem -Path .\backend\dotnet\control-plane -Recurse -Filter "*Tests*.csproj" -File |
               Sort-Object FullName
           )
 
           if ($testProjects.Count -eq 0) {
-            Write-Host "::notice title=dotnet test skipped::No *Tests*.csproj projects found under control-plane-dotnet."
+            Write-Host "::notice title=dotnet test skipped::No *Tests*.csproj projects found under backend/dotnet/control-plane."
             exit 0
           }
 
@@ -67,7 +67,7 @@ jobs:
           .\scripts\windows\verify-final-legacy-surface.ps1 `
             -CoreApiRoot .\legacy\__missing-core-api `
             -ServicesApiRoot .\legacy\__missing-services-api `
-            -LegacySurfaceManifestPath .\legacy-surface-evidence\final-legacy-surface-manifest-g11k.json
+            -LegacySurfaceManifestPath .\deploy\retained\legacy-surface-evidence\final-legacy-surface-manifest-g11k.json
 
       - name: Verify frontend legacy dependencies
         shell: pwsh

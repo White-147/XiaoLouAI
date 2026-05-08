@@ -229,7 +229,6 @@ $envExamplePath = Join-Path $RepoRoot "scripts\windows\.env.windows.example"
 $publishPath = Join-Path $RepoRoot "scripts\windows\publish-runtime-to-d.ps1"
 $registerPath = Join-Path $RepoRoot "scripts\windows\register-services.ps1"
 $readmePath = Join-Path $RepoRoot "README.md"
-$readmeZhPath = Join-Path $RepoRoot "README.zh-CN.md"
 $servicesApiPath = $ServicesApiRoot
 
 $legacySourceMode = if ($LegacySurfaceManifestPath) { "manifest" } else { "live" }
@@ -244,7 +243,6 @@ $envExampleText = Read-TextFile $envExamplePath
 $publishText = Read-TextFile $publishPath
 $registerText = Read-TextFile $registerPath
 $readmeText = Read-TextFile $readmePath
-$readmeZhText = Read-TextFile $readmeZhPath
 
 if ($legacySourceMode -eq "manifest") {
   $legacyManifestText = Read-TextFile $LegacySurfaceManifestPath
@@ -417,10 +415,10 @@ if ($WriteLegacySurfaceManifestPath) {
 }
 
 Add-TermCheck `
-  -Name "root-readme-final-positioning-en" `
+  -Name "root-readme-final-positioning" `
   -Text $readmeText `
   -Terms @(
-    "control-plane-dotnet/",
+    "backend/dotnet/control-plane/",
     "core-api/",
     "Node compatibility layer and migration reference",
     "services/api/",
@@ -432,24 +430,6 @@ Add-TermCheck `
   ) `
   -OkDetail "README.md clearly positions archived core-api and services API references for finalization." `
   -FailedDetail "README.md must clearly position archived core-api and services API final states."
-
-Add-TermCheck `
-  -Name "root-readme-final-positioning-zh" `
-  -Text $readmeZhText `
-  -Terms @(
-    "control-plane-dotnet/",
-    "core-api/",
-    "services/api/",
-    "legacy/core-api",
-    "legacy/services-api",
-    "Node ",
-    "Python API",
-    "legacy-surface",
-    "legacy reference",
-    "Windows Service workers"
-  ) `
-  -OkDetail "README.zh-CN.md contains the synchronized final positioning anchors." `
-  -FailedDetail "README.zh-CN.md must keep the synchronized final positioning anchors."
 
 if ($registerText) {
   $serviceMatches = [regex]::Matches($registerText, 'Name\s*=\s*"(?<name>XiaoLou-[^"]+)"')

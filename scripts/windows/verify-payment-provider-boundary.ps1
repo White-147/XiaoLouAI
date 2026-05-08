@@ -52,7 +52,7 @@ if (-not [System.IO.Path]::GetFullPath($DotnetExe).StartsWith("D:\", [StringComp
 }
 
 if (-not $ControlApiDll) {
-  $ControlApiDll = Join-Path $RepoRoot "control-plane-dotnet\src\XiaoLou.ControlApi\bin\Debug\net8.0\XiaoLou.ControlApi.dll"
+  $ControlApiDll = Join-Path $RepoRoot "backend\dotnet\control-plane\src\XiaoLou.ControlApi\bin\Debug\net8.0\XiaoLou.ControlApi.dll"
 }
 
 if (-not $PaymentWebhookSecret) {
@@ -181,7 +181,7 @@ function Invoke-ExpectedStatus {
 }
 
 if ($Build -or -not (Test-Path -LiteralPath $ControlApiDll)) {
-  & $DotnetExe build (Join-Path $RepoRoot "control-plane-dotnet\XiaoLou.ControlPlane.sln")
+  & $DotnetExe build (Join-Path $RepoRoot "backend\dotnet\control-plane\XiaoLou.ControlPlane.sln")
   if ($LASTEXITCODE -ne 0) {
     throw "dotnet build failed with exit code $LASTEXITCODE"
   }

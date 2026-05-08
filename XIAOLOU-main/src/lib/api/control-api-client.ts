@@ -257,11 +257,24 @@ export async function controlApiJsonRequest<T>(path: string, init?: RequestInit)
   }
 
   if (!response.ok) {
-    const errorPayload = payload as { error?: { message?: string; code?: string }; title?: string; detail?: string } | null;
+    const errorPayload = payload as {
+      error?: string | { message?: string; code?: string };
+      title?: string;
+      detail?: string;
+    } | null;
+    const rawError = errorPayload?.error;
+    const errorMessage =
+      typeof rawError === "string"
+        ? rawError
+        : rawError?.message;
+    const errorCode =
+      typeof rawError === "object" && rawError !== null
+        ? rawError.code
+        : undefined;
     throw new ApiRequestError(
-      errorPayload?.error?.message || errorPayload?.detail || errorPayload?.title || "Control API request failed",
+      errorMessage || errorPayload?.detail || errorPayload?.title || "Control API request failed",
       {
-        code: errorPayload?.error?.code,
+        code: errorCode,
         status: response.status,
       },
     );
