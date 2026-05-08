@@ -323,6 +323,31 @@ public sealed record CreateOrganizationMemberRequest
     public bool? CanUseOrganizationWallet { get; init; }
 }
 
+public sealed record OrganizationMemberPasswordResetRequest
+{
+    public string? NewPassword { get; init; }
+}
+
+public sealed record UpdateOrganizationMemberAccountRequest
+{
+    public string? DisplayName { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public string? Department { get; init; }
+    public string? MembershipRole { get; init; }
+    public bool? CanUseOrganizationWallet { get; init; }
+    public string? NewPassword { get; init; }
+}
+
+public sealed record UpdatePlatformAccountRequest
+{
+    public string? DisplayName { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public string? PlatformRole { get; init; }
+    public string? NewPassword { get; init; }
+}
+
 public sealed record PaymentCallbackRequest : AccountScope
 {
     public string Provider { get; init; } = "";

@@ -70,6 +70,37 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS region_code text NOT NULL DEFAULT 'CN
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text;
 CREATE INDEX IF NOT EXISTS idx_users_account_id ON users(account_id);
 
+DO $$
+BEGIN
+  IF to_regclass('uq_users_email_lower') IS NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM (
+         SELECT lower(email) AS normalized_email
+         FROM users
+         WHERE email IS NOT NULL AND btrim(email) <> ''
+         GROUP BY lower(email)
+         HAVING COUNT(*) > 1
+       ) duplicates
+     ) THEN
+    EXECUTE $create_index$CREATE UNIQUE INDEX uq_users_email_lower ON users ((lower(email))) WHERE email IS NOT NULL AND btrim(email) <> ''$create_index$;
+  END IF;
+
+  IF to_regclass('uq_users_phone_hash') IS NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM (
+         SELECT phone_hash
+         FROM users
+         WHERE phone_hash IS NOT NULL AND btrim(phone_hash) <> ''
+         GROUP BY phone_hash
+         HAVING COUNT(*) > 1
+       ) duplicates
+     ) THEN
+    EXECUTE $create_index$CREATE UNIQUE INDEX uq_users_phone_hash ON users (phone_hash) WHERE phone_hash IS NOT NULL AND btrim(phone_hash) <> ''$create_index$;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_account_id uuid NOT NULL REFERENCES accounts(id),

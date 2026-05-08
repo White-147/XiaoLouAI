@@ -12,6 +12,7 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan PasswordResetTokenTtl = TimeSpan.FromMinutes(30);
+    private const string DefaultSuperAdminPassword = "admin";
     private const int PasswordResetRateLimit = 3;
 
     public async Task<Dictionary<string, object?>> GetPermissionContextAsync(
@@ -39,6 +40,11 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         var defaultOrganizationId = request.DefaultOrganizationId is null
             ? AsString(current, "defaultOrganizationId")
             : NormalizeBlank(request.DefaultOrganizationId);
+        if (phone is not null && !string.Equals(phone, AsString(current, "phone"), StringComparison.Ordinal))
+        {
+            await RequireUniqueAccountContactAsync(null, phone, normalizedActorId, cancellationToken);
+        }
+
         if (defaultOrganizationId is not null)
         {
             var defaultOrganization = organizations.FirstOrDefault(item =>
@@ -72,13 +78,18 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
     {
         var email = RequireEmail(request.Email);
         var password = RequirePassword(request.Password);
-        var actorId = ActorIdFromEmail(email, mode);
-        var passwordHash = await GetPasswordHashAsync(actorId, cancellationToken);
-        if (!PasswordHashing.VerifyPassword(password, passwordHash))
+        if (email == "root@xiaolou.local")
+        {
+            await EnsureDemoIdentityAsync("root_demo_001", cancellationToken);
+        }
+
+        var user = await GetPasswordUserRecordByEmailAsync(email, cancellationToken);
+        if (user is null || !PasswordHashing.VerifyPassword(password, AsString(user, "password_hash")))
         {
             throw InvalidCredentials();
         }
 
+        var actorId = AsString(user, "actor_id") ?? throw InvalidCredentials();
         var permissionContext = await GetPermissionContextAsync(actorId, cancellationToken);
         var resolvedPlatformRole = AsString(permissionContext, "platformRole") ?? "guest";
         if (mode == "ops_admin")
@@ -87,10 +98,6 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             {
                 throw InvalidCredentials();
             }
-        }
-        else if (resolvedPlatformRole is "ops_admin" or "super_admin")
-        {
-            throw InvalidCredentials();
         }
 
         return permissionContext;
@@ -159,12 +166,13 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
     {
         var email = RequireEmail(request.Email);
         var newPassword = RequirePassword(request.NewPassword);
-        var actorId = ActorIdFromEmail(email, "personal");
-        if (await GetUserAsync(actorId, cancellationToken) is null)
+        var user = await GetPasswordUserRecordByEmailAsync(email, cancellationToken);
+        if (user is null || ResolvePlatformRole(user) is "ops_admin" or "super_admin")
         {
             throw new ArgumentException("account is not available");
         }
 
+        var actorId = AsString(user, "actor_id") ?? throw new ArgumentException("account is not available");
         await UpdatePasswordHashAsync(
             actorId,
             PasswordHashing.HashPassword(newPassword),
@@ -178,9 +186,9 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         CancellationToken cancellationToken)
     {
         var email = RequireEmail(request.Email);
-        var actorId = ActorIdFromEmail(email, "personal");
-        var user = await GetPasswordUserRecordAsync(actorId, cancellationToken);
-        if (user is null || InferPlatformRole(actorId) is "ops_admin" or "super_admin")
+        var user = await GetPasswordUserRecordByEmailAsync(email, cancellationToken);
+        var actorId = user is null ? null : AsString(user, "actor_id");
+        if (user is null || actorId is null || ResolvePlatformRole(user) is "ops_admin" or "super_admin")
         {
             await RecordPasswordAuditAsync(
                 "password.reset.request",
@@ -400,10 +408,11 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
     {
         var email = RequireEmail(request.Email);
         var password = RequirePassword(request.Password);
-        var actorId = ActorIdFromEmail(email, "personal");
-        RejectReservedPlatformActor(actorId);
+        RejectReservedPlatformEmail(email);
+        await RequireUniqueAccountContactAsync(email, request.Phone, null, cancellationToken);
+        var actorId = NewUserId();
         var displayName = NormalizeBlank(request.DisplayName) ?? EmailLocalPart(email);
-        var passwordHash = await PasswordHashForRegistrationAsync(actorId, password, cancellationToken);
+        var passwordHash = PasswordHashing.HashPassword(password);
         await EnsureUserAsync(actorId, displayName, email, request.Phone, "customer", null, null, passwordHash, false, cancellationToken);
         var permissionContext = await GetPermissionContextAsync(actorId, cancellationToken);
         return BuildRegistrationResult(actorId, permissionContext, "personal", null);
@@ -415,12 +424,13 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
     {
         var email = RequireEmail(request.Email);
         var password = RequirePassword(request.Password);
-        var actorId = ActorIdFromEmail(email, "enterprise_admin");
-        RejectReservedPlatformActor(actorId);
+        RejectReservedPlatformEmail(email);
+        await RequireUniqueAccountContactAsync(email, request.Phone, null, cancellationToken);
+        var actorId = NewUserId();
         var companyName = NormalizeBlank(request.CompanyName) ?? "XiaoLou Enterprise";
         var organizationId = OrganizationIdFromName(companyName);
         var adminName = NormalizeBlank(request.AdminName) ?? EmailLocalPart(email);
-        var passwordHash = await PasswordHashForRegistrationAsync(actorId, password, cancellationToken);
+        var passwordHash = PasswordHashing.HashPassword(password);
         await EnsureOrganizationAsync(organizationId, companyName, cancellationToken);
         await EnsureUserAsync(actorId, adminName, email, request.Phone, "customer", organizationId, null, passwordHash, false, cancellationToken);
         await EnsureMembershipAsync(
@@ -447,8 +457,10 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
 
     public async Task<IReadOnlyList<Dictionary<string, object?>>> ListOrganizationMembersAsync(
         string organizationId,
+        string? query,
         CancellationToken cancellationToken)
     {
+        var normalizedQuery = NormalizeBlank(query);
         await EnsureDemoOrganizationAsync(organizationId, cancellationToken);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand(
@@ -463,19 +475,96 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
               om.updated_at,
               u.email,
               u.display_name,
-              u.data::text AS user_data_json
+              u.data::text AS user_data_json,
+              usage.today_used_credits,
+              usage.month_used_credits,
+              usage.total_used_credits,
+              usage.refunded_credits,
+              usage.recent_task_count,
+              usage.last_activity_at,
+              usage.series_json::text AS usage_series_json
             FROM organization_memberships om
             JOIN accounts org_account ON org_account.id = om.organization_account_id
             JOIN accounts user_account ON user_account.id = om.user_account_id
             LEFT JOIN users u ON u.account_id = user_account.id
+            LEFT JOIN LATERAL (
+              SELECT
+                COALESCE(SUM(CASE
+                  WHEN ledger.amount_value < 0 AND ledger.created_at >= date_trunc('day', now()) THEN abs(ledger.amount_value)
+                  ELSE 0
+                END), 0) AS today_used_credits,
+                COALESCE(SUM(CASE
+                  WHEN ledger.amount_value < 0 AND ledger.created_at >= date_trunc('month', now()) THEN abs(ledger.amount_value)
+                  ELSE 0
+                END), 0) AS month_used_credits,
+                COALESCE(SUM(CASE WHEN ledger.amount_value < 0 THEN abs(ledger.amount_value) ELSE 0 END), 0) AS total_used_credits,
+                COALESCE(SUM(CASE WHEN ledger.entry_type = 'refund' THEN abs(ledger.amount_value) ELSE 0 END), 0) AS refunded_credits,
+                COUNT(*) FILTER (WHERE ledger.amount_value < 0) AS recent_task_count,
+                MAX(ledger.created_at) AS last_activity_at,
+                COALESCE((
+                  SELECT jsonb_agg(
+                    jsonb_build_object(
+                      'bucketStart', bucket.bucket_start,
+                      'bucketLabel', to_char(bucket.bucket_start, 'MM-DD'),
+                      'consumedCredits', bucket.consumed_credits,
+                      'refundedCredits', bucket.refunded_credits
+                    )
+                    ORDER BY bucket.bucket_start
+                  )
+                  FROM (
+                    SELECT
+                      date_trunc('day', wl.created_at) AS bucket_start,
+                      COALESCE(SUM(CASE
+                        WHEN COALESCE(NULLIF(wl.credit_amount, 0), wl.amount, 0) < 0
+                        THEN abs(COALESCE(NULLIF(wl.credit_amount, 0), wl.amount, 0))
+                        ELSE 0
+                      END), 0) AS consumed_credits,
+                      COALESCE(SUM(CASE
+                        WHEN wl.entry_type = 'refund'
+                        THEN abs(COALESCE(NULLIF(wl.credit_amount, 0), wl.amount, 0))
+                        ELSE 0
+                      END), 0) AS refunded_credits
+                    FROM wallet_ledger wl
+                    WHERE (wl.account_id = org_account.id OR wl.wallet_id = org_account.id::text)
+                      AND wl.actor_id = om.legacy_user_id
+                      AND wl.created_at >= now() - interval '30 days'
+                    GROUP BY date_trunc('day', wl.created_at)
+                  ) bucket
+                ), '[]'::jsonb) AS series_json
+              FROM (
+                SELECT
+                  COALESCE(NULLIF(wl.credit_amount, 0), wl.amount, 0) AS amount_value,
+                  wl.entry_type,
+                  wl.created_at
+                FROM wallet_ledger wl
+                WHERE (wl.account_id = org_account.id OR wl.wallet_id = org_account.id::text)
+                  AND wl.actor_id = om.legacy_user_id
+              ) ledger
+            ) usage ON true
             WHERE org_account.legacy_owner_type = 'organization'
               AND org_account.legacy_owner_id = @organizationId
+              AND om.status <> 'disabled'
+              AND (
+                @query IS NULL
+                OR lower(om.legacy_user_id) LIKE @query ESCAPE '\'
+                OR lower(COALESCE(om.data->>'displayName', u.display_name, '')) LIKE @query ESCAPE '\'
+                OR lower(COALESCE(om.data->>'email', u.email, '')) LIKE @query ESCAPE '\'
+                OR lower(COALESCE(om.data->>'phone', '')) LIKE @query ESCAPE '\'
+              )
             ORDER BY om.updated_at DESC, om.created_at DESC
             LIMIT 200
             """,
             connection);
         command.Parameters.AddWithValue("organizationId", NpgsqlDbType.Text, organizationId);
+        command.Parameters.AddWithValue("query", NpgsqlDbType.Text, DbNullable(normalizedQuery is null ? null : $"%{EscapeLike(normalizedQuery.ToLowerInvariant())}%"));
         return (await PostgresRows.ReadManyAsync(command, cancellationToken)).Select(ToOrganizationMember).ToArray();
+    }
+
+    public Task<IReadOnlyList<Dictionary<string, object?>>> ListOrganizationMembersAsync(
+        string organizationId,
+        CancellationToken cancellationToken)
+    {
+        return ListOrganizationMembersAsync(organizationId, null, cancellationToken);
     }
 
     public async Task<Dictionary<string, object?>> CreateOrganizationMemberAsync(
@@ -486,6 +575,8 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         var normalizedOrganizationId = NormalizeOwnerId(organizationId, "org_demo_001");
         await EnsureDemoOrganizationAsync(normalizedOrganizationId, cancellationToken);
         var email = RequireEmail(request.Email);
+        RejectReservedPlatformEmail(email);
+        await RequireUniqueAccountContactAsync(email, request.Phone, null, cancellationToken);
         var requestedPassword = NormalizeBlank(request.Password);
         var generatedPassword = requestedPassword is null ? PasswordHashing.GenerateTemporaryPassword() : null;
         var password = requestedPassword ?? generatedPassword ?? throw new InvalidOperationException("Failed to generate member password.");
@@ -494,9 +585,7 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             ? "admin"
             : "member";
         var role = membershipRole == "admin" ? "enterprise_admin" : "enterprise_member";
-        var actorMode = role == "enterprise_admin" ? "enterprise_admin" : "personal";
-        var actorId = ActorIdFromEmail(email, actorMode);
-        RejectReservedPlatformActor(actorId);
+        var actorId = NewUserId();
         var displayName = NormalizeBlank(request.DisplayName) ?? EmailLocalPart(email);
         await EnsureUserAsync(actorId, displayName, email, request.Phone, "customer", normalizedOrganizationId, null, passwordHash, true, cancellationToken);
         await EnsureMembershipAsync(
@@ -518,6 +607,422 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         var member = members.First(item => string.Equals(AsString(item, "userId"), actorId, StringComparison.Ordinal));
         var permissionContext = await GetPermissionContextAsync(actorId, cancellationToken);
         return BuildRegistrationResult(actorId, permissionContext, role, member, generatedPassword, generatedPassword is not null);
+    }
+
+    public async Task<Dictionary<string, object?>> ResetOrganizationMemberPasswordAsync(
+        string organizationId,
+        string userId,
+        OrganizationMemberPasswordResetRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedOrganizationId = NormalizeOwnerId(organizationId, "org_demo_001");
+        var normalizedUserId = NormalizeActorId(userId);
+        var newPassword = RequirePassword(request.NewPassword);
+        if (await GetOrganizationMemberPasswordRecordAsync(normalizedOrganizationId, normalizedUserId, cancellationToken) is null)
+        {
+            throw new ArgumentException("member is not available");
+        }
+
+        await UpdatePasswordHashAsync(
+            normalizedUserId,
+            PasswordHashing.HashPassword(newPassword),
+            cancellationToken);
+        return await BuildPasswordConfiguredResultAsync(normalizedUserId, true, cancellationToken);
+    }
+
+    public async Task<Dictionary<string, object?>> UpdateOrganizationMemberAccountAsync(
+        string organizationId,
+        string userId,
+        UpdateOrganizationMemberAccountRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedOrganizationId = NormalizeOwnerId(organizationId, "org_demo_001");
+        var normalizedUserId = NormalizeActorId(userId);
+        var existing = await GetOrganizationMemberRecordAsync(normalizedOrganizationId, normalizedUserId, cancellationToken)
+            ?? throw new ArgumentException("member is not available");
+        var membershipData = ParseJsonObject(AsString(existing, "membership_data_json"));
+        var displayName = request.DisplayName is null
+            ? ReadJsonString(membershipData, "displayName") ?? AsString(existing, "display_name") ?? DefaultDisplayName(normalizedUserId)
+            : NormalizeBlank(request.DisplayName) ?? throw new ArgumentException("displayName is required");
+        var email = request.Email is null
+            ? ReadJsonString(membershipData, "email") ?? AsString(existing, "email") ?? throw new ArgumentException("email is required")
+            : RequireEmail(request.Email);
+        RejectReservedPlatformEmail(email);
+        var phone = request.Phone is null
+            ? ReadJsonString(membershipData, "phone")
+            : NormalizeBlank(request.Phone);
+        var department = request.Department is null
+            ? ReadJsonString(membershipData, "department")
+            : NormalizeBlank(request.Department);
+        var membershipRole = request.MembershipRole is null
+            ? NormalizeEnterpriseRole(AsString(existing, "role")) == "enterprise_admin"
+                ? "admin"
+                : ReadJsonString(membershipData, "membershipRole") ?? "member"
+            : string.Equals(request.MembershipRole, "admin", StringComparison.OrdinalIgnoreCase)
+                ? "admin"
+                : "member";
+        var role = membershipRole == "admin" ? "enterprise_admin" : "enterprise_member";
+        var canUseOrganizationWallet = request.CanUseOrganizationWallet
+            ?? ReadJsonBool(membershipData, "canUseOrganizationWallet", true);
+        var currentEmail = NormalizeEmail(ReadJsonString(membershipData, "email") ?? AsString(existing, "email"));
+        var currentPhone = NormalizeBlank(ReadJsonString(membershipData, "phone"));
+        if (!string.Equals(currentEmail, NormalizeEmail(email), StringComparison.Ordinal)
+            || !string.Equals(currentPhone, phone, StringComparison.Ordinal))
+        {
+            await RequireUniqueAccountContactAsync(email, phone, normalizedUserId, cancellationToken);
+        }
+
+        var passwordHash = request.NewPassword is null
+            ? null
+            : PasswordHashing.HashPassword(RequirePassword(request.NewPassword));
+        var userPatch = new JsonObject
+        {
+            ["phone"] = phone,
+        };
+        var membershipPatch = new JsonObject
+        {
+            ["displayName"] = displayName,
+            ["email"] = email,
+            ["phone"] = phone,
+            ["department"] = department,
+            ["membershipRole"] = membershipRole,
+            ["canUseOrganizationWallet"] = canUseOrganizationWallet,
+        };
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var userAccountId = AsGuid(existing, "user_account_id");
+        var organizationAccountId = AsGuid(existing, "organization_account_id");
+        await using var updateUser = new NpgsqlCommand(
+            """
+            UPDATE users
+            SET email = @email,
+                phone_hash = @phoneHash,
+                password_hash = CASE
+                    WHEN @passwordHash IS NULL THEN password_hash
+                    ELSE @passwordHash
+                END,
+                display_name = @displayName,
+                status = 'active',
+                data = data || CAST(@userData AS jsonb),
+                updated_at = now()
+            WHERE account_id = @userAccountId
+            """,
+            connection,
+            transaction);
+        updateUser.Parameters.AddWithValue("userAccountId", NpgsqlDbType.Uuid, userAccountId);
+        updateUser.Parameters.AddWithValue("email", NpgsqlDbType.Text, email);
+        updateUser.Parameters.AddWithValue("phoneHash", NpgsqlDbType.Text, DbNullable(HashOptional(phone)));
+        updateUser.Parameters.AddWithValue("passwordHash", NpgsqlDbType.Text, DbNullable(passwordHash));
+        updateUser.Parameters.AddWithValue("displayName", NpgsqlDbType.Text, displayName);
+        updateUser.Parameters.AddWithValue("userData", NpgsqlDbType.Jsonb, userPatch.ToJsonString(JsonOptions));
+        await updateUser.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var updateMembership = new NpgsqlCommand(
+            """
+            UPDATE organization_memberships
+            SET role = @role,
+                status = 'active',
+                data = data || CAST(@membershipData AS jsonb),
+                updated_at = now()
+            WHERE organization_account_id = @organizationAccountId
+              AND user_account_id = @userAccountId
+            """,
+            connection,
+            transaction);
+        updateMembership.Parameters.AddWithValue("organizationAccountId", NpgsqlDbType.Uuid, organizationAccountId);
+        updateMembership.Parameters.AddWithValue("userAccountId", NpgsqlDbType.Uuid, userAccountId);
+        updateMembership.Parameters.AddWithValue("role", NpgsqlDbType.Text, role);
+        updateMembership.Parameters.AddWithValue("membershipData", NpgsqlDbType.Jsonb, membershipPatch.ToJsonString(JsonOptions));
+        await updateMembership.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        var members = await ListOrganizationMembersAsync(normalizedOrganizationId, normalizedUserId, cancellationToken);
+        return members.FirstOrDefault(item => string.Equals(AsString(item, "userId"), normalizedUserId, StringComparison.Ordinal))
+            ?? throw new ArgumentException("member is not available");
+    }
+
+    public async Task<Dictionary<string, object?>> DeleteOrganizationMemberAccountAsync(
+        string organizationId,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedOrganizationId = NormalizeOwnerId(organizationId, "org_demo_001");
+        var normalizedUserId = NormalizeActorId(userId);
+        var existing = await GetOrganizationMemberRecordAsync(normalizedOrganizationId, normalizedUserId, cancellationToken)
+            ?? throw new ArgumentException("member is not available");
+        var deletedAt = DateTimeOffset.UtcNow.ToString("O");
+        var deletionPatch = new JsonObject
+        {
+            ["deletedAt"] = deletedAt,
+            ["phone"] = null,
+        };
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var userAccountId = AsGuid(existing, "user_account_id");
+        var organizationAccountId = AsGuid(existing, "organization_account_id");
+        await using var updateMembership = new NpgsqlCommand(
+            """
+            UPDATE organization_memberships
+            SET status = 'disabled',
+                data = data || CAST(@deletionData AS jsonb),
+                updated_at = now()
+            WHERE organization_account_id = @organizationAccountId
+              AND user_account_id = @userAccountId
+            """,
+            connection,
+            transaction);
+        updateMembership.Parameters.AddWithValue("organizationAccountId", NpgsqlDbType.Uuid, organizationAccountId);
+        updateMembership.Parameters.AddWithValue("userAccountId", NpgsqlDbType.Uuid, userAccountId);
+        updateMembership.Parameters.AddWithValue("deletionData", NpgsqlDbType.Jsonb, deletionPatch.ToJsonString(JsonOptions));
+        await updateMembership.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var updateUser = new NpgsqlCommand(
+            """
+            UPDATE users
+            SET email = NULL,
+                phone_hash = NULL,
+                password_hash = NULL,
+                status = 'disabled',
+                data = data || CAST(@deletionData AS jsonb),
+                updated_at = now()
+            WHERE account_id = @userAccountId
+            """,
+            connection,
+            transaction);
+        updateUser.Parameters.AddWithValue("userAccountId", NpgsqlDbType.Uuid, userAccountId);
+        updateUser.Parameters.AddWithValue("deletionData", NpgsqlDbType.Jsonb, deletionPatch.ToJsonString(JsonOptions));
+        await updateUser.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var updateAccount = new NpgsqlCommand(
+            """
+            UPDATE accounts
+            SET status = 'disabled',
+                updated_at = now()
+            WHERE id = @userAccountId
+            """,
+            connection,
+            transaction);
+        updateAccount.Parameters.AddWithValue("userAccountId", NpgsqlDbType.Uuid, userAccountId);
+        await updateAccount.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return new Dictionary<string, object?>
+        {
+            ["deleted"] = true,
+            ["organizationId"] = normalizedOrganizationId,
+            ["userId"] = normalizedUserId,
+        };
+    }
+
+    public async Task<IReadOnlyList<Dictionary<string, object?>>> ListPlatformAccountsAsync(
+        string? query,
+        CancellationToken cancellationToken)
+    {
+        var normalizedQuery = NormalizeBlank(query);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              user_account.id AS account_id,
+              user_account.legacy_owner_id AS actor_id,
+              user_account.status AS account_status,
+              user_account.created_at,
+              user_account.updated_at,
+              u.email,
+              u.display_name,
+              u.status AS user_status,
+              u.data::text AS data_json
+            FROM accounts user_account
+            JOIN users u ON u.account_id = user_account.id
+            WHERE user_account.legacy_owner_type = 'user'
+              AND (
+                @query IS NULL
+                OR lower(user_account.legacy_owner_id) LIKE @query ESCAPE '\'
+                OR lower(COALESCE(u.display_name, '')) LIKE @query ESCAPE '\'
+                OR lower(COALESCE(u.email, '')) LIKE @query ESCAPE '\'
+                OR lower(COALESCE(u.data->>'phone', '')) LIKE @query ESCAPE '\'
+              )
+            ORDER BY
+              CASE WHEN u.status = 'active' AND user_account.status = 'active' THEN 0 ELSE 1 END,
+              user_account.updated_at DESC,
+              user_account.created_at DESC
+            LIMIT 200
+            """,
+            connection);
+        command.Parameters.AddWithValue("query", NpgsqlDbType.Text, DbNullable(normalizedQuery is null ? null : $"%{EscapeLike(normalizedQuery.ToLowerInvariant())}%"));
+        return (await PostgresRows.ReadManyAsync(command, cancellationToken)).Select(ToPlatformAccount).ToArray();
+    }
+
+    public async Task<Dictionary<string, object?>> UpdatePlatformAccountAsync(
+        string userId,
+        UpdatePlatformAccountRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedUserId = NormalizeActorId(userId);
+        var existing = await GetPlatformAccountRecordAsync(normalizedUserId, cancellationToken)
+            ?? throw new ArgumentException("account is not available");
+        var data = ParseJsonObject(AsString(existing, "data_json"));
+        var displayName = request.DisplayName is null
+            ? AsString(existing, "display_name") ?? ReadJsonString(data, "displayName") ?? DefaultDisplayName(normalizedUserId)
+            : NormalizeBlank(request.DisplayName) ?? throw new ArgumentException("displayName is required");
+        var email = request.Email is null
+            ? AsString(existing, "email") ?? ReadJsonString(data, "email") ?? throw new ArgumentException("email is required")
+            : RequireEmail(request.Email);
+        RejectReservedPlatformEmail(email);
+        var phone = request.Phone is null
+            ? ReadJsonString(data, "phone")
+            : NormalizeBlank(request.Phone);
+        var platformRole = NormalizePlatformRole(request.PlatformRole)
+            ?? ReadJsonString(data, "platformRole")
+            ?? InferPlatformRole(normalizedUserId);
+        var currentEmail = NormalizeEmail(AsString(existing, "email") ?? ReadJsonString(data, "email"));
+        var currentPhone = NormalizeBlank(ReadJsonString(data, "phone"));
+        if (!string.Equals(currentEmail, NormalizeEmail(email), StringComparison.Ordinal)
+            || !string.Equals(currentPhone, phone, StringComparison.Ordinal))
+        {
+            await RequireUniqueAccountContactAsync(email, phone, normalizedUserId, cancellationToken);
+        }
+
+        var passwordHash = request.NewPassword is null
+            ? null
+            : PasswordHashing.HashPassword(RequirePassword(request.NewPassword));
+        var userPatch = new JsonObject
+        {
+            ["phone"] = phone,
+            ["platformRole"] = platformRole,
+            ["deletedAt"] = null,
+        };
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var userAccountId = AsGuid(existing, "account_id");
+        await using var updateUser = new NpgsqlCommand(
+            """
+            UPDATE users
+            SET email = @email,
+                phone_hash = @phoneHash,
+                password_hash = CASE
+                    WHEN @passwordHash IS NULL THEN password_hash
+                    ELSE @passwordHash
+                END,
+                display_name = @displayName,
+                status = 'active',
+                data = data || CAST(@userData AS jsonb),
+                updated_at = now()
+            WHERE account_id = @accountId
+            """,
+            connection,
+            transaction);
+        updateUser.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, userAccountId);
+        updateUser.Parameters.AddWithValue("email", NpgsqlDbType.Text, email);
+        updateUser.Parameters.AddWithValue("phoneHash", NpgsqlDbType.Text, DbNullable(HashOptional(phone)));
+        updateUser.Parameters.AddWithValue("passwordHash", NpgsqlDbType.Text, DbNullable(passwordHash));
+        updateUser.Parameters.AddWithValue("displayName", NpgsqlDbType.Text, displayName);
+        updateUser.Parameters.AddWithValue("userData", NpgsqlDbType.Jsonb, userPatch.ToJsonString(JsonOptions));
+        await updateUser.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var updateAccount = new NpgsqlCommand(
+            """
+            UPDATE accounts
+            SET status = 'active',
+                updated_at = now()
+            WHERE id = @accountId
+            """,
+            connection,
+            transaction);
+        updateAccount.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, userAccountId);
+        await updateAccount.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return await GetPlatformAccountAsync(normalizedUserId, cancellationToken)
+            ?? throw new ArgumentException("account is not available");
+    }
+
+    public async Task<Dictionary<string, object?>> DeletePlatformAccountAsync(
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedUserId = NormalizeActorId(userId);
+        var existing = await GetPlatformAccountRecordAsync(normalizedUserId, cancellationToken)
+            ?? throw new ArgumentException("account is not available");
+        var deletedAt = DateTimeOffset.UtcNow.ToString("O");
+        var deletionPatch = new JsonObject
+        {
+            ["deleted"] = true,
+            ["deletedAt"] = deletedAt,
+            ["phone"] = null,
+            ["defaultOrganizationId"] = null,
+        };
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var userAccountId = AsGuid(existing, "account_id");
+        await using var updateMemberships = new NpgsqlCommand(
+            """
+            UPDATE organization_memberships
+            SET status = 'disabled',
+                data = data || CAST(@deletionData AS jsonb),
+                updated_at = now()
+            WHERE user_account_id = @accountId
+            """,
+            connection,
+            transaction);
+        updateMemberships.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, userAccountId);
+        updateMemberships.Parameters.AddWithValue("deletionData", NpgsqlDbType.Jsonb, deletionPatch.ToJsonString(JsonOptions));
+        await updateMemberships.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var updateUser = new NpgsqlCommand(
+            """
+            UPDATE users
+            SET email = NULL,
+                phone_hash = NULL,
+                password_hash = NULL,
+                display_name = 'Deleted account',
+                status = 'disabled',
+                data = data || CAST(@deletionData AS jsonb),
+                updated_at = now()
+            WHERE account_id = @accountId
+            """,
+            connection,
+            transaction);
+        updateUser.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, userAccountId);
+        updateUser.Parameters.AddWithValue("deletionData", NpgsqlDbType.Jsonb, deletionPatch.ToJsonString(JsonOptions));
+        await updateUser.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var updateAccount = new NpgsqlCommand(
+            """
+            UPDATE accounts
+            SET status = 'disabled',
+                updated_at = now()
+            WHERE id = @accountId
+            """,
+            connection,
+            transaction);
+        updateAccount.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, userAccountId);
+        await updateAccount.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return await GetPlatformAccountAsync(normalizedUserId, cancellationToken)
+            ?? new Dictionary<string, object?>
+            {
+                ["id"] = normalizedUserId,
+                ["userId"] = normalizedUserId,
+                ["displayName"] = "Deleted account",
+                ["status"] = "disabled",
+                ["accountStatus"] = "disabled",
+                ["deleted"] = true,
+                ["deletedAt"] = deletedAt,
+            };
+    }
+
+    private async Task<Dictionary<string, object?>?> GetPlatformAccountAsync(
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var accounts = await ListPlatformAccountsAsync(userId, cancellationToken);
+        return accounts.FirstOrDefault(item => string.Equals(AsString(item, "userId"), userId, StringComparison.Ordinal));
     }
 
     public async Task<JsonObject> GetApiCenterConfigAsync(AccountScope scope, CancellationToken cancellationToken)
@@ -649,7 +1154,17 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         }
         else if (InferPlatformRole(actorId) == "super_admin")
         {
-            await EnsureUserAsync(actorId, "Super Admin", "root@xiaolou.local", null, "super_admin", null, null, null, false, cancellationToken);
+            await EnsureUserAsync(
+                actorId,
+                "Super Admin",
+                "root@xiaolou.local",
+                null,
+                "super_admin",
+                null,
+                null,
+                PasswordHashing.HashPassword(DefaultSuperAdminPassword),
+                false,
+                cancellationToken);
         }
     }
 
@@ -807,7 +1322,8 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
               user_account.id AS account_id,
               user_account.legacy_owner_id AS actor_id,
               u.email,
-              u.password_hash
+              u.password_hash,
+              u.data::text AS data_json
             FROM accounts user_account
             JOIN users u ON u.account_id = user_account.id
             WHERE user_account.legacy_owner_type = 'user'
@@ -817,6 +1333,180 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             connection);
         command.Parameters.AddWithValue("actorId", NpgsqlDbType.Text, actorId);
         return await PostgresRows.ReadSingleAsync(command, cancellationToken);
+    }
+
+    private async Task<Dictionary<string, object?>?> GetPasswordUserRecordByEmailAsync(
+        string email,
+        CancellationToken cancellationToken)
+    {
+        var normalizedEmail = RequireEmail(email);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              user_account.id AS account_id,
+              user_account.legacy_owner_id AS actor_id,
+              u.email,
+              u.password_hash,
+              u.data::text AS data_json
+            FROM accounts user_account
+            JOIN users u ON u.account_id = user_account.id
+            WHERE user_account.legacy_owner_type = 'user'
+              AND lower(u.email) = @email
+              AND u.status = 'active'
+            ORDER BY user_account.created_at ASC
+            LIMIT 1
+            """,
+            connection);
+        command.Parameters.AddWithValue("email", NpgsqlDbType.Text, normalizedEmail);
+        return await PostgresRows.ReadSingleAsync(command, cancellationToken);
+    }
+
+    private async Task<Dictionary<string, object?>?> GetOrganizationMemberRecordAsync(
+        string organizationId,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              org_account.id AS organization_account_id,
+              user_account.id AS user_account_id,
+              org_account.legacy_owner_id AS organization_id,
+              user_account.legacy_owner_id AS actor_id,
+              u.email,
+              u.display_name,
+              u.password_hash,
+              u.data::text AS user_data_json,
+              om.role,
+              om.status,
+              om.data::text AS membership_data_json
+            FROM organization_memberships om
+            JOIN accounts org_account ON org_account.id = om.organization_account_id
+            JOIN accounts user_account ON user_account.id = om.user_account_id
+            JOIN users u ON u.account_id = user_account.id
+            WHERE org_account.legacy_owner_type = 'organization'
+              AND org_account.legacy_owner_id = @organizationId
+              AND user_account.legacy_owner_type = 'user'
+              AND user_account.legacy_owner_id = @userId
+              AND om.status <> 'disabled'
+            LIMIT 1
+            """,
+            connection);
+        command.Parameters.AddWithValue("organizationId", NpgsqlDbType.Text, organizationId);
+        command.Parameters.AddWithValue("userId", NpgsqlDbType.Text, userId);
+        return await PostgresRows.ReadSingleAsync(command, cancellationToken);
+    }
+
+    private async Task<Dictionary<string, object?>?> GetPlatformAccountRecordAsync(
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              user_account.id AS account_id,
+              user_account.legacy_owner_id AS actor_id,
+              user_account.status AS account_status,
+              user_account.created_at,
+              user_account.updated_at,
+              u.email,
+              u.display_name,
+              u.status AS user_status,
+              u.data::text AS data_json
+            FROM accounts user_account
+            JOIN users u ON u.account_id = user_account.id
+            WHERE user_account.legacy_owner_type = 'user'
+              AND user_account.legacy_owner_id = @userId
+            LIMIT 1
+            """,
+            connection);
+        command.Parameters.AddWithValue("userId", NpgsqlDbType.Text, userId);
+        return await PostgresRows.ReadSingleAsync(command, cancellationToken);
+    }
+
+    private async Task<Dictionary<string, object?>?> GetOrganizationMemberPasswordRecordAsync(
+        string organizationId,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              user_account.id AS account_id,
+              user_account.legacy_owner_id AS actor_id,
+              u.email,
+              u.password_hash,
+              u.data::text AS data_json,
+              om.role,
+              om.status
+            FROM organization_memberships om
+            JOIN accounts org_account ON org_account.id = om.organization_account_id
+            JOIN accounts user_account ON user_account.id = om.user_account_id
+            JOIN users u ON u.account_id = user_account.id
+            WHERE org_account.legacy_owner_type = 'organization'
+              AND org_account.legacy_owner_id = @organizationId
+              AND user_account.legacy_owner_type = 'user'
+              AND user_account.legacy_owner_id = @userId
+              AND om.status <> 'disabled'
+            LIMIT 1
+            """,
+            connection);
+        command.Parameters.AddWithValue("organizationId", NpgsqlDbType.Text, organizationId);
+        command.Parameters.AddWithValue("userId", NpgsqlDbType.Text, userId);
+        return await PostgresRows.ReadSingleAsync(command, cancellationToken);
+    }
+
+    private async Task RequireUniqueAccountContactAsync(
+        string? email,
+        string? phone,
+        string? excludingActorId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedEmail = NormalizeEmail(email);
+        var phoneHash = HashOptional(phone);
+        if (normalizedEmail is null && phoneHash is null)
+        {
+            return;
+        }
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              user_account.legacy_owner_id AS actor_id,
+              u.email,
+              u.phone_hash
+            FROM accounts user_account
+            JOIN users u ON u.account_id = user_account.id
+            WHERE user_account.legacy_owner_type = 'user'
+              AND (@excludingActorId IS NULL OR user_account.legacy_owner_id <> @excludingActorId)
+              AND (
+                (@email IS NOT NULL AND lower(u.email) = @email)
+                OR (@phoneHash IS NOT NULL AND u.phone_hash = @phoneHash)
+              )
+            LIMIT 1
+            """,
+            connection);
+        command.Parameters.AddWithValue("excludingActorId", NpgsqlDbType.Text, DbNullable(excludingActorId));
+        command.Parameters.AddWithValue("email", NpgsqlDbType.Text, DbNullable(normalizedEmail));
+        command.Parameters.AddWithValue("phoneHash", NpgsqlDbType.Text, DbNullable(phoneHash));
+        var existing = await PostgresRows.ReadSingleAsync(command, cancellationToken);
+        if (existing is null)
+        {
+            return;
+        }
+
+        var existingEmail = NormalizeEmail(AsString(existing, "email"));
+        if (normalizedEmail is not null && string.Equals(existingEmail, normalizedEmail, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("email is already registered");
+        }
+
+        throw new ArgumentException("phone is already registered");
     }
 
     private async Task<int> CountRecentPasswordResetRequestsAsync(
@@ -964,7 +1654,7 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
                 password_hash = CASE
                     WHEN @passwordHash IS NULL THEN password_hash
                     WHEN @overwritePasswordHash THEN @passwordHash
-                    ELSE COALESCE(password_hash, @passwordHash)
+                    ELSE COALESCE(NULLIF(password_hash, ''), @passwordHash)
                 END,
                 display_name = COALESCE(NULLIF(@displayName, ''), display_name),
                 status = 'active',
@@ -1240,8 +1930,44 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             ["status"] = AsString(row, "status") ?? "active",
             ["createdAt"] = ToIso(row.TryGetValue("created_at", out var createdAt) ? createdAt : null),
             ["updatedAt"] = ToIso(row.TryGetValue("updated_at", out var updatedAt) ? updatedAt : null),
-            ["usageSummary"] = EmptyUsageSummary(),
+            ["usageSummary"] = BuildMemberUsageSummary(row),
         };
+    }
+
+    private static Dictionary<string, object?> ToPlatformAccount(Dictionary<string, object?> row)
+    {
+        var data = ParseJsonObject(AsString(row, "data_json"));
+        var actorId = AsString(row, "actor_id") ?? "guest";
+        var userStatus = AsString(row, "user_status") ?? "active";
+        var accountStatus = AsString(row, "account_status") ?? "active";
+        var deleted = string.Equals(userStatus, "disabled", StringComparison.Ordinal)
+            || string.Equals(accountStatus, "disabled", StringComparison.Ordinal)
+            || ReadJsonBool(data, "deleted", false);
+        return new Dictionary<string, object?>
+        {
+            ["id"] = actorId,
+            ["userId"] = actorId,
+            ["displayName"] = deleted
+                ? "已删除账号"
+                : AsString(row, "display_name") ?? ReadJsonString(data, "displayName") ?? DefaultDisplayName(actorId),
+            ["email"] = deleted ? null : AsString(row, "email") ?? ReadJsonString(data, "email"),
+            ["phone"] = deleted ? null : ReadJsonString(data, "phone"),
+            ["avatar"] = deleted ? null : ReadJsonString(data, "avatar"),
+            ["platformRole"] = ReadJsonString(data, "platformRole") ?? InferPlatformRole(actorId),
+            ["status"] = userStatus,
+            ["accountStatus"] = accountStatus,
+            ["deleted"] = deleted,
+            ["deletedAt"] = ReadJsonString(data, "deletedAt"),
+            ["createdAt"] = ToIso(row.TryGetValue("created_at", out var createdAt) ? createdAt : null),
+            ["updatedAt"] = ToIso(row.TryGetValue("updated_at", out var updatedAt) ? updatedAt : null),
+        };
+    }
+
+    private static string ResolvePlatformRole(Dictionary<string, object?> userRecord)
+    {
+        var actorId = AsString(userRecord, "actor_id") ?? "guest";
+        var data = ParseJsonObject(AsString(userRecord, "data_json"));
+        return ReadJsonString(data, "platformRole") ?? InferPlatformRole(actorId);
     }
 
     private static Dictionary<string, object?> BuildPermissionContext(
@@ -1275,7 +2001,7 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             ["currentOrganizationRole"] = currentOrganizationRole,
             ["permissions"] = new Dictionary<string, object?>
             {
-                ["canCreateProject"] = !isGuest && platformRole is not "ops_admin" and not "super_admin",
+                ["canCreateProject"] = !isGuest,
                 ["canRecharge"] = !isGuest && platformRole is not "ops_admin" and not "super_admin",
                 ["canUseEnterprise"] = organizations.Count > 0,
                 ["canManageOrganization"] = organizations.Any(item => string.Equals(item["role"] as string, "enterprise_admin", StringComparison.Ordinal)),
@@ -1337,12 +2063,112 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             return fallback;
         }
 
-        source["vendors"] ??= fallback["vendors"]?.DeepClone();
-        source["defaults"] ??= fallback["defaults"]?.DeepClone();
-        source["strategies"] ??= fallback["strategies"]?.DeepClone();
+        source["vendors"] = MergeApiCenterVendors(source["vendors"] as JsonArray, fallback["vendors"] as JsonArray);
+        source["defaults"] = MergeJsonObjectDefaults(source["defaults"] as JsonObject, fallback["defaults"] as JsonObject);
+        source["strategies"] = MergeJsonObjectDefaults(source["strategies"] as JsonObject, fallback["strategies"] as JsonObject);
         source["nodeAssignments"] ??= fallback["nodeAssignments"]?.DeepClone();
         source["toolboxAssignments"] ??= fallback["toolboxAssignments"]?.DeepClone();
         return source;
+    }
+
+    private static JsonObject MergeJsonObjectDefaults(JsonObject? source, JsonObject? fallback)
+    {
+        var merged = source ?? new JsonObject();
+        if (fallback is null)
+        {
+            return merged;
+        }
+
+        foreach (var property in fallback)
+        {
+            if (!merged.TryGetPropertyValue(property.Key, out var existing) || existing is null)
+            {
+                merged[property.Key] = property.Value?.DeepClone();
+            }
+        }
+
+        return merged;
+    }
+
+    private static JsonArray MergeApiCenterVendors(JsonArray? source, JsonArray? fallback)
+    {
+        var merged = source ?? new JsonArray();
+        if (fallback is null)
+        {
+            return merged;
+        }
+
+        foreach (var fallbackVendor in fallback.OfType<JsonObject>())
+        {
+            var vendorId = fallbackVendor["id"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(vendorId))
+            {
+                continue;
+            }
+
+            var existingVendor = merged.OfType<JsonObject>()
+                .FirstOrDefault(item => string.Equals(item["id"]?.GetValue<string>(), vendorId, StringComparison.Ordinal));
+            if (existingVendor is null)
+            {
+                merged.Add(fallbackVendor.DeepClone());
+                continue;
+            }
+
+            foreach (var property in fallbackVendor)
+            {
+                if (property.Key == "models")
+                {
+                    existingVendor["models"] = MergeApiCenterModels(
+                        existingVendor["models"] as JsonArray,
+                        fallbackVendor["models"] as JsonArray);
+                    continue;
+                }
+
+                if (!existingVendor.TryGetPropertyValue(property.Key, out var existing) || existing is null)
+                {
+                    existingVendor[property.Key] = property.Value?.DeepClone();
+                }
+            }
+        }
+
+        return merged;
+    }
+
+    private static JsonArray MergeApiCenterModels(JsonArray? source, JsonArray? fallback)
+    {
+        var merged = source ?? new JsonArray();
+        if (fallback is null)
+        {
+            return merged;
+        }
+
+        foreach (var fallbackModel in fallback.OfType<JsonObject>())
+        {
+            var modelId = fallbackModel["id"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(modelId))
+            {
+                continue;
+            }
+
+            var existingModel = merged.OfType<JsonObject>()
+                .FirstOrDefault(item => string.Equals(item["id"]?.GetValue<string>(), modelId, StringComparison.Ordinal));
+            if (existingModel is null)
+            {
+                merged.Add(fallbackModel.DeepClone());
+            }
+            else
+            {
+                foreach (var property in fallbackModel)
+                {
+                    if (!existingModel.TryGetPropertyValue(property.Key, out var existing) || existing is null)
+                    {
+                        existingModel[property.Key] = property.Value?.DeepClone();
+                    }
+                }
+            }
+        }
+
+        return merged;
     }
 
     private static JsonObject DefaultApiCenterConfig()
@@ -1363,6 +2189,16 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
                     Model("doubao-seedream-5-0-260128", "Seedream 5.0", "image", true),
                     Model("doubao-seedance-2-0-260128", "Seedance 2.0", "video", true),
                 }),
+                Vendor("google-vertex", "Google Vertex AI", new[] { "text", "vision", "image", "video" }, new[]
+                {
+                    Model("vertex:gemini-3-flash-preview", "Gemini 3 Flash (Vertex)", "text", true),
+                    Model("vertex:gemini-3.1-pro-preview", "Gemini 3.1 Pro (Vertex)", "text", true),
+                    Model("vertex:gemini-3-pro-image-preview", "Gemini 3 Pro Image+", "image", true),
+                    Model("vertex:gemini-3.1-flash-image-preview", "Gemini 3.1 Flash Image+", "image", true),
+                    Model("vertex:veo-3.1-generate-001", "Veo 3.1+", "video", true),
+                    Model("vertex:veo-3.1-fast-generate-001", "Veo 3.1 Fast+", "video", true),
+                    Model("vertex:veo-3.1-lite-generate-001", "Veo 3.1 Lite+", "video", true),
+                }),
                 Vendor("kling", "Kling AI", new[] { "image", "video" }, new[]
                 {
                     Model("kling-v2-master", "Kling V2 Master", "video", false),
@@ -1373,8 +2209,8 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             {
                 ["textModelId"] = "doubao-seed-1-6",
                 ["visionModelId"] = "qwen-vl-plus",
-                ["imageModelId"] = "doubao-seedream-5-0-260128",
-                ["videoModelId"] = "doubao-seedance-2-0-260128",
+                ["imageModelId"] = "vertex:gemini-3-pro-image-preview",
+                ["videoModelId"] = "vertex:veo-3.1-generate-001",
                 ["audioModelId"] = "qwen-audio-turbo",
             },
             ["strategies"] = new JsonObject
@@ -1451,11 +2287,46 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         }
     }
 
+    private static JsonArray? ParseJsonArray(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonNode.Parse(raw) as JsonArray;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static string? ReadJsonString(JsonObject? data, string key)
     {
-        return data is not null && data.TryGetPropertyValue(key, out var value)
-            ? value?.GetValue<string>()
-            : null;
+        if (data is null || !data.TryGetPropertyValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value.GetValueKind() == JsonValueKind.Null ? null : value.GetValue<string>();
+    }
+
+    private static decimal ReadJsonDecimal(JsonObject? data, string key)
+    {
+        if (data is null || !data.TryGetPropertyValue(key, out var value) || value is null)
+        {
+            return 0;
+        }
+
+        return value.GetValueKind() switch
+        {
+            JsonValueKind.Number => value.GetValue<decimal>(),
+            JsonValueKind.String => decimal.TryParse(value.GetValue<string>(), out var parsed) ? parsed : 0,
+            _ => 0,
+        };
     }
 
     private static bool ReadJsonBool(JsonObject? data, string key, bool fallback)
@@ -1480,6 +2351,34 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             ["pendingFrozenCredits"] = 0,
             ["recentTaskCount"] = 0,
             ["lastActivityAt"] = null,
+            ["series"] = Array.Empty<Dictionary<string, object?>>(),
+        };
+    }
+
+    private static Dictionary<string, object?> BuildMemberUsageSummary(Dictionary<string, object?> row)
+    {
+        var series = ParseJsonArray(AsString(row, "usage_series_json"))
+            ?.OfType<JsonObject>()
+            .Select(item => new Dictionary<string, object?>
+            {
+                ["bucketStart"] = ReadJsonString(item, "bucketStart"),
+                ["bucketLabel"] = ReadJsonString(item, "bucketLabel") ?? "",
+                ["consumedCredits"] = ReadJsonDecimal(item, "consumedCredits"),
+                ["refundedCredits"] = ReadJsonDecimal(item, "refundedCredits"),
+            })
+            .ToArray()
+            ?? Array.Empty<Dictionary<string, object?>>();
+
+        return new Dictionary<string, object?>
+        {
+            ["todayUsedCredits"] = ReadDecimal(row, "today_used_credits"),
+            ["monthUsedCredits"] = ReadDecimal(row, "month_used_credits"),
+            ["totalUsedCredits"] = ReadDecimal(row, "total_used_credits"),
+            ["refundedCredits"] = ReadDecimal(row, "refunded_credits"),
+            ["pendingFrozenCredits"] = 0,
+            ["recentTaskCount"] = ReadInt(row, "recent_task_count"),
+            ["lastActivityAt"] = ToIsoOrNull(row.TryGetValue("last_activity_at", out var lastActivityAt) ? lastActivityAt : null),
+            ["series"] = series,
         };
     }
 
@@ -1499,9 +2398,22 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
+    private static string EscapeLike(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
+    }
+
+    private static string? NormalizeEmail(string? email)
+    {
+        return NormalizeBlank(email)?.ToLowerInvariant();
+    }
+
     private static string RequireEmail(string? email)
     {
-        return NormalizeBlank(email)
+        return NormalizeEmail(email)
             ?? throw new ArgumentException("email is required");
     }
 
@@ -1541,9 +2453,9 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         return new UnauthorizedAccessException("email or password is incorrect");
     }
 
-    private static void RejectReservedPlatformActor(string actorId)
+    private static void RejectReservedPlatformEmail(string email)
     {
-        if (actorId is "ops_demo_001" or "root_demo_001")
+        if (email is "root@xiaolou.local" or "ops@xiaolou.local" or "admin@xiaolou.local" or "member@xiaolou.local")
         {
             throw new ArgumentException("email is reserved");
         }
@@ -1555,6 +2467,11 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         {
             throw new ArgumentException("email is not a platform admin");
         }
+    }
+
+    private static string NewUserId()
+    {
+        return $"user_{Guid.NewGuid():N}";
     }
 
     private static string ActorIdFromEmail(string email, string mode)
@@ -1655,6 +2572,14 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             : "enterprise_member";
     }
 
+    private static string? NormalizePlatformRole(string? role)
+    {
+        var normalized = NormalizeBlank(role);
+        return normalized is "guest" or "customer" or "ops_admin" or "super_admin"
+            ? normalized
+            : null;
+    }
+
     private static string? HashOptional(string? value)
     {
         var normalized = NormalizeBlank(value);
@@ -1682,6 +2607,54 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
         return row.TryGetValue(key, out var value) && value is not null ? Convert.ToString(value) : null;
     }
 
+    private static Guid AsGuid(Dictionary<string, object?> row, string key)
+    {
+        if (!row.TryGetValue(key, out var value) || value is null)
+        {
+            throw new InvalidOperationException($"{key} is required");
+        }
+
+        return value switch
+        {
+            Guid guid => guid,
+            _ => Guid.Parse(Convert.ToString(value) ?? throw new InvalidOperationException($"{key} is required")),
+        };
+    }
+
+    private static decimal ReadDecimal(Dictionary<string, object?> row, string key)
+    {
+        if (!row.TryGetValue(key, out var value) || value is null)
+        {
+            return 0;
+        }
+
+        return value switch
+        {
+            decimal decimalValue => decimalValue,
+            double doubleValue => Convert.ToDecimal(doubleValue),
+            float floatValue => Convert.ToDecimal(floatValue),
+            int intValue => intValue,
+            long longValue => longValue,
+            _ => decimal.TryParse(value.ToString(), out var parsed) ? parsed : 0,
+        };
+    }
+
+    private static int ReadInt(Dictionary<string, object?> row, string key)
+    {
+        if (!row.TryGetValue(key, out var value) || value is null)
+        {
+            return 0;
+        }
+
+        return value switch
+        {
+            int intValue => intValue,
+            long longValue => (int)Math.Clamp(longValue, int.MinValue, int.MaxValue),
+            decimal decimalValue => (int)Math.Clamp(decimalValue, int.MinValue, int.MaxValue),
+            _ => int.TryParse(value.ToString(), out var parsed) ? parsed : 0,
+        };
+    }
+
     private static string ToIso(object? value)
     {
         return value switch
@@ -1690,6 +2663,17 @@ public sealed class PostgresIdentityConfigStore(NpgsqlDataSource dataSource, Pos
             DateTime dt => DateTime.SpecifyKind(dt, DateTimeKind.Utc).ToString("O"),
             null => DateTimeOffset.UtcNow.ToString("O"),
             _ => Convert.ToString(value) ?? DateTimeOffset.UtcNow.ToString("O"),
+        };
+    }
+
+    private static string? ToIsoOrNull(object? value)
+    {
+        return value switch
+        {
+            DateTimeOffset dto => dto.ToString("O"),
+            DateTime dt => DateTime.SpecifyKind(dt, DateTimeKind.Utc).ToString("O"),
+            null => null,
+            _ => NormalizeBlank(Convert.ToString(value)),
         };
     }
 

@@ -350,7 +350,7 @@ describe("createAuthAccountService", () => {
     expect(parseJsonBody(calls[1])).toEqual(enterpriseInput);
   });
 
-  it("uses encoded organization member routes for list and create", async () => {
+  it("uses encoded organization member routes for list, create, update, password reset, and delete", async () => {
     const response = { items: [] };
     const { calls, service } = createServiceHarness({ response });
     const memberInput = {
@@ -359,20 +359,51 @@ describe("createAuthAccountService", () => {
       membershipRole: "admin" as const,
       canUseOrganizationWallet: true,
     };
+    const updateInput = {
+      displayName: "Renamed Member",
+      email: "renamed@example.test",
+      phone: "13800000000",
+      newPassword: "synthetic-updated-password",
+    };
 
-    await expect(service.listOrganizationMembers("synthetic organization/1")).resolves.toBe(response);
+    await expect(service.listOrganizationMembers("synthetic organization/1", "member 1")).resolves.toBe(response);
     await expect(
       service.createOrganizationMember("synthetic organization/1", memberInput),
+    ).resolves.toBe(response);
+    await expect(
+      service.updateOrganizationMemberAccount("synthetic organization/1", "user/member 1", updateInput),
+    ).resolves.toBe(response);
+    await expect(
+      service.resetOrganizationMemberPassword("synthetic organization/1", "user/member 1", {
+        newPassword: "synthetic-password",
+      }),
+    ).resolves.toBe(response);
+    await expect(
+      service.deleteOrganizationMemberAccount("synthetic organization/1", "user/member 1"),
     ).resolves.toBe(response);
 
     const expectedPath = "/api/organizations/synthetic%20organization%2F1/members";
     expect(calls[0]).toEqual({
-      path: expectedPath,
+      path: `${expectedPath}?query=member%201`,
       init: undefined,
     });
     expect(calls[1].path).toBe(expectedPath);
     expect(calls[1].init?.method).toBe("POST");
     expect(parseJsonBody(calls[1])).toEqual(memberInput);
+    expect(calls[2].path).toBe(
+      "/api/organizations/synthetic%20organization%2F1/members/user%2Fmember%201/account",
+    );
+    expect(calls[2].init?.method).toBe("PUT");
+    expect(parseJsonBody(calls[2])).toEqual(updateInput);
+    expect(calls[3].path).toBe(
+      "/api/organizations/synthetic%20organization%2F1/members/user%2Fmember%201/password",
+    );
+    expect(calls[3].init?.method).toBe("POST");
+    expect(parseJsonBody(calls[3])).toEqual({ newPassword: "synthetic-password" });
+    expect(calls[4].path).toBe(
+      "/api/organizations/synthetic%20organization%2F1/members/user%2Fmember%201",
+    );
+    expect(calls[4].init?.method).toBe("DELETE");
   });
 
   it("returns an empty organization wallet fallback for not-found wallet routes", async () => {

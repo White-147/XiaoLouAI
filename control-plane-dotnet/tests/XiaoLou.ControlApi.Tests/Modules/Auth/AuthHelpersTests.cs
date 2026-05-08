@@ -311,6 +311,27 @@ public sealed class AuthHelpersTests
     }
 
     [Fact]
+    public void TryReadLocalAuthTokenActorId_DecodesValidSessionToken()
+    {
+        var token = AuthHelpers.CreateLocalAuthToken("synthetic-actor");
+
+        Assert.True(AuthHelpers.TryReadLocalAuthTokenActorId(token, out var actorId));
+        Assert.Equal("synthetic-actor", actorId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-base64")]
+    [InlineData("c3ludGhldGljLWFjdG9y")]
+    [InlineData("c3ludGhldGljLWFjdG9yOm5vdC1hLXRpbWVzdGFtcA==")]
+    public void TryReadLocalAuthTokenActorId_RejectsInvalidTokenShape(string? token)
+    {
+        Assert.False(AuthHelpers.TryReadLocalAuthTokenActorId(token, out var actorId));
+        Assert.Equal("", actorId);
+    }
+
+    [Fact]
     public void CreateControlApiClientAssertion_ReturnsNullWithoutSecret()
     {
         using var env = ClearClientAuthEnvironment();
@@ -425,6 +446,7 @@ public sealed class AuthHelpersTests
     [InlineData("GET", "/api/me", true)]
     [InlineData("POST", "/api/auth/login", true)]
     [InlineData("POST", "/api/auth/password/bootstrap-admin", true)]
+    [InlineData("POST", "/api/auth/session/refresh", true)]
     [InlineData("POST", "/api/auth/password/reset/request", true)]
     [InlineData("POST", "/api/auth/password/reset/complete", true)]
     [InlineData("POST", "/api/auth/password/change", false)]

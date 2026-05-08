@@ -2,9 +2,12 @@ import {
   getAuthToken,
   getControlApiClientAssertion,
   getCurrentActorId,
+  setAuthToken,
+  setControlApiClientAssertion,
 } from "../actor-session";
 import {
   isControlApiClientPath,
+  normalizeRoutePath,
   shouldBlockLegacyMutatingRequest,
 } from "./route-policy";
 
@@ -19,6 +22,30 @@ type ApiEnvelope<T> = {
     message: string;
   };
 };
+
+type SessionRefreshResponse = {
+  actorId?: string | null;
+  token?: string | null;
+  controlApiClientAssertion?: string | null;
+};
+
+const SESSION_REFRESH_PATH = "/api/auth/session/refresh";
+const SESSION_REPAIR_STATUS_CODES = new Set([401, 403]);
+const SESSION_REPAIR_EXCLUDED_PATHS = new Set([
+  SESSION_REFRESH_PATH,
+  "/api/auth/providers",
+  "/api/auth/google/exchange",
+  "/api/auth/login",
+  "/api/auth/admin/login",
+  "/api/auth/password/bootstrap-admin",
+  "/api/auth/password/reset/request",
+  "/api/auth/password/reset/complete",
+  "/api/auth/demo-session",
+  "/api/auth/register/personal",
+  "/api/auth/register/enterprise-admin",
+  "/api/me",
+]);
+let sessionRefreshPromise: Promise<boolean> | null = null;
 
 export class ApiRequestError extends Error {
   code: string;
@@ -63,14 +90,100 @@ function buildRequestHeaders(path: string, init?: RequestInit, options: { allowB
   return headers;
 }
 
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  assertNoLegacyMutatingRequest(path, init);
+function shouldAttemptSessionRepair(path: string) {
+  const normalizedPath = normalizeRoutePath(path);
+  return (
+    Boolean(getAuthToken()) &&
+    isControlApiClientPath(path) &&
+    !SESSION_REPAIR_EXCLUDED_PATHS.has(normalizedPath)
+  );
+}
 
-  const headers = buildRequestHeaders(path, init, { allowBodyContentType: true });
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+function shouldRetryAfterSessionRepair(path: string, status: number) {
+  return shouldAttemptSessionRepair(path) && SESSION_REPAIR_STATUS_CODES.has(status);
+}
+
+async function refreshControlApiSessionAssertion() {
+  const token = getAuthToken();
+  if (!token) {
+    return false;
+  }
+
+  if (sessionRefreshPromise) {
+    return sessionRefreshPromise;
+  }
+
+  sessionRefreshPromise = (async () => {
+    const headers = new Headers();
+    headers.set("Content-Type", "application/json");
+    headers.set("X-Actor-Id", getCurrentActorId());
+    headers.set("Authorization", `Bearer ${token}`);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}${SESSION_REFRESH_PATH}`, {
+        method: "POST",
+        headers,
+        body: "{}",
+      });
+      if (!response.ok) {
+        return false;
+      }
+
+      const text = await response.text();
+      if (!text) {
+        return false;
+      }
+
+      const payload = JSON.parse(text) as SessionRefreshResponse;
+      if (!payload?.controlApiClientAssertion) {
+        return false;
+      }
+
+      if (payload.token) {
+        setAuthToken(payload.token);
+      }
+      setControlApiClientAssertion(payload.controlApiClientAssertion);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  try {
+    return await sessionRefreshPromise;
+  } finally {
+    sessionRefreshPromise = null;
+  }
+}
+
+async function repairMissingSessionAssertion(path: string) {
+  if (!shouldAttemptSessionRepair(path) || getControlApiClientAssertion()) {
+    return false;
+  }
+
+  return refreshControlApiSessionAssertion();
+}
+
+function sendRequest(path: string, init?: RequestInit, options: { allowBodyContentType?: boolean } = {}) {
+  const headers = buildRequestHeaders(path, init, options);
+  return fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers,
   });
+}
+
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  assertNoLegacyMutatingRequest(path, init);
+
+  const repairedBeforeRequest = await repairMissingSessionAssertion(path);
+  let response = await sendRequest(path, init, { allowBodyContentType: true });
+  if (
+    !repairedBeforeRequest &&
+    shouldRetryAfterSessionRepair(path, response.status) &&
+    (await refreshControlApiSessionAssertion())
+  ) {
+    response = await sendRequest(path, init, { allowBodyContentType: true });
+  }
 
   const responseText = await response.text();
   let payload: ApiEnvelope<T> | null = null;
@@ -117,14 +230,18 @@ export async function controlApiJsonRequest<T>(path: string, init?: RequestInit)
   assertNoLegacyMutatingRequest(path, init);
 
   const isFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
-  const headers = buildRequestHeaders(path, init, {
+  const requestOptions = {
     allowBodyContentType: Boolean(init?.body && !isFormDataBody),
-  });
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  });
+  };
+  const repairedBeforeRequest = await repairMissingSessionAssertion(path);
+  let response = await sendRequest(path, init, requestOptions);
+  if (
+    !repairedBeforeRequest &&
+    shouldRetryAfterSessionRepair(path, response.status) &&
+    (await refreshControlApiSessionAssertion())
+  ) {
+    response = await sendRequest(path, init, requestOptions);
+  }
 
   const text = await response.text();
   let payload: unknown = null;
@@ -157,15 +274,31 @@ export async function controlApiStreamRequest(path: string, init?: RequestInit):
   assertNoLegacyMutatingRequest(path, init);
 
   const isFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
-  const headers = buildRequestHeaders(path, init, {
+  const requestOptions = {
     allowBodyContentType: Boolean(init?.body && !isFormDataBody),
-  });
-  if (!headers.has("Accept")) {
-    headers.set("Accept", "text/event-stream");
+  };
+
+  const sendStreamRequest = () => {
+    const headers = buildRequestHeaders(path, init, requestOptions);
+    if (!headers.has("Accept")) {
+      headers.set("Accept", "text/event-stream");
+    }
+
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers,
+    });
+  };
+
+  const repairedBeforeRequest = await repairMissingSessionAssertion(path);
+  let response = await sendStreamRequest();
+  if (
+    !repairedBeforeRequest &&
+    shouldRetryAfterSessionRepair(path, response.status) &&
+    (await refreshControlApiSessionAssertion())
+  ) {
+    response = await sendStreamRequest();
   }
 
-  return fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  });
+  return response;
 }

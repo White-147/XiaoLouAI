@@ -131,6 +131,65 @@ function mediaCapabilitySet(
 
 const WINDOWS_NATIVE_IMAGE_CAPABILITIES: MediaModelCapability[] = [
   {
+    id: "vertex:gemini-3-pro-image-preview",
+    label: "Gemini 3 Pro Image+",
+    provider: "google-vertex",
+    kind: "image",
+    status: "stable",
+    recommended: true,
+    inputModes: {
+      text_to_image: mediaCapabilitySet("stable", {
+        supportedAspectRatios: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+        supportedResolutions: ["1K", "2K", "4K"],
+        defaultAspectRatio: "1:1",
+        defaultResolution: "1K",
+      }),
+      image_to_image: mediaCapabilitySet("stable", {
+        supportedAspectRatios: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+        supportedResolutions: ["1K", "2K", "4K"],
+        defaultAspectRatio: "1:1",
+        defaultResolution: "1K",
+        maxReferenceImages: 1,
+      }),
+      multi_image: mediaCapabilitySet("stable", {
+        supportedAspectRatios: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+        supportedResolutions: ["1K", "2K", "4K"],
+        defaultAspectRatio: "1:1",
+        defaultResolution: "1K",
+        maxReferenceImages: 4,
+      }),
+    },
+  },
+  {
+    id: "vertex:gemini-3.1-flash-image-preview",
+    label: "Gemini 3.1 Flash Image+",
+    provider: "google-vertex",
+    kind: "image",
+    status: "stable",
+    inputModes: {
+      text_to_image: mediaCapabilitySet("stable", {
+        supportedAspectRatios: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "1:8", "4:1", "8:1"],
+        supportedResolutions: ["1K", "2K", "4K"],
+        defaultAspectRatio: "1:1",
+        defaultResolution: "1K",
+      }),
+      image_to_image: mediaCapabilitySet("stable", {
+        supportedAspectRatios: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "1:8", "4:1", "8:1"],
+        supportedResolutions: ["1K", "2K", "4K"],
+        defaultAspectRatio: "1:1",
+        defaultResolution: "1K",
+        maxReferenceImages: 1,
+      }),
+      multi_image: mediaCapabilitySet("stable", {
+        supportedAspectRatios: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "1:8", "4:1", "8:1"],
+        supportedResolutions: ["1K", "2K", "4K"],
+        defaultAspectRatio: "1:1",
+        defaultResolution: "1K",
+        maxReferenceImages: 4,
+      }),
+    },
+  },
+  {
     id: "doubao-seedream-5-0-260128",
     label: "Seedream 5.0",
     provider: "bytedance",
@@ -146,6 +205,102 @@ const WINDOWS_NATIVE_IMAGE_CAPABILITIES: MediaModelCapability[] = [
 ];
 
 const WINDOWS_NATIVE_VIDEO_CAPABILITIES: MediaModelCapability[] = [
+  {
+    id: "vertex:veo-3.1-generate-001",
+    label: "Veo 3.1+",
+    provider: "google-vertex",
+    kind: "video",
+    status: "stable",
+    recommended: true,
+    inputModes: {
+      text_to_video: mediaCapabilitySet("stable", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p", "480p"],
+        defaultDuration: "8s",
+      }),
+      single_reference: mediaCapabilitySet("stable", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p", "480p"],
+        defaultDuration: "8s",
+      }),
+      start_end_frame: mediaCapabilitySet("stable", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p", "480p"],
+        defaultDuration: "8s",
+      }),
+      multi_param: mediaCapabilitySet("stable", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16"],
+        supportedResolutions: ["1080p", "720p"],
+        defaultDuration: "8s",
+        maxReferenceImages: 3,
+      }),
+    },
+  },
+  {
+    id: "vertex:veo-3.1-fast-generate-001",
+    label: "Veo 3.1 Fast+",
+    provider: "google-vertex",
+    kind: "video",
+    status: "stable",
+    inputModes: {
+      text_to_video: mediaCapabilitySet("stable", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p"],
+        defaultDuration: "8s",
+      }),
+      single_reference: mediaCapabilitySet("stable", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p"],
+        defaultDuration: "8s",
+      }),
+      start_end_frame: mediaCapabilitySet("stable", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p"],
+        defaultDuration: "8s",
+      }),
+      multi_param: mediaCapabilitySet("stable", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16"],
+        supportedResolutions: ["1080p", "720p"],
+        defaultDuration: "8s",
+        maxReferenceImages: 3,
+      }),
+    },
+  },
+  {
+    id: "vertex:veo-3.1-lite-generate-001",
+    label: "Veo 3.1 Lite+",
+    provider: "google-vertex",
+    kind: "video",
+    status: "preview",
+    inputModes: {
+      text_to_video: mediaCapabilitySet("preview", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p"],
+        defaultDuration: "8s",
+      }),
+      single_reference: mediaCapabilitySet("preview", {
+        supportedDurations: ["4s", "6s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p"],
+        defaultDuration: "8s",
+      }),
+      start_end_frame: mediaCapabilitySet("preview", {
+        supportedDurations: ["5s", "8s"],
+        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedResolutions: ["1080p", "720p"],
+        defaultDuration: "8s",
+      }),
+    },
+  },
   {
     id: "doubao-seedance-2-0-260128",
     label: "Seedance 2.0",
@@ -322,7 +477,7 @@ export function createProjectsCanvasCreateService({
       return {
         kind: "image",
         mode: mode || "text_to_image",
-        defaultModel: "doubao-seedream-5-0-260128",
+        defaultModel: "vertex:gemini-3-pro-image-preview",
         items: WINDOWS_NATIVE_IMAGE_CAPABILITIES,
       } satisfies MediaCapabilitiesResponse;
     },
@@ -331,7 +486,7 @@ export function createProjectsCanvasCreateService({
       return {
         kind: "video",
         mode: normalizeVideoMode(mode) || "image_to_video",
-        defaultModel: "doubao-seedance-2-0-260128",
+        defaultModel: "vertex:veo-3.1-generate-001",
         items: WINDOWS_NATIVE_VIDEO_CAPABILITIES,
       } satisfies MediaCapabilitiesResponse;
     },

@@ -1,6 +1,6 @@
-import { Building2, Camera, LoaderCircle, Mail, Phone, User as UserIcon, X } from "lucide-react";
+import { Building2, Camera, KeyRound, LoaderCircle, Mail, Phone, User as UserIcon, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { uploadFile, type PermissionContext, updateMe } from "../../lib/api";
+import { changePassword, uploadFile, type PermissionContext, updateMe } from "../../lib/api";
 import { mergeProfileUpdateContext, resolveAvatarUploadUrl } from "../../lib/api/profile-avatar";
 import { cn } from "../../lib/utils";
 
@@ -22,6 +22,9 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
   );
   const canEditDefaultOrganization =
     context?.platformRole === "customer" && enterpriseOrganizations.length > 0;
+  const canEditAccountFields =
+    context?.currentOrganizationRole !== "enterprise_member" ||
+    context?.permissions.canManageOrganization === true;
   const [displayName, setDisplayName] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
@@ -29,6 +32,15 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPasswordOpen, setIsPasswordOpen] = useState(false);
+  const [isPasswordSaving, setIsPasswordSaving] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -43,25 +55,31 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
           "",
       );
       setError(null);
+      setIsPasswordOpen(false);
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordError(null);
+      setPasswordMessage(null);
     }
   }, [enterpriseOrganizations, isOpen, context]);
 
   if (!isOpen || !context) return null;
 
   const handleSave = async () => {
-    const username = displayName.trim();
-    if (!username || isUploading) return;
+    const username = canEditAccountFields ? displayName.trim() : context.actor.displayName || "";
+    if ((canEditAccountFields && !username) || isUploading) return;
     setIsSaving(true);
     setError(null);
     try {
-      const profilePatch = {
-        displayName: username,
-        avatar,
-        phone: phone.trim() || null,
-        ...(canEditDefaultOrganization
-          ? { defaultOrganizationId: defaultOrganizationId || null }
-          : {}),
-      };
+      const profilePatch = canEditAccountFields
+        ? {
+            displayName: username,
+            avatar,
+            phone: phone.trim() || null,
+            ...(canEditDefaultOrganization
+              ? { defaultOrganizationId: defaultOrganizationId || null }
+              : {}),
+          }
+        : { avatar };
       const updatedContext = await updateMe(profilePatch);
       onUpdateContext(mergeProfileUpdateContext(updatedContext, profilePatch));
       onClose();
@@ -93,6 +111,36 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    setPasswordError(null);
+    setPasswordMessage(null);
+
+    if (!passwordForm.currentPassword.trim() || !passwordForm.newPassword.trim()) {
+      setPasswordError("请填写当前密码和新密码。");
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError("两次输入的新密码不一致。");
+      return;
+    }
+
+    setIsPasswordSaving(true);
+    try {
+      await changePassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      });
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordMessage("密码已更新。");
+      setIsPasswordOpen(false);
+    } catch (caught) {
+      setPasswordError(caught instanceof Error ? caught.message : "密码修改失败，请稍后重试。");
+    } finally {
+      setIsPasswordSaving(false);
     }
   };
 
@@ -170,15 +218,21 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
               <label htmlFor="displayName" className="text-sm font-medium text-foreground">
                 用户名
               </label>
-              <input
-                id="displayName"
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/30"
-                placeholder="输入用户名"
-                maxLength={30}
-              />
+              {canEditAccountFields ? (
+                <input
+                  id="displayName"
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/30"
+                  placeholder="输入用户名"
+                  maxLength={30}
+                />
+              ) : (
+                <div className="flex min-h-10 items-center rounded-lg border border-border/50 bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                  {context.actor.displayName || context.actor.id}
+                </div>
+              )}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -201,21 +255,28 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
                 <label htmlFor="phone" className="text-sm font-medium text-foreground">
                   手机号
                 </label>
-                <div className="relative">
-                  <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    id="phone"
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/30"
-                    placeholder="可选"
-                  />
-                </div>
+                {canEditAccountFields ? (
+                  <div className="relative">
+                    <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      id="phone"
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/30"
+                      placeholder="可选"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex min-h-10 items-center gap-2 rounded-lg border border-border/50 bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                    <Phone className="h-4 w-4 shrink-0" />
+                    <span>{context.actor.phone || "未绑定手机号"}</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {canEditDefaultOrganization ? (
+            {canEditAccountFields && canEditDefaultOrganization ? (
               <div className="space-y-1.5">
                 <label htmlFor="defaultOrganization" className="text-sm font-medium text-foreground">
                   默认组织
@@ -238,6 +299,87 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
               </div>
             ) : null}
 
+            {canEditAccountFields ? (
+            <div className="rounded-xl border border-border/70 bg-background/35 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <KeyRound className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">修改密码</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">更新当前账号的登录密码</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPasswordOpen((open) => !open);
+                    setPasswordError(null);
+                    setPasswordMessage(null);
+                  }}
+                  className="rounded-lg border border-border/70 bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                >
+                  {isPasswordOpen ? "收起" : "修改"}
+                </button>
+              </div>
+
+              {isPasswordOpen ? (
+                <div className="mt-4 grid grid-cols-1 gap-3">
+                  <input
+                    type="password"
+                    value={passwordForm.currentPassword}
+                    onChange={(event) =>
+                      setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))
+                    }
+                    className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/30"
+                    placeholder="当前密码"
+                  />
+                  <input
+                    type="password"
+                    value={passwordForm.newPassword}
+                    onChange={(event) =>
+                      setPasswordForm((current) => ({ ...current, newPassword: event.target.value }))
+                    }
+                    className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/30"
+                    placeholder="新密码"
+                  />
+                  <input
+                    type="password"
+                    value={passwordForm.confirmPassword}
+                    onChange={(event) =>
+                      setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }))
+                    }
+                    className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/30"
+                    placeholder="确认新密码"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handlePasswordChange()}
+                      disabled={isPasswordSaving}
+                      className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {isPasswordSaving ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : null}
+                      保存新密码
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {passwordError ? (
+                <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  {passwordError}
+                </div>
+              ) : null}
+              {passwordMessage ? (
+                <div className="mt-3 rounded-lg border border-primary/20 bg-primary/8 px-3 py-2 text-xs text-primary">
+                  {passwordMessage}
+                </div>
+              ) : null}
+            </div>
+            ) : null}
+
             {error ? (
               <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                 {error}
@@ -257,11 +399,11 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
           <button
             type="button"
             onClick={handleSave}
-            disabled={isSaving || isUploading || !displayName.trim()}
+            disabled={isSaving || isUploading || (canEditAccountFields && !displayName.trim())}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-            保存修改
+            {canEditAccountFields ? "保存修改" : "保存头像"}
           </button>
         </div>
       </div>

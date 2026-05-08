@@ -1,4 +1,10 @@
-import type { AdminRechargeOrder, PricingRule, WalletRechargeOrder } from "../api";
+import type {
+  AdminRechargeOrder,
+  PlatformAccount,
+  PricingRule,
+  UpdatePlatformAccountInput,
+  WalletRechargeOrder,
+} from "../api";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -18,6 +24,29 @@ export function createAdminEnterpriseService({
 
     listAdminOrders() {
       return controlApiJsonRequest<{ items: AdminRechargeOrder[] }>("/api/admin/orders");
+    },
+
+    listPlatformAccounts(query?: string) {
+      const queryText = query?.trim();
+      const queryString = queryText ? `?query=${encodeURIComponent(queryText)}` : "";
+      return controlApiJsonRequest<{ items: PlatformAccount[] }>(`/api/admin/accounts${queryString}`);
+    },
+
+    updatePlatformAccount(userId: string, input: UpdatePlatformAccountInput) {
+      return controlApiJsonRequest<PlatformAccount>(
+        `/api/admin/accounts/${encodeURIComponent(userId)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(input),
+        },
+      );
+    },
+
+    deletePlatformAccount(userId: string) {
+      return controlApiJsonRequest<PlatformAccount>(
+        `/api/admin/accounts/${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
+      );
     },
 
     async reviewAdminOrder(

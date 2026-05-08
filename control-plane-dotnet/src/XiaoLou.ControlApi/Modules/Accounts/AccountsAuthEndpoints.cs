@@ -99,6 +99,29 @@ internal static class AccountsAuthEndpoints
             }
         });
 
+        endpoints.MapPost("/api/auth/session/refresh", async (
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (!IsLocalDemoSessionRequest(httpContext))
+            {
+                return AuthError(
+                    "SESSION_REFRESH_LOCAL_ONLY",
+                    "session refresh is available only from local loopback access",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            if (!TryResolveLocalSessionActorId(httpContext, out var actorId, out var denied))
+            {
+                return denied!;
+            }
+
+            var permissionContext = await identity.GetPermissionContextAsync(actorId, ct);
+            return Results.Ok(BuildLoginResult(permissionContext, clientApi.Value));
+        });
+
         endpoints.MapPost("/api/auth/password/bootstrap-admin", async (
             BootstrapPlatformPasswordRequest request,
             HttpContext httpContext,
@@ -325,6 +348,7 @@ internal static class AccountsAuthEndpoints
 
         endpoints.MapGet("/api/organizations/{organizationId}/members", async (
             string organizationId,
+            string? query,
             HttpContext httpContext,
             IOptions<ClientApiOptions> clientApi,
             PostgresIdentityConfigStore identity,
@@ -339,9 +363,18 @@ internal static class AccountsAuthEndpoints
                 return denied;
             }
 
+            var permissionContext = await identity.GetPermissionContextAsync(ResolveActorId(httpContext), ct);
+            if (!CanManageOrganization(permissionContext, organizationId))
+            {
+                return AuthError(
+                    "ORG_ADMIN_FORBIDDEN",
+                    "organization admin permission is required",
+                    StatusCodes.Status403Forbidden);
+            }
+
             return Results.Ok(new
             {
-                items = await identity.ListOrganizationMembersAsync(organizationId, ct),
+                items = await identity.ListOrganizationMembersAsync(organizationId, query, ct),
             });
         });
 
@@ -362,6 +395,15 @@ internal static class AccountsAuthEndpoints
                 return denied;
             }
 
+            var permissionContext = await identity.GetPermissionContextAsync(ResolveActorId(httpContext), ct);
+            if (!CanManageOrganization(permissionContext, organizationId))
+            {
+                return AuthError(
+                    "ORG_ADMIN_FORBIDDEN",
+                    "organization admin permission is required",
+                    StatusCodes.Status403Forbidden);
+            }
+
             try
             {
                 return Results.Json(await identity.CreateOrganizationMemberAsync(organizationId, request, ct), statusCode: StatusCodes.Status201Created);
@@ -373,6 +415,125 @@ internal static class AccountsAuthEndpoints
             catch (UnauthorizedAccessException ex)
             {
                 return AuthError("AUTH_INVALID_CREDENTIALS", ex.Message, StatusCodes.Status401Unauthorized);
+            }
+        });
+
+        endpoints.MapPut("/api/organizations/{organizationId}/members/{userId}/account", async (
+            string organizationId,
+            string userId,
+            UpdateOrganizationMemberAccountRequest request,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, new AccountScope
+                {
+                    AccountOwnerType = "organization",
+                    AccountOwnerId = organizationId,
+                }, requireConfiguredAccountGrant: false) is { } denied)
+            {
+                return denied;
+            }
+
+            var permissionContext = await identity.GetPermissionContextAsync(ResolveActorId(httpContext), ct);
+            if (!CanManageOrganization(permissionContext, organizationId))
+            {
+                return AuthError(
+                    "ORG_ADMIN_FORBIDDEN",
+                    "organization admin permission is required",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            try
+            {
+                return Results.Ok(await identity.UpdateOrganizationMemberAccountAsync(organizationId, userId, request, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        endpoints.MapPost("/api/organizations/{organizationId}/members/{userId}/password", async (
+            string organizationId,
+            string userId,
+            OrganizationMemberPasswordResetRequest request,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, new AccountScope
+                {
+                    AccountOwnerType = "organization",
+                    AccountOwnerId = organizationId,
+                }, requireConfiguredAccountGrant: false) is { } denied)
+            {
+                return denied;
+            }
+
+            var permissionContext = await identity.GetPermissionContextAsync(ResolveActorId(httpContext), ct);
+            if (!CanManageOrganization(permissionContext, organizationId))
+            {
+                return AuthError(
+                    "ORG_ADMIN_FORBIDDEN",
+                    "organization admin permission is required",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            try
+            {
+                return Results.Ok(await identity.ResetOrganizationMemberPasswordAsync(organizationId, userId, request, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        endpoints.MapDelete("/api/organizations/{organizationId}/members/{userId}", async (
+            string organizationId,
+            string userId,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, new AccountScope
+                {
+                    AccountOwnerType = "organization",
+                    AccountOwnerId = organizationId,
+                }, requireConfiguredAccountGrant: false) is { } denied)
+            {
+                return denied;
+            }
+
+            var actorId = ResolveActorId(httpContext);
+            if (string.Equals(actorId, userId, StringComparison.Ordinal))
+            {
+                return AuthError(
+                    "AUTH_INVALID_REQUEST",
+                    "current administrator account cannot be deleted from this panel",
+                    StatusCodes.Status400BadRequest);
+            }
+
+            var permissionContext = await identity.GetPermissionContextAsync(actorId, ct);
+            if (!CanManageOrganization(permissionContext, organizationId))
+            {
+                return AuthError(
+                    "ORG_ADMIN_FORBIDDEN",
+                    "organization admin permission is required",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            try
+            {
+                return Results.Ok(await identity.DeleteOrganizationMemberAccountAsync(organizationId, userId, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return AuthError("AUTH_INVALID_REQUEST", ex.Message, StatusCodes.Status400BadRequest);
             }
         });
 
@@ -515,6 +676,14 @@ internal static class AccountsAuthEndpoints
         }, statusCode: statusCode);
     }
 
+    private static bool CanManageOrganization(Dictionary<string, object?> permissionContext, string organizationId)
+    {
+        return ReadDictionaryEnumerable(permissionContext, "organizations")?.Any(organization =>
+            string.Equals(ReadDictionaryString(organization, "id"), organizationId, StringComparison.Ordinal)
+            && string.Equals(ReadDictionaryString(organization, "role"), "enterprise_admin", StringComparison.Ordinal))
+            == true;
+    }
+
     private static Dictionary<string, object?> AttachSessionCredentials(
         Dictionary<string, object?> registration,
         ClientApiOptions options)
@@ -549,6 +718,40 @@ internal static class AccountsAuthEndpoints
 
         return IsLocalOriginHeader(context, "Origin")
             && IsLocalOriginHeader(context, "Referer");
+    }
+
+    private static bool TryResolveLocalSessionActorId(HttpContext context, out string actorId, out IResult? denied)
+    {
+        actorId = "";
+        denied = null;
+        var authorization = NormalizeBlank(ReadHeader(context, "Authorization"));
+        const string bearerPrefix = "Bearer ";
+        var token = authorization?.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase) == true
+            ? authorization[bearerPrefix.Length..].Trim()
+            : authorization;
+
+        if (!TryReadLocalAuthTokenActorId(token, out var resolvedActorId)
+            || string.Equals(resolvedActorId, "guest", StringComparison.OrdinalIgnoreCase))
+        {
+            denied = AuthError(
+                "SESSION_TOKEN_INVALID",
+                "a valid local session token is required to refresh the Control API assertion",
+                StatusCodes.Status401Unauthorized);
+            return false;
+        }
+
+        var headerActorId = NormalizeBlank(ReadHeader(context, "X-Actor-Id"));
+        if (headerActorId is not null && !string.Equals(headerActorId, resolvedActorId, StringComparison.Ordinal))
+        {
+            denied = AuthError(
+                "SESSION_ACTOR_MISMATCH",
+                "the session token actor does not match the requested actor",
+                StatusCodes.Status401Unauthorized);
+            return false;
+        }
+
+        actorId = resolvedActorId;
+        return true;
     }
 
     private static bool CanEchoLocalPasswordResetToken(HttpContext context)

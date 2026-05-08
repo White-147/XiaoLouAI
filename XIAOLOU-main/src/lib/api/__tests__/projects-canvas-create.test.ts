@@ -507,12 +507,21 @@ describe("createProjectsCanvasCreateService", () => {
     await expect(service.getCreateImageCapabilities(null)).resolves.toMatchObject({
       kind: "image",
       mode: "text_to_image",
-      defaultModel: "doubao-seedream-5-0-260128",
+      defaultModel: "vertex:gemini-3-pro-image-preview",
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: "vertex:gemini-3-pro-image-preview", provider: "google-vertex" }),
+        expect.objectContaining({ id: "doubao-seedream-5-0-260128", provider: "bytedance" }),
+      ]),
     });
     await expect(service.getCreateVideoCapabilities("video_edit")).resolves.toMatchObject({
       kind: "video",
       mode: "video_edit",
-      defaultModel: "doubao-seedance-2-0-260128",
+      defaultModel: "vertex:veo-3.1-generate-001",
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: "vertex:veo-3.1-generate-001", provider: "google-vertex" }),
+        expect.objectContaining({ id: "doubao-seedance-2-0-260128", provider: "bytedance" }),
+        expect.objectContaining({ id: "kling-video", provider: "kling" }),
+      ]),
     });
     await expect(
       service.getCreateCreditQuote("create_image_generate", {

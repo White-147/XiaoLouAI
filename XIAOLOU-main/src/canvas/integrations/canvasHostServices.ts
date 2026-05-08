@@ -64,7 +64,7 @@ export type HostAssetItem = {
   category: string;
   url: string;
   previewUrl?: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'audio';
   description?: string;
   sourceTaskId?: string;
   generationPrompt?: string;
@@ -72,6 +72,20 @@ export type HostAssetItem = {
   aspectRatio?: string;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type HostUploadedMedia = {
+  id: string;
+  kind: string;
+  originalName: string;
+  storedName: string;
+  sizeBytes: number;
+  contentType: string;
+  url: string;
+  urlPath: string;
+  mediaObjectId?: string;
+  objectKey?: string;
+  signedReadUrl?: string;
 };
 
 export type HostProjectSummary = {
@@ -128,7 +142,7 @@ export type CanvasHostServices = {
   readonly actorId: string | null;
   readonly projectId: string | null;
   readonly initialTheme: 'light' | 'dark';
-  generateImage(payload: HostGenerateImagePayload): Promise<{ resultUrl: string; model?: string; taskId?: string }>;
+  generateImage(payload: HostGenerateImagePayload): Promise<{ resultUrl: string; resultUrls?: string[]; model?: string; taskId?: string }>;
   generateVideo(payload: HostGenerateVideoPayload): Promise<{ resultUrl: string; previewUrl?: string; model?: string; taskId?: string }>;
   getImageCapabilities(mode?: string | null): Promise<BridgeMediaCapabilitiesResponse>;
   getVideoCapabilities(mode?: string): Promise<BridgeMediaCapabilitiesResponse>;
@@ -147,6 +161,7 @@ export type CanvasHostServices = {
   listAssets(): Promise<{ projectId?: string; items: HostAssetItem[] }>;
   createAsset(payload: unknown): Promise<HostAssetItem | null>;
   deleteAsset(id: string): Promise<void>;
+  uploadMedia?(file: File, kind?: string): Promise<HostUploadedMedia>;
   listProjects(): Promise<{ items: HostProjectSummary[] }>;
   loadProject(id: string): Promise<HostProjectFull>;
   deleteProject(id: string): Promise<{ deleted: boolean }>;

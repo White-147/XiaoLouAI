@@ -12,6 +12,7 @@ import type {
   LoginInput,
   LoginResult,
   OrganizationMember,
+  OrganizationMemberPasswordResetInput,
   PasswordConfiguredResult,
   PasswordResetRequestResult,
   PermissionContext,
@@ -19,6 +20,7 @@ import type {
   RegisterPersonalInput,
   RegistrationResult,
   RequestPasswordResetInput,
+  UpdateOrganizationMemberAccountInput,
   UpdateMeInput,
   Wallet,
   WalletOwnerType,
@@ -107,9 +109,11 @@ export function createAuthAccountService({
       );
     },
 
-    listOrganizationMembers(organizationId: string) {
+    listOrganizationMembers(organizationId: string, query?: string) {
+      const queryText = query?.trim();
+      const queryString = queryText ? `?query=${encodeURIComponent(queryText)}` : "";
       return controlApiJsonRequest<{ items: OrganizationMember[] }>(
-        `/api/organizations/${encodeURIComponent(organizationId)}/members`,
+        `/api/organizations/${encodeURIComponent(organizationId)}/members${queryString}`,
       );
     },
 
@@ -120,6 +124,41 @@ export function createAuthAccountService({
           method: "POST",
           body: JSON.stringify(input),
         },
+      );
+    },
+
+    resetOrganizationMemberPassword(
+      organizationId: string,
+      userId: string,
+      input: OrganizationMemberPasswordResetInput,
+    ) {
+      return controlApiJsonRequest<PasswordConfiguredResult>(
+        `/api/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/password`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
+    },
+
+    updateOrganizationMemberAccount(
+      organizationId: string,
+      userId: string,
+      input: UpdateOrganizationMemberAccountInput,
+    ) {
+      return controlApiJsonRequest<OrganizationMember>(
+        `/api/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}/account`,
+        {
+          method: "PUT",
+          body: JSON.stringify(input),
+        },
+      );
+    },
+
+    deleteOrganizationMemberAccount(organizationId: string, userId: string) {
+      return controlApiJsonRequest<{ deleted: boolean; organizationId: string; userId: string }>(
+        `/api/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
       );
     },
 

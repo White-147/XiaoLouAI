@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowLeft,
   Clock,
   CreditCard,
   LoaderCircle,
@@ -11,6 +12,7 @@ import {
   Wallet as WalletIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   getAdminCreditUsageStats,
   getMe,
@@ -173,6 +175,7 @@ function SubjectButton(props: {
 }
 
 export default function CreditUsage() {
+  const navigate = useNavigate();
   const [me, setMe] = useState<PermissionContext | null>(null);
   const [stats, setStats] = useState<CreditUsageStats | null>(null);
   const [subjects, setSubjects] = useState<CreditUsageSubject[]>([]);
@@ -205,6 +208,7 @@ export default function CreditUsage() {
   const walletEntitlement = useMemo(() => resolveWalletEntitlement(me), [me]);
   const isEnterpriseWalletContext =
     walletEntitlement.kind === "enterprise_admin" || walletEntitlement.kind === "enterprise_member";
+  const canUseCreditUsagePage = walletEntitlement.kind === "personal";
 
   useEffect(() => {
     if (!me || !isPlatformAdmin) return;
@@ -236,7 +240,7 @@ export default function CreditUsage() {
     setLoading(true);
     setError(null);
 
-    if (!isPlatformAdmin && !walletEntitlement.ownerType) {
+    if (!canUseCreditUsagePage || (!isPlatformAdmin && !walletEntitlement.ownerType)) {
       setStats(null);
       setLoading(false);
       return () => {
@@ -265,7 +269,7 @@ export default function CreditUsage() {
     return () => {
       active = false;
     };
-  }, [isPlatformAdmin, me, refreshKey, selectedSubject, walletEntitlement]);
+  }, [canUseCreditUsagePage, isPlatformAdmin, me, refreshKey, selectedSubject, walletEntitlement]);
 
   const walletDescription = useMemo(() => {
     if (!stats?.wallets.length) return "暂无可统计钱包";
@@ -311,6 +315,34 @@ export default function CreditUsage() {
           </div>
         ) : null}
 
+        {!loading && !canUseCreditUsagePage ? (
+          <section className="rounded-lg border border-border/70 bg-card p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/12 text-primary">
+              <CreditCard className="h-5 w-5" />
+            </div>
+            <h2 className="mt-4 text-xl font-semibold text-foreground">
+              {isEnterpriseWalletContext ? "企业积分统计已移至成员监管" : "当前账号暂无积分统计入口"}
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
+              {walletEntitlement.kind === "enterprise_admin"
+                ? "企业管理员可以在管理面板的成员监管中查看员工积分消耗和分时统计。"
+                : walletEntitlement.kind === "enterprise_member"
+                  ? "企业成员使用企业钱包，积分统计由企业管理员在管理面板统一查看。"
+                  : "个人积分统计仅面向个人账号；平台级统计建议从后台入口独立查看。"}
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate(walletEntitlement.kind === "enterprise_admin" ? "/enterprise" : "/home")}
+              className="mt-5 inline-flex min-h-10 items-center gap-2 rounded-lg border border-border/70 bg-card px-4 py-2 text-sm font-medium text-foreground transition hover:bg-accent"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {walletEntitlement.kind === "enterprise_admin" ? "前往管理面板" : "返回首页"}
+            </button>
+          </section>
+        ) : null}
+
+        {canUseCreditUsagePage ? (
+          <>
         {isPlatformAdmin ? (
           <section className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
             <div className="rounded-lg border border-border/70 bg-card p-4">
@@ -455,6 +487,8 @@ export default function CreditUsage() {
             </div>
           </div>
         </section>
+          </>
+        ) : null}
       </div>
     </main>
   );

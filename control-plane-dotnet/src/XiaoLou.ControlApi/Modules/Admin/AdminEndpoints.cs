@@ -70,6 +70,69 @@ internal static class AdminEndpoints
             code = "RECHARGE_FLOW_RETIRED",
         }, statusCode: StatusCodes.Status410Gone));
 
+        endpoints.MapGet("/api/admin/accounts", async (
+            string? query,
+            HttpContext httpContext,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (await AuthorizeSuperAdminAsync(httpContext, identity, ct) is { } denied)
+            {
+                return denied;
+            }
+
+            return Results.Ok(new { items = await identity.ListPlatformAccountsAsync(query, ct) });
+        });
+
+        endpoints.MapPut("/api/admin/accounts/{userId}", async (
+            string userId,
+            UpdatePlatformAccountRequest request,
+            HttpContext httpContext,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (await AuthorizeSuperAdminAsync(httpContext, identity, ct) is { } denied)
+            {
+                return denied;
+            }
+
+            try
+            {
+                return Results.Ok(await identity.UpdatePlatformAccountAsync(userId, request, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequestError(ex);
+            }
+        });
+
+        endpoints.MapDelete("/api/admin/accounts/{userId}", async (
+            string userId,
+            HttpContext httpContext,
+            PostgresIdentityConfigStore identity,
+            CancellationToken ct) =>
+        {
+            if (await AuthorizeSuperAdminAsync(httpContext, identity, ct) is { } denied)
+            {
+                return denied;
+            }
+
+            var actorId = ResolveActorId(httpContext);
+            if (string.Equals(actorId, userId, StringComparison.Ordinal))
+            {
+                return BadRequestError(new ArgumentException("cannot delete current admin account"));
+            }
+
+            try
+            {
+                return Results.Ok(await identity.DeletePlatformAccountAsync(userId, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequestError(ex);
+            }
+        });
+
         endpoints.MapGet("/api/enterprise-applications", async (
             int? limit,
             HttpContext httpContext,
@@ -161,4 +224,22 @@ internal static class AdminEndpoints
         Decision = request.Decision,
         Note = request.Note,
     };
+
+    private static async Task<IResult?> AuthorizeSuperAdminAsync(
+        HttpContext context,
+        PostgresIdentityConfigStore identity,
+        CancellationToken cancellationToken)
+    {
+        var permissionContext = await identity.GetPermissionContextAsync(ResolveActorId(context), cancellationToken);
+        var permissions = TryReadDictionary(permissionContext, "permissions");
+        var platformRole = ReadDictionaryString(permissionContext, "platformRole")
+            ?? ReadDictionaryString(TryReadDictionary(permissionContext, "actor"), "platformRole");
+        return ReadDictionaryBool(permissions, "canManageSystem") || string.Equals(platformRole, "super_admin", StringComparison.Ordinal)
+            ? null
+            : Results.Json(new
+            {
+                error = "super admin permission is required",
+                code = "SYSTEM_ADMIN_FORBIDDEN",
+            }, statusCode: StatusCodes.Status403Forbidden);
+    }
 }

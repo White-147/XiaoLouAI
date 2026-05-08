@@ -92,6 +92,7 @@ export type MemberUsageSummary = {
   pendingFrozenCredits: number;
   recentTaskCount: number;
   lastActivityAt: string | null;
+  series?: CreditUsageSeriesPoint[];
 };
 
 export type PermissionContext = {
@@ -546,6 +547,22 @@ export type OrganizationMember = {
   usageSummary?: MemberUsageSummary | null;
 };
 
+export type PlatformAccount = {
+  id: string;
+  userId: string;
+  displayName: string;
+  email: string | null;
+  phone?: string | null;
+  avatar?: string | null;
+  platformRole: PlatformRole;
+  status: string;
+  accountStatus?: string;
+  deleted?: boolean;
+  deletedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
 export type RegisterPersonalInput = {
   displayName: string;
   email: string;
@@ -572,6 +589,28 @@ export type CreateOrganizationMemberInput = {
   password?: string;
   membershipRole?: "member" | "admin";
   canUseOrganizationWallet?: boolean;
+};
+
+export type OrganizationMemberPasswordResetInput = {
+  newPassword: string;
+};
+
+export type UpdateOrganizationMemberAccountInput = {
+  displayName?: string;
+  email?: string;
+  phone?: string | null;
+  department?: string | null;
+  membershipRole?: "member" | "admin";
+  canUseOrganizationWallet?: boolean;
+  newPassword?: string;
+};
+
+export type UpdatePlatformAccountInput = {
+  displayName?: string;
+  email?: string;
+  phone?: string | null;
+  platformRole?: PlatformRole;
+  newPassword?: string;
 };
 
 export type RegistrationResult = {
@@ -1039,7 +1078,7 @@ function buildFallbackPermissionContext(actorId: string): PermissionContext {
       currentOrganizationId: null,
       currentOrganizationRole: null,
       permissions: {
-        canCreateProject: false,
+        canCreateProject: true,
         canRecharge: false,
         canUseEnterprise: false,
         canManageOrganization: false,
@@ -1064,7 +1103,7 @@ function buildFallbackPermissionContext(actorId: string): PermissionContext {
       currentOrganizationId: null,
       currentOrganizationRole: null,
       permissions: {
-        canCreateProject: false,
+        canCreateProject: true,
         canRecharge: false,
         canUseEnterprise: false,
         canManageOrganization: false,
@@ -1408,6 +1447,23 @@ const DEFAULT_API_CENTER_CONFIG: ApiCenterConfig = {
       ],
     },
     {
+      id: "google-vertex",
+      name: "Google Vertex AI",
+      connected: false,
+      apiKeyConfigured: false,
+      lastCheckedAt: null,
+      supportedDomains: ["text", "vision", "image", "video"],
+      models: [
+        { id: "vertex:gemini-3-flash-preview", name: "Gemini 3 Flash (Vertex)", domain: "text", inputPrice: "local", outputPrice: "local", enabled: true },
+        { id: "vertex:gemini-3.1-pro-preview", name: "Gemini 3.1 Pro (Vertex)", domain: "text", inputPrice: "local", outputPrice: "local", enabled: true },
+        { id: "vertex:gemini-3-pro-image-preview", name: "Gemini 3 Pro Image+", domain: "image", inputPrice: "local", outputPrice: "local", enabled: true },
+        { id: "vertex:gemini-3.1-flash-image-preview", name: "Gemini 3.1 Flash Image+", domain: "image", inputPrice: "local", outputPrice: "local", enabled: true },
+        { id: "vertex:veo-3.1-generate-001", name: "Veo 3.1+", domain: "video", inputPrice: "local", outputPrice: "local", enabled: true },
+        { id: "vertex:veo-3.1-fast-generate-001", name: "Veo 3.1 Fast+", domain: "video", inputPrice: "local", outputPrice: "local", enabled: true },
+        { id: "vertex:veo-3.1-lite-generate-001", name: "Veo 3.1 Lite+", domain: "video", inputPrice: "local", outputPrice: "local", enabled: true },
+      ],
+    },
+    {
       id: "kling",
       name: "Kling",
       connected: false,
@@ -1422,8 +1478,8 @@ const DEFAULT_API_CENTER_CONFIG: ApiCenterConfig = {
   defaults: {
     textModelId: "qwen-plus",
     visionModelId: "qwen-vl-plus",
-    imageModelId: "doubao-seedream-5-0-260128",
-    videoModelId: "doubao-seedance-2-0-260128",
+    imageModelId: "vertex:gemini-3-pro-image-preview",
+    videoModelId: "vertex:veo-3.1-generate-001",
     audioModelId: "qwen3.5-omni-flash",
   },
   strategies: {
@@ -1439,22 +1495,22 @@ const DEFAULT_API_CENTER_CONFIG: ApiCenterConfig = {
     {
       nodeCode: "create_image_generate",
       nodeName: "Create image",
-      primaryModelId: "doubao-seedream-5-0-260128",
-      fallbackModelIds: [],
+      primaryModelId: "vertex:gemini-3-pro-image-preview",
+      fallbackModelIds: ["doubao-seedream-5-0-260128"],
     },
     {
       nodeCode: "create_video_generate",
       nodeName: "Create video",
-      primaryModelId: "doubao-seedance-2-0-260128",
-      fallbackModelIds: ["kling-video"],
+      primaryModelId: "vertex:veo-3.1-generate-001",
+      fallbackModelIds: ["doubao-seedance-2-0-260128", "kling-video"],
     },
   ],
   toolboxAssignments: [
     {
       nodeCode: "storyboard_grid25_generate",
       nodeName: "25-grid storyboard",
-      primaryModelId: "doubao-seedream-5-0-260128",
-      fallbackModelIds: [],
+      primaryModelId: "vertex:gemini-3-pro-image-preview",
+      fallbackModelIds: ["doubao-seedream-5-0-260128"],
     },
   ],
 };
@@ -1463,10 +1519,54 @@ function cloneApiCenterConfig(config: ApiCenterConfig = DEFAULT_API_CENTER_CONFI
   return JSON.parse(JSON.stringify(config)) as ApiCenterConfig;
 }
 
+function mergeApiCenterConfigDefaults(config: ApiCenterConfig): ApiCenterConfig {
+  const fallback = cloneApiCenterConfig();
+  const vendors = config.vendors.map((vendor) => {
+    const fallbackVendor = fallback.vendors.find((item) => item.id === vendor.id);
+    if (!fallbackVendor) {
+      return vendor;
+    }
+
+    const models = vendor.models.map((model) => {
+      const fallbackModel = fallbackVendor.models.find((item) => item.id === model.id);
+      return fallbackModel ? { ...fallbackModel, ...model } : model;
+    });
+    for (const fallbackModel of fallbackVendor.models) {
+      if (!models.some((model) => model.id === fallbackModel.id)) {
+        models.push(fallbackModel);
+      }
+    }
+
+    return {
+      ...fallbackVendor,
+      ...vendor,
+      supportedDomains: Array.from(new Set([...fallbackVendor.supportedDomains, ...vendor.supportedDomains])),
+      models,
+    };
+  });
+  for (const fallbackVendor of fallback.vendors) {
+    if (!vendors.some((vendor) => vendor.id === fallbackVendor.id)) {
+      vendors.push(fallbackVendor);
+    }
+  }
+
+  return {
+    ...fallback,
+    ...config,
+    vendors,
+    defaults: { ...fallback.defaults, ...config.defaults },
+    strategies: { ...fallback.strategies, ...config.strategies },
+    nodeAssignments: config.nodeAssignments?.length ? config.nodeAssignments : fallback.nodeAssignments,
+    toolboxAssignments: config.toolboxAssignments?.length ? config.toolboxAssignments : fallback.toolboxAssignments,
+  };
+}
+
 function readLocalApiCenterConfig() {
-  return localStorageGetJson<ApiCenterConfig>(
-    LOCAL_API_CENTER_CONFIG_STORAGE_PREFIX,
-    cloneApiCenterConfig(),
+  return mergeApiCenterConfigDefaults(
+    localStorageGetJson<ApiCenterConfig>(
+      LOCAL_API_CENTER_CONFIG_STORAGE_PREFIX,
+      cloneApiCenterConfig(),
+    ),
   );
 }
 
@@ -1577,7 +1677,7 @@ function createLocalOrganizationMember(organizationId: string, input: CreateOrga
   const now = new Date().toISOString();
   const membershipRole = input.membershipRole || "member";
   const role: EnterpriseRole = membershipRole === "admin" ? "enterprise_admin" : "enterprise_member";
-  const actorId = actorIdFromEmail(input.email || input.displayName, role === "enterprise_admin" ? "enterprise_admin" : "personal");
+  const actorId = createClientId("user");
   return {
     id: createClientId("org-member"),
     organizationId,
@@ -1601,6 +1701,7 @@ function createLocalOrganizationMember(organizationId: string, input: CreateOrga
       pendingFrozenCredits: 0,
       recentTaskCount: 0,
       lastActivityAt: null,
+      series: [],
     },
   };
 }
@@ -2175,6 +2276,18 @@ export async function listAdminOrders() {
   return adminEnterpriseService.listAdminOrders();
 }
 
+export async function listPlatformAccounts(query?: string) {
+  return adminEnterpriseService.listPlatformAccounts(query);
+}
+
+export async function updatePlatformAccount(userId: string, input: UpdatePlatformAccountInput) {
+  return adminEnterpriseService.updatePlatformAccount(userId, input);
+}
+
+export async function deletePlatformAccount(userId: string) {
+  return adminEnterpriseService.deletePlatformAccount(userId);
+}
+
 export async function reviewAdminOrder(
   orderId: string,
   input: { decision: "approve" | "reject"; note?: string },
@@ -2182,8 +2295,8 @@ export async function reviewAdminOrder(
   return adminEnterpriseService.reviewAdminOrder(orderId, input);
 }
 
-export async function listOrganizationMembers(organizationId: string) {
-  return authAccountService.listOrganizationMembers(organizationId);
+export async function listOrganizationMembers(organizationId: string, query?: string) {
+  return authAccountService.listOrganizationMembers(organizationId, query);
 }
 
 export async function createOrganizationMember(
@@ -2191,6 +2304,26 @@ export async function createOrganizationMember(
   input: CreateOrganizationMemberInput,
 ) {
   return authAccountService.createOrganizationMember(organizationId, input);
+}
+
+export async function resetOrganizationMemberPassword(
+  organizationId: string,
+  userId: string,
+  input: OrganizationMemberPasswordResetInput,
+) {
+  return authAccountService.resetOrganizationMemberPassword(organizationId, userId, input);
+}
+
+export async function updateOrganizationMemberAccount(
+  organizationId: string,
+  userId: string,
+  input: UpdateOrganizationMemberAccountInput,
+) {
+  return authAccountService.updateOrganizationMemberAccount(organizationId, userId, input);
+}
+
+export async function deleteOrganizationMemberAccount(organizationId: string, userId: string) {
+  return authAccountService.deleteOrganizationMemberAccount(organizationId, userId);
 }
 
 export async function getOrganizationWallet(organizationId: string) {

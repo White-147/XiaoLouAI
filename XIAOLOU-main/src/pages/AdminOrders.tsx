@@ -1,4 +1,4 @@
-import { ArrowLeft, Building2, CheckCircle2, CreditCard, LoaderCircle, LogIn, ShieldX } from "lucide-react";
+import { ArrowLeft, Building2, CheckCircle2, CreditCard, LoaderCircle, ShieldX } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -114,11 +114,11 @@ export default function AdminOrders() {
           </p>
           <button
             type="button"
-            onClick={() => navigate("/admin/login", { state: { from: "/admin/orders" } })}
+            onClick={() => navigate("/home")}
             className="mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
           >
-            <LogIn className="h-4 w-4" />
-            管理员登录
+            <ArrowLeft className="h-4 w-4" />
+            返回首页
           </button>
         </div>
       </div>

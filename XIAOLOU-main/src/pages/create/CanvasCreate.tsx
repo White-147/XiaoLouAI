@@ -557,22 +557,31 @@ function isVideoAsset(asset: Asset) {
   return asset.mediaKind === "video" || asset.assetType === "video_ref";
 }
 
+function isAudioAsset(asset: Asset) {
+  return asset.mediaKind === "audio" || asset.assetType === "audio" || asset.assetType === "sound_effect";
+}
+
 function mapXiaolouAssetTypeToCategory(assetType: string) {
   switch (assetType) {
     case "character": return "Character";
     case "scene": return "Scene";
     case "prop": return "Item";
     case "style": return "Style";
+    case "audio":
+    case "sound_effect":
+      return "Sound Effect";
     default: return "Others";
   }
 }
 
-function mapCanvasCategoryToAssetType(category: string | undefined, mediaKind: "image" | "video") {
+function mapCanvasCategoryToAssetType(category: string | undefined, mediaKind: "image" | "video" | "audio") {
   if (mediaKind === "video") return "video_ref";
+  if (mediaKind === "audio") return "audio";
   switch ((category || "").trim().toLowerCase()) {
     case "character": return "character";
     case "scene": return "scene";
     case "style": return "style";
+    case "sound effect": return "sound_effect";
     default: return "prop";
   }
 }
@@ -587,7 +596,7 @@ function normalizeAssetToBridgeItem(asset: Asset): HostAssetItem | null {
     category: mapXiaolouAssetTypeToCategory(asset.assetType),
     url: mediaUrl,
     previewUrl,
-    type: isVideoAsset(asset) ? "video" : "image",
+    type: isAudioAsset(asset) ? "audio" : isVideoAsset(asset) ? "video" : "image",
     description: asset.description || undefined,
     sourceTaskId: asset.sourceTaskId || undefined,
     generationPrompt: asset.generationPrompt || undefined,
@@ -963,11 +972,11 @@ export default function CanvasCreate() {
           assetType?: string; name?: string; description?: string; previewUrl?: string;
           mediaUrl?: string; sourceUrl?: string; sourceTaskId?: string | null;
           generationPrompt?: string; prompt?: string; imageModel?: string; model?: string;
-          scope?: string; category?: string; mediaKind?: "image" | "video";
+          scope?: string; category?: string; mediaKind?: "image" | "video" | "audio";
           aspectRatio?: string; resultAspectRatio?: string;
           sourceModule?: string;
         };
-        const mediaKind = p.mediaKind === "video" ? "video" : "image";
+        const mediaKind = p.mediaKind === "video" ? "video" : p.mediaKind === "audio" ? "audio" : "image";
         const previewUrl = p.previewUrl?.trim() || p.sourceUrl?.trim();
         const mediaUrl = p.mediaUrl?.trim() || p.sourceUrl?.trim() || previewUrl;
         const parts: string[] = ["Saved from canvas"];
@@ -996,6 +1005,10 @@ export default function CanvasCreate() {
       async deleteAsset(id) {
         const readyProjectId = await resolveReadyProjectId();
         await deleteAsset(readyProjectId, id);
+      },
+
+      async uploadMedia(file, kind) {
+        return uploadFile(file, kind || "canvas-media");
       },
 
       // ── Canvas projects ─────────────────────────────────────────────────────

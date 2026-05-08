@@ -73,7 +73,15 @@ export const AssetLibraryPanel: React.FC<AssetLibraryPanelProps> = ({
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
   const [loading, setLoading] = useState(false);
-  const [assetSource, setAssetSource] = useState<AssetLibrarySource>('local');
+  const [assetSource, setAssetSource] = useState<AssetLibrarySource>(
+    () => (hasProjectAssetBridge ? 'xiaolou' : 'local'),
+  );
+
+  useEffect(() => {
+    if (isOpen && hasProjectAssetBridge) {
+      setAssetSource((current) => (current === 'local' ? 'xiaolou' : current));
+    }
+  }, [hasProjectAssetBridge, isOpen]);
 
   const fetchLibrary = useCallback(async () => {
     setLoading(true);

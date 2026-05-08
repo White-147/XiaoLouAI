@@ -56,6 +56,12 @@ import {
     type NativeAgentToolInfo,
 } from '../services/nativeAgentCatalog';
 import {
+    createXiaolouAsset,
+    uploadXiaolouMediaFile,
+    type XiaolouAssetLibraryItem,
+    type XiaolouUploadedMedia,
+} from '../integrations/xiaolouAssetBridge';
+import {
     CANVAS_IMAGE_MODELS,
     DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID,
     getCanvasImageQualityOptions,
@@ -81,6 +87,7 @@ import {
     canUseXiaolouImageGenerationBridge,
     generateVideoWithXiaolou,
     getVideoCapabilitiesFromXiaolou,
+    type XiaolouGenerateVideoPayload,
 } from '../integrations/xiaolouGenerationBridge';
 import { buildFallbackVideoCapabilities } from '../config/canvasVideoModels';
 import {
@@ -321,6 +328,9 @@ interface AttachedMedia {
     nodeId: string;
     base64?: string;
     frameRole?: VideoFrameRole;
+    previewUrl?: string;
+    uploadedUrl?: string;
+    assetId?: string;
 }
 
 type VideoSlotDefinition = {
@@ -539,20 +549,6 @@ function readFileAsDataUrl(file: File): Promise<string> {
         reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
         reader.readAsDataURL(file);
     });
-}
-
-async function imageUrlToBase64(url: string): Promise<string | undefined> {
-    try {
-        const response = await fetch(url);
-        const blob = await response.blob();
-        const dataUrl = await readFileAsDataUrl(new File([blob], 'reference.png', {
-            type: blob.type || 'image/png',
-        }));
-        return dataUrl.split(',')[1] || undefined;
-    } catch (err) {
-        console.error('Failed to convert image to base64:', err);
-        return undefined;
-    }
 }
 
 function modelDisplayName(model: NativeAgentModelInfo) {
@@ -887,8 +883,62 @@ function getCapabilityStatusLabel(status?: string) {
     return status || '';
 }
 
+function resolveUploadedMediaUrl(uploaded: XiaolouUploadedMedia | null | undefined) {
+    return uploaded?.signedReadUrl || uploaded?.url || uploaded?.urlPath || '';
+}
+
 function mediaUrlForPayload(media: AttachedMedia) {
+    const durableUrl = media.uploadedUrl || media.url;
+    if (durableUrl) return durableUrl;
     return media.type === 'image' && media.base64 ? `data:image/png;base64,${media.base64}` : media.url;
+}
+
+function mediaPreviewUrl(media: AttachedMedia) {
+    return media.previewUrl || media.url;
+}
+
+function inferComposerMediaType(file: File): AttachedMedia['type'] {
+    if (file.type.startsWith('image/')) return 'image';
+    if (file.type.startsWith('audio/')) return 'audio';
+    return 'video';
+}
+
+function assetCategoryForMediaType(type: AttachedMedia['type']) {
+    if (type === 'audio') return 'Sound Effect';
+    return 'Others';
+}
+
+function assetTypeForMediaType(type: AttachedMedia['type']) {
+    if (type === 'video') return 'video_ref';
+    if (type === 'audio') return 'audio';
+    return 'image_ref';
+}
+
+function mediaAttachmentFromCanvasNode(node: unknown): AttachedMedia | null {
+    if (!node || typeof node !== 'object') return null;
+    const record = node as Record<string, unknown>;
+    const rawType = String(record.type || record.nodeType || '').toLowerCase();
+    const type: AttachedMedia['type'] | null = rawType.includes('video')
+        ? 'video'
+        : rawType.includes('audio')
+            ? 'audio'
+            : rawType.includes('image')
+                ? 'image'
+                : null;
+    if (!type) return null;
+
+    const url = String(record.resultUrl || record.url || record.mediaUrl || '').trim();
+    if (!url) return null;
+    const id = String(record.id || `canvas-${Date.now()}`).trim();
+    const previewUrl = type === 'video'
+        ? String(record.lastFrame || record.thumbnailUrl || url || '').trim()
+        : url;
+    return {
+        type,
+        url,
+        previewUrl: previewUrl || url,
+        nodeId: id,
+    };
 }
 
 function isSeedanceVideoModelId(modelId?: string | null) {
@@ -1834,7 +1884,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 type,
                 url,
                 nodeId,
-                base64: type === 'image' ? await imageUrlToBase64(url) : undefined,
+                previewUrl: url,
             };
             setAttachedMedia((prev) => applyVideoAttachmentsForSlot(
                 prev,
@@ -2064,13 +2114,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         }
 
         try {
+            const videoPayload = videoRequest.payload as XiaolouGenerateVideoPayload;
             await onApplyActions([{
                 type: 'create_node',
                 node: {
                     id: nodeId,
                     type: 'video',
                     title: '视频',
-                    prompt: videoRequest.payload.prompt,
+                    prompt: videoPayload.prompt,
                     status: 'loading',
                     model: currentVideoModelId,
                     videoModel: currentVideoModelId,
@@ -2080,12 +2131,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     videoMode: videoRequest.nodeMode,
                     generateAudio: supportsVideoAudioOutput ? videoGenerateAudio : false,
                     networkSearch: webSearchEnabled,
-                    referenceAudioUrls: videoRequest.payload.referenceAudioUrls,
+                    inputUrl: videoPayload.referenceImageUrl || videoPayload.firstFrameUrl,
+                    lastFrame: videoPayload.lastFrameUrl,
+                    referenceVideoUrls: videoPayload.referenceVideoUrls,
+                    referenceAudioUrls: videoPayload.referenceAudioUrls,
+                    motionReferenceVideoUrl: videoPayload.motionReferenceVideoUrl,
+                    characterReferenceImageUrl: videoPayload.characterReferenceImageUrl,
+                    editMode: videoPayload.editMode,
+                    qualityMode: videoPayload.qualityMode,
                 },
             } as CanvasAgentAction]);
 
             const result = await generateVideoWithXiaolou({
-                ...videoRequest.payload,
+                ...videoPayload,
                 onTaskIdAssigned: (taskId) => {
                     void onApplyActions([{
                         type: 'update_node',
@@ -2244,6 +2302,60 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         setActiveMenu(null);
     };
 
+    const buildAttachmentFromLocalFile = async (file: File, index: number): Promise<AttachedMedia> => {
+        const type = inferComposerMediaType(file);
+        const localDataUrl = type === 'image' ? await readFileAsDataUrl(file) : '';
+        const baseAttachment: AttachedMedia = {
+            type,
+            url: localDataUrl,
+            previewUrl: localDataUrl || undefined,
+            nodeId: `upload-${Date.now()}-${index}-${file.name}`,
+            base64: type === 'image' ? localDataUrl.split(',')[1] || undefined : undefined,
+        };
+
+        try {
+            const uploaded = await uploadXiaolouMediaFile(file, `agent-canvas-${type}-reference`);
+            const uploadedUrl = resolveUploadedMediaUrl(uploaded);
+            if (!uploadedUrl) {
+                if (baseAttachment.url) return baseAttachment;
+                const fallbackUrl = await readFileAsDataUrl(file);
+                return { ...baseAttachment, url: fallbackUrl, previewUrl: fallbackUrl };
+            }
+
+            let asset: XiaolouAssetLibraryItem | null = null;
+            try {
+                asset = await createXiaolouAsset({
+                    assetType: assetTypeForMediaType(type),
+                    name: file.name,
+                    category: assetCategoryForMediaType(type),
+                    mediaKind: type,
+                    mediaUrl: uploadedUrl,
+                    sourceUrl: uploadedUrl,
+                    previewUrl: type === 'image' ? uploadedUrl : uploadedUrl,
+                    scope: 'manual',
+                    sourceModule: 'canvas',
+                });
+            } catch (assetError) {
+                console.warn('[ChatPanel] Local upload succeeded but project asset sync failed:', assetError);
+            }
+
+            const durableUrl = asset?.url || uploadedUrl;
+            return {
+                ...baseAttachment,
+                url: durableUrl,
+                uploadedUrl,
+                previewUrl: asset?.previewUrl || (type === 'image' ? localDataUrl || durableUrl : durableUrl),
+                assetId: asset?.id,
+                base64: undefined,
+            };
+        } catch (uploadError) {
+            console.warn('[ChatPanel] Failed to upload local file through Xiaolou media service:', uploadError);
+            if (baseAttachment.url) return baseAttachment;
+            const fallbackUrl = await readFileAsDataUrl(file);
+            return { ...baseAttachment, url: fallbackUrl, previewUrl: fallbackUrl };
+        }
+    };
+
     const handleUploadFiles = async (files: FileList | null) => {
         const pendingSlot = composerMode === 'video' ? pendingVideoAttachSlotRef.current : null;
         const pendingMediaType = pendingSlot ? getVideoAttachMediaType(pendingSlot) : null;
@@ -2260,17 +2372,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             return;
         }
 
-        const nextAttachments = await Promise.all(selectedFiles.map(async (file, index) => {
-            const isImage = file.type.startsWith('image/');
-            const isAudio = file.type.startsWith('audio/');
-            const url = await readFileAsDataUrl(file);
-            return {
-                type: isImage ? 'image' as const : isAudio ? 'audio' as const : 'video' as const,
-                url,
-                nodeId: `upload-${Date.now()}-${index}-${file.name}`,
-                base64: isImage ? url.split(',')[1] || undefined : undefined,
-            };
-        }));
+        const nextAttachments = await Promise.all(
+            selectedFiles.map((file, index) => buildAttachmentFromLocalFile(file, index)),
+        );
 
         setAttachedMedia((prev) => applyVideoAttachmentsForSlot(prev, nextAttachments, pendingSlot));
         setActiveMenu(null);
@@ -2284,8 +2388,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         const nextAttachment = {
             type,
             url,
+            previewUrl: url,
             nodeId: `library-${Date.now()}`,
-            base64: type === 'image' ? await imageUrlToBase64(url) : undefined,
         };
         setAttachedMedia((prev) => applyVideoAttachmentsForSlot(
             prev,
@@ -2327,6 +2431,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const handlePickFromCanvas = (slot?: VideoAttachSlot) => {
         if (slot) {
             updatePendingVideoAttachSlot(slot);
+        }
+        const snapshot = getCanvasSnapshot?.();
+        const selectedNodeIds = new Set((snapshot?.selectedNodeIds || []).map(String));
+        const selectedMedia = (snapshot?.nodes || [])
+            .filter((node) => {
+                const nodeId = String((node as Record<string, unknown> | null)?.id || '');
+                return nodeId && selectedNodeIds.has(nodeId);
+            })
+            .map(mediaAttachmentFromCanvasNode)
+            .filter((item): item is AttachedMedia => Boolean(item));
+        const targetSlot = slot || (composerMode === 'video' ? pendingVideoAttachSlotRef.current : null);
+        const targetType = targetSlot ? getVideoAttachMediaType(targetSlot) : 'image';
+        const matchingMedia = selectedMedia.filter((item) => item.type === targetType);
+        if (matchingMedia.length) {
+            setAttachedMedia((prev) => applyVideoAttachmentsForSlot(
+                prev,
+                matchingMedia,
+                composerMode === 'video' ? targetSlot : null,
+            ));
+            updatePendingVideoAttachSlot(null);
+            setActiveMenu(null);
+            setIsDragOver(false);
+            return;
         }
         setActiveMenu(null);
         setIsDragOver(true);
@@ -2973,7 +3100,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                                     >
                                                         {media ? (
                                                             media.type === 'image' ? (
-                                                                <img src={media.url} alt="" className="h-full w-full object-cover" />
+                                                                <img src={mediaPreviewUrl(media)} alt="" className="h-full w-full object-cover" />
                                                             ) : media.type === 'video' ? (
                                                                 <Film size={16} />
                                                             ) : (

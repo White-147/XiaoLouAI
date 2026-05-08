@@ -1,5 +1,6 @@
 using XiaoLou.Domain;
 using XiaoLou.Infrastructure.Storage;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -8,8 +9,11 @@ namespace XiaoLou.Infrastructure.Postgres;
 public sealed class PostgresMediaStore(
     NpgsqlDataSource dataSource,
     PostgresAccountStore accounts,
-    IObjectStorageSigner signer)
+    IObjectStorageSigner signer,
+    IOptions<ObjectStorageOptions> storageOptions)
 {
+    private readonly ObjectStorageOptions _storageOptions = storageOptions.Value;
+
     public async Task<Dictionary<string, object?>> BeginUploadAsync(
         UploadBeginRequest request,
         CancellationToken cancellationToken)
@@ -19,7 +23,9 @@ public sealed class PostgresMediaStore(
         var accountId = await accounts.EnsureAccountAsync(connection, transaction, request, cancellationToken);
         await PostgresAccountStore.LockAccountLaneAsync(connection, transaction, accountId, AccountLanes.Media, cancellationToken);
 
-        var bucket = string.IsNullOrWhiteSpace(request.Bucket) ? "xiaolou-prod" : request.Bucket.Trim();
+        var bucket = string.IsNullOrWhiteSpace(request.Bucket)
+            ? (string.IsNullOrWhiteSpace(_storageOptions.Bucket) ? "xiaolou-prod" : _storageOptions.Bucket.Trim())
+            : request.Bucket.Trim();
         var objectKey = string.IsNullOrWhiteSpace(request.ObjectKey)
             ? $"temp/{accountId:N}/{Guid.NewGuid():N}"
             : request.ObjectKey.Trim().Replace('\\', '/');

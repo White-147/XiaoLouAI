@@ -24,8 +24,7 @@ const Assets = lazy(() => import("./pages/Assets"));
 const WalletRecharge = lazy(() => import("./pages/WalletRecharge"));
 const ApiCenter = lazy(() => import("./pages/ApiCenter"));
 const EnterpriseConsole = lazy(() => import("./pages/EnterpriseConsole"));
-const AdminOrders = lazy(() => import("./pages/AdminOrders"));
-const AdminLogin = lazy(() => import("./pages/AdminLogin"));
+const SuperAdminConsole = lazy(() => import("./pages/SuperAdminConsole"));
 // Placeholder components for other routes
 const Placeholder = ({ title }: { title: string }) => (
   <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -91,18 +90,10 @@ export default function App() {
             }
           />
           <Route
-            path="admin/login"
+            path="admin"
             element={
               <DeferredRoute>
-                <AdminLogin />
-              </DeferredRoute>
-            }
-          />
-          <Route
-            path="admin/orders"
-            element={
-              <DeferredRoute>
-                <AdminOrders />
+                <SuperAdminConsole />
               </DeferredRoute>
             }
           />

@@ -565,12 +565,14 @@ function mapXiaolouAssetTypeToCategory(assetType: string) {
   }
 }
 
-function mapCanvasCategoryToAssetType(category: string | undefined, mediaKind: "image" | "video") {
+function mapCanvasCategoryToAssetType(category: string | undefined, mediaKind: "image" | "video" | "audio") {
   if (mediaKind === "video") return "video_ref";
+  if (mediaKind === "audio") return "audio";
   switch ((category || "").trim().toLowerCase()) {
     case "character": return "character";
     case "scene": return "scene";
     case "style": return "style";
+    case "sound effect": return "sound_effect";
     default: return "prop";
   }
 }
@@ -923,11 +925,11 @@ export default function AgentCanvasCreate() {
           assetType?: string; name?: string; description?: string; previewUrl?: string;
           mediaUrl?: string; sourceUrl?: string; sourceTaskId?: string | null;
           generationPrompt?: string; prompt?: string; imageModel?: string; model?: string;
-          scope?: string; category?: string; mediaKind?: "image" | "video";
+          scope?: string; category?: string; mediaKind?: "image" | "video" | "audio";
           aspectRatio?: string; resultAspectRatio?: string;
           sourceModule?: string;
         };
-        const mediaKind = p.mediaKind === "video" ? "video" : "image";
+        const mediaKind = p.mediaKind === "video" ? "video" : p.mediaKind === "audio" ? "audio" : "image";
         const previewUrl = p.previewUrl?.trim() || p.sourceUrl?.trim();
         const mediaUrl = p.mediaUrl?.trim() || p.sourceUrl?.trim() || previewUrl;
         const parts: string[] = ["Saved from canvas"];
@@ -956,6 +958,10 @@ export default function AgentCanvasCreate() {
       async deleteAsset(id) {
         const readyProjectId = await resolveReadyProjectId();
         await deleteAsset(readyProjectId, id);
+      },
+
+      async uploadMedia(file, kind) {
+        return uploadFile(file, kind || "agent-canvas-media");
       },
 
       // ── Canvas projects ─────────────────────────────────────────────────────

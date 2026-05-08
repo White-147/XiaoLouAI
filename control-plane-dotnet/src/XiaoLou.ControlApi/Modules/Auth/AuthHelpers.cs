@@ -41,6 +41,44 @@ internal static class AuthHelpers
         return ClientAssertionFactory.CreateLocalAuthToken(actorId);
     }
 
+    internal static bool TryReadLocalAuthTokenActorId(string? token, out string actorId)
+    {
+        actorId = "";
+        var normalizedToken = NormalizeBlank(token);
+        if (normalizedToken is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var base64 = normalizedToken.Replace('-', '+').Replace('_', '/');
+            base64 = base64.PadRight(base64.Length + (4 - base64.Length % 4) % 4, '=');
+            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(base64));
+            var separatorIndex = decoded.LastIndexOf(':');
+            if (separatorIndex <= 0 || separatorIndex >= decoded.Length - 1)
+            {
+                return false;
+            }
+
+            if (!long.TryParse(decoded[(separatorIndex + 1)..], out _))
+            {
+                return false;
+            }
+
+            actorId = NormalizeBlank(decoded[..separatorIndex]) ?? "";
+            return actorId.Length > 0;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+    }
+
     internal static string? CreateControlApiClientAssertion(
         Dictionary<string, object?> permissionContext,
         ClientApiOptions options)

@@ -8,13 +8,14 @@
 
 import { getRuntimeConfig } from '../runtimeConfig';
 import { hasCanvasHostServices, getCanvasHostServices } from './canvasHostServices';
-import type { HostAssetItem } from './canvasHostServices';
+import type { HostAssetItem, HostUploadedMedia } from './canvasHostServices';
 
 const ASSET_BRIDGE_CHANNEL = 'xiaolou.assetBridge';
 const REQUEST_TIMEOUT_MS = 30000;
 
 // Re-export the item type under the original name so callers don't change.
 export type XiaolouAssetLibraryItem = HostAssetItem;
+export type XiaolouUploadedMedia = HostUploadedMedia;
 
 // ─── iframe / postMessage plumbing ────────────────────────────────────────────
 
@@ -128,6 +129,15 @@ export async function createXiaolouAsset(payload: unknown): Promise<XiaolouAsset
   const services = getCanvasHostServices();
   if (services) return services.createAsset(payload);
   return requestBridgeViaPostMessage<XiaolouAssetLibraryItem | null>('createAsset', payload);
+}
+
+export async function uploadXiaolouMediaFile(
+  file: File,
+  kind = 'agent-canvas-media',
+): Promise<XiaolouUploadedMedia | null> {
+  const services = getCanvasHostServices();
+  if (!services || typeof services.uploadMedia !== 'function') return null;
+  return services.uploadMedia(file, kind);
 }
 
 export async function deleteXiaolouAsset(id: string): Promise<void> {

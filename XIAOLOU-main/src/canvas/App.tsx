@@ -303,7 +303,7 @@ function getBoundsNudge(rect: RectLike, bounds: ScreenBounds) {
 
 function getFallbackCreatePermission(actorId: string) {
   const normalized = String(actorId || '').trim();
-  return normalized !== '' && normalized !== 'guest' && normalized !== 'ops_demo_001';
+  return normalized !== '' && normalized !== 'guest';
 }
 
 function buildGenerationDeniedMessage(options: {

@@ -75,6 +75,20 @@ export type HostAssetItem = {
   updatedAt?: string;
 };
 
+export type HostUploadedMedia = {
+  id: string;
+  kind: string;
+  originalName: string;
+  storedName: string;
+  sizeBytes: number;
+  contentType: string;
+  url: string;
+  urlPath: string;
+  mediaObjectId?: string;
+  objectKey?: string;
+  signedReadUrl?: string;
+};
+
 export type HostProjectSummary = {
   id: string;
   title: string;
@@ -151,6 +165,7 @@ export type CanvasHostServices = {
   listAssets(): Promise<{ projectId?: string; items: HostAssetItem[] }>;
   createAsset(payload: unknown): Promise<HostAssetItem | null>;
   deleteAsset(id: string): Promise<void>;
+  uploadMedia?(file: File, kind?: string): Promise<HostUploadedMedia>;
   listProjects(): Promise<{ items: HostProjectSummary[] }>;
   loadProject(id: string): Promise<HostProjectFull>;
   deleteProject(id: string): Promise<{ deleted: boolean }>;

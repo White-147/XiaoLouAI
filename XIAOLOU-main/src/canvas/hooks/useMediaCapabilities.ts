@@ -15,6 +15,7 @@ import {
 } from '../config/canvasImageModels';
 import {
   buildFallbackVideoCapabilities,
+  DEFAULT_XIAOLOU_VIDEO_MODEL_ID,
   normalizeCanvasVideoModelId,
 } from '../config/canvasVideoModels';
 
@@ -48,12 +49,12 @@ function getCached(cache: Map<string, CacheEntry>, key: string): BridgeMediaCapa
 }
 
 function getStrictFallbackVideoState(): Pick<CapabilitiesState, 'capabilities' | 'defaultModel'> {
-  const capabilities = buildFallbackVideoCapabilities().filter(
-    (capability) => !capability.id.startsWith('vertex:'),
-  );
+  const capabilities = buildFallbackVideoCapabilities();
   return {
     capabilities,
-    defaultModel: capabilities[0]?.id || null,
+    defaultModel: capabilities.some((capability) => capability.id === DEFAULT_XIAOLOU_VIDEO_MODEL_ID)
+      ? DEFAULT_XIAOLOU_VIDEO_MODEL_ID
+      : capabilities[0]?.id || null,
   };
 }
 

@@ -7,4 +7,5 @@ public sealed class ObjectStorageOptions
     public string PublicBaseUrl { get; init; } = "https://object-storage.example.invalid";
     public string TempPrefix { get; init; } = "temp";
     public string PermanentPrefix { get; init; } = "media";
+    public string LocalRootPath { get; init; } = "";
 }

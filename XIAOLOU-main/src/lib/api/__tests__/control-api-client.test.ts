@@ -10,6 +10,12 @@ vi.mock("../../actor-session", () => ({
   getAuthToken: () => sessionState.token,
   getControlApiClientAssertion: () => sessionState.clientAssertion,
   getCurrentActorId: () => sessionState.actorId,
+  setAuthToken: (token: string | null) => {
+    sessionState.token = token;
+  },
+  setControlApiClientAssertion: (assertion: string | null | undefined) => {
+    sessionState.clientAssertion = assertion ?? null;
+  },
 }));
 
 import {
@@ -29,7 +35,11 @@ function createResponse(body: string, status = 200): Response {
 }
 
 function getLastRequest(fetchMock: ReturnType<typeof vi.fn>) {
-  const [url, init] = fetchMock.mock.calls.at(-1) ?? [];
+  return getRequestAt(fetchMock, -1);
+}
+
+function getRequestAt(fetchMock: ReturnType<typeof vi.fn>, index: number) {
+  const [url, init] = fetchMock.mock.calls.at(index) ?? [];
   return {
     headers: (init as RequestInit | undefined)?.headers as Headers,
     init: init as RequestInit,
@@ -69,6 +79,90 @@ describe("control-api-client", () => {
     expect(requestInfo.headers.get("X-Actor-Id")).toBe("synthetic-actor");
     expect(requestInfo.headers.get("Authorization")).toBe("Bearer synthetic-client-assertion");
     expect(requestInfo.headers.get("Content-Type")).toBe("application/json");
+  });
+
+  it("refreshes a missing client assertion before a Control API request", async () => {
+    sessionState.token = "synthetic-user-token";
+    fetchMock
+      .mockResolvedValueOnce(createResponse(JSON.stringify({
+        actorId: "synthetic-actor",
+        token: "refreshed-user-token",
+        controlApiClientAssertion: "refreshed-client-assertion",
+      })))
+      .mockResolvedValueOnce(createResponse(JSON.stringify({ capabilities: [] })));
+
+    await expect(controlApiJsonRequest("/api/toolbox/capabilities")).resolves.toEqual({ capabilities: [] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const refreshRequest = getRequestAt(fetchMock, 0);
+    expect(refreshRequest.url).toBe("/api/auth/session/refresh");
+    expect(refreshRequest.init.method).toBe("POST");
+    expect(refreshRequest.headers.get("X-Actor-Id")).toBe("synthetic-actor");
+    expect(refreshRequest.headers.get("Authorization")).toBe("Bearer synthetic-user-token");
+    expect(refreshRequest.headers.get("Content-Type")).toBe("application/json");
+
+    const retriedRequest = getRequestAt(fetchMock, 1);
+    expect(retriedRequest.url).toBe("/api/toolbox/capabilities");
+    expect(retriedRequest.headers.get("Authorization")).toBe("Bearer refreshed-client-assertion");
+    expect(sessionState.token).toBe("refreshed-user-token");
+    expect(sessionState.clientAssertion).toBe("refreshed-client-assertion");
+  });
+
+  it("repairs protected password auth requests without repairing anonymous auth routes", async () => {
+    sessionState.token = "synthetic-user-token";
+    fetchMock
+      .mockResolvedValueOnce(createResponse(JSON.stringify({
+        actorId: "synthetic-actor",
+        token: "refreshed-user-token",
+        controlApiClientAssertion: "refreshed-client-assertion",
+      })))
+      .mockResolvedValueOnce(createResponse(JSON.stringify({ passwordConfigured: true })))
+      .mockResolvedValueOnce(createResponse(JSON.stringify({ accepted: true })));
+
+    await expect(
+      controlApiJsonRequest("/api/auth/password/change", {
+        method: "POST",
+        body: JSON.stringify({
+          currentPassword: "old-password",
+          newPassword: "new-password",
+        }),
+      }),
+    ).resolves.toEqual({ passwordConfigured: true });
+    await expect(
+      controlApiJsonRequest("/api/auth/password/reset/request", {
+        method: "POST",
+        body: JSON.stringify({ email: "synthetic@example.test" }),
+      }),
+    ).resolves.toEqual({ accepted: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(getRequestAt(fetchMock, 0).url).toBe("/api/auth/session/refresh");
+    expect(getRequestAt(fetchMock, 1).url).toBe("/api/auth/password/change");
+    expect(getRequestAt(fetchMock, 1).headers.get("Authorization")).toBe("Bearer refreshed-client-assertion");
+    expect(getRequestAt(fetchMock, 2).url).toBe("/api/auth/password/reset/request");
+  });
+
+  it("refreshes a stale client assertion and retries once on auth failure", async () => {
+    sessionState.token = "synthetic-user-token";
+    sessionState.clientAssertion = "stale-client-assertion";
+    fetchMock
+      .mockResolvedValueOnce(createResponse(JSON.stringify({ error: "expired assertion" }), 401))
+      .mockResolvedValueOnce(createResponse(JSON.stringify({
+        actorId: "synthetic-actor",
+        token: "refreshed-user-token",
+        controlApiClientAssertion: "refreshed-client-assertion",
+      })))
+      .mockResolvedValueOnce(createResponse(JSON.stringify({ models: [] })));
+
+    await expect(controlApiJsonRequest("/api/playground/models")).resolves.toEqual({ models: [] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(getRequestAt(fetchMock, 0).url).toBe("/api/playground/models");
+    expect(getRequestAt(fetchMock, 0).headers.get("Authorization")).toBe("Bearer stale-client-assertion");
+    expect(getRequestAt(fetchMock, 1).url).toBe("/api/auth/session/refresh");
+    expect(getRequestAt(fetchMock, 1).headers.get("Authorization")).toBe("Bearer synthetic-user-token");
+    expect(getRequestAt(fetchMock, 2).url).toBe("/api/playground/models");
+    expect(getRequestAt(fetchMock, 2).headers.get("Authorization")).toBe("Bearer refreshed-client-assertion");
   });
 
   it("falls back to the session token outside the Control API client allowlist", async () => {
