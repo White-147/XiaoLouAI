@@ -23,7 +23,7 @@ import { useCurrentProjectId } from "../../../lib/session";
 import {
   ReferenceAssetPicker,
   type ReferenceAssetSelection,
-} from "../../../components/create/ReferenceAssetPicker";
+} from "../../assets-media-projects/reference-assets/ReferenceAssetPicker";
 
 // ─── Qwen-Omni model options (must match core-api ALLOWED_QWEN_OMNI_MODELS) ──
 type ModelOption = {

@@ -33,18 +33,20 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 
 | 模块 | 路径 | 当前说明 |
 | --- | --- | --- |
-| 首页 / AI 工具箱 | `/home`、`/` | 能力卡片、工具箱任务入口和项目导航。 |
+| 首页 / AI 工具箱 | `/home`、`/` | 能力卡片、工具箱任务入口和项目导航；Layout/nav shell 位于 `XIAOLOU-main/src/features/home/nav-layout/`。 |
 | 图片创作 | `/create/image` | 前端位于 `XIAOLOU-main/src/features/create-image/image-create/`，支持参考图和素材库引用；Vertex 图片链路已接入真实 provider。 |
 | 视频创作 | `/create/video` | 前端位于 `XIAOLOU-main/src/features/create-video/video-create/`，保留队列和参数面；Vertex/Veo 视频 adapter 待接入。 |
 | 剧本广场 | `/script-plaza` | 前端位于 `XIAOLOU-main/src/features/comic-production/script-plaza/`，用于从剧本模板创建漫剧项目。 |
+| 漫剧制作 | `/comic/*` | 前端位于 `XIAOLOU-main/src/features/comic-production/comic/`，包含全局设定、剧本、资产、分镜、视频、配音和预览。 |
 | 剧本拆解 | `/create/script-breakdown` | 前端位于 `XIAOLOU-main/src/features/toolbox/script-breakdown/`，通过 toolbox job API 排队。 |
 | 人物替换 | `/create/video-replace` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-replace/`，Python sidecar 位于 `backend/services/toolbox/video-replace-sidecar/`。 |
 | 视频反推提示词 | `/create/video-reverse` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-reverse/`，通过 toolbox job API 排队。 |
 | 25 格分镜 | `/create/storyboard-25` | 前端位于 `XIAOLOU-main/src/features/toolbox/storyboard-25/`，通过 toolbox job API 排队。 |
-| 原生画布 | `/create/canvas` | XiaoLou 原生画布，直接编译进主前端。 |
-| 智能体画布 | `/create/agent-canvas` | XiaoLou 智能体画布入口；历史 Jaaz embed 只作本地对照。 |
-| 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`，用于项目资产、画布资产、上传、同步和预览。 |
+| 原生画布 | `/create/canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/canvas/`，直接编译进主前端。 |
+| 智能体画布 | `/create/agent-canvas`、`/create/agent-studio` | 前端宿主、runtime 和 Jaaz embed 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`。 |
+| 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；资产引用选择器、同步入库控件和生成媒体占位 UI 也由 `assets-media-projects` owner 承载。 |
 | 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`，用于组织成员、企业钱包和项目权限管理。 |
+| 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；注册页和充值审核页分别收口到同一 owner 下的 `register/`、`admin-orders/`。 |
 | Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；canonical 会话、消息、记忆和聊天任务调试。 |
 | 积分统计 | `/wallet/usage` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/credit-usage/`，用于个人或平台视角的积分消耗统计。 |
 | API 中心 | `/api-center` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/api-center/`，用于供应商模型、默认链路和 API Key 配置。 |
@@ -76,9 +78,12 @@ locks, `FOR UPDATE SKIP LOCKED`, and `LISTEN/NOTIFY`.
 ```text
 XIAOLOU-main/          React + Vite SPA; production output is dist/
 XIAOLOU-main/src/features/account-admin-enterprise/ account/admin/enterprise frontend surfaces
+XIAOLOU-main/src/features/assets-media-projects/ assets route, reference picker, media UI, and project asset surfaces
+XIAOLOU-main/src/features/canvas-agent-canvas/ canvas and agent-canvas frontend runtimes
+XIAOLOU-main/src/features/comic-production/ comic production frontend surfaces
 XIAOLOU-main/src/features/create-image/ create image frontend surface
 XIAOLOU-main/src/features/create-video/ create video frontend surface
-XIAOLOU-main/src/features/home/     home product surface
+XIAOLOU-main/src/features/home/     home product surface and nav/layout shell
 XIAOLOU-main/src/features/playground/ Playground frontend surface and API wrapper
 XIAOLOU-main/src/features/wallet-payments-api-center/ wallet/payment/API-center frontend surfaces
 XIAOLOU-main/src/features/toolbox/  toolbox frontend surfaces grouped by capability

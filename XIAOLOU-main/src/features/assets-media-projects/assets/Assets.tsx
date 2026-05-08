@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GeneratedMediaPlaceholder,
   getGeneratedMediaUrl,
-} from "../../../components/media/GenerationPlaceholder";
+} from "../media/GenerationPlaceholder";
 import { cn } from "../../../lib/utils";
 import {
   createAsset,
@@ -674,12 +674,12 @@ export default function Assets() {
 
   useEffect(() => {
     if (activeSection !== "canvas-projects") return;
-    void import("../../../pages/create/CanvasCreate");
+    void import("../../canvas-agent-canvas/canvas/CanvasCreate");
   }, [activeSection]);
 
   useEffect(() => {
     if (activeSection !== "agent-canvas-projects") return;
-    void import("../../../pages/create/AgentCanvasCreate");
+    void import("../../canvas-agent-canvas/agent-canvas/AgentCanvasCreate");
   }, [activeSection]);
 
   useEffect(() => {

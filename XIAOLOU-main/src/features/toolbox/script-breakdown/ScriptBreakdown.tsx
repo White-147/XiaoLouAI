@@ -19,11 +19,11 @@ import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import {
   ReferenceAssetPicker,
   type ReferenceAssetSelection,
-} from "../../../components/create/ReferenceAssetPicker";
+} from "../../assets-media-projects/reference-assets/ReferenceAssetPicker";
 import {
   GeneratedMediaPlaceholder,
   getGeneratedMediaUrl,
-} from "../../../components/media/GenerationPlaceholder";
+} from "../../assets-media-projects/media/GenerationPlaceholder";
 import {
   autoGenerateStoryboards,
   deleteStoryboard,
@@ -44,7 +44,7 @@ import { cn } from "../../../lib/utils";
 import {
   DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID,
   XIAOLOU_TEXT_TO_IMAGE_MODELS,
-} from "../../../canvas/config/canvasImageModels";
+} from "../../canvas-agent-canvas/canvas/runtime/config/canvasImageModels";
 import {
   BREAKDOWN_MAX_SHOTS,
   STORYBOARD_BREAKDOWN_SYSTEM_PROMPT,

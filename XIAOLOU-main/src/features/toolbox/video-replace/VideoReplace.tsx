@@ -36,12 +36,12 @@ import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AssetSyncDialog,
   type AssetSyncDraft,
-} from "../../../components/create/AssetSyncControls";
+} from "../../assets-media-projects/asset-sync/AssetSyncControls";
 import { CreateStudioSplitLayout } from "../../../components/create/CreateStudioSplitLayout";
 import {
   ReferenceAssetPicker,
   type ReferenceAssetSelection,
-} from "../../../components/create/ReferenceAssetPicker";
+} from "../../assets-media-projects/reference-assets/ReferenceAssetPicker";
 import {
   cancelVideoReplaceJob,
   createAsset,

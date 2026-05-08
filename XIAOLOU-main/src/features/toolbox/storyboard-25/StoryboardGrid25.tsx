@@ -25,7 +25,7 @@ import { useCurrentProjectId } from "../../../lib/session";
 import {
   ReferenceAssetPicker,
   type ReferenceAssetSelection,
-} from "../../../components/create/ReferenceAssetPicker";
+} from "../../assets-media-projects/reference-assets/ReferenceAssetPicker";
 import {
   uploadFile,
   generateStoryboardGrid25,

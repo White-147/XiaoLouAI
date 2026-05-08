@@ -18,17 +18,17 @@ import {
   AssetSyncDialog,
   AssetSyncDropzone,
   type AssetSyncDraft,
-} from "../../../components/create/AssetSyncControls";
+} from "../../assets-media-projects/asset-sync/AssetSyncControls";
 import { CreateStudioSplitLayout } from "../../../components/create/CreateStudioSplitLayout";
 import {
   REFERENCE_ASSET_MIME,
   ReferenceAssetPicker,
   type ReferenceAssetSelection,
-} from "../../../components/create/ReferenceAssetPicker";
+} from "../../assets-media-projects/reference-assets/ReferenceAssetPicker";
 import {
   GeneratedMediaPlaceholder,
   getGeneratedMediaUrl,
-} from "../../../components/media/GenerationPlaceholder";
+} from "../../assets-media-projects/media/GenerationPlaceholder";
 import { downloadMediaFile, guessMediaFilename } from "../../../lib/download-media";
 import { parseGenerationError } from "../../../lib/generation-error";
 import {
