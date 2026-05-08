@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { CheckCircle2, ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
 import { getProjectOverview } from "./api/comic-production";
-import { runNavigationGuards } from "../../../lib/navigation-guards";
+import { runNavigationGuards } from "../../home/nav-layout/navigation-guards";
 import { useCurrentProjectId } from "../../../lib/session";
 
 const nodes = [

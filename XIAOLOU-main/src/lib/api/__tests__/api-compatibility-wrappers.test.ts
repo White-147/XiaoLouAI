@@ -275,7 +275,7 @@ async function importApiWithMockServices() {
   vi.doMock("../../api/projects-canvas-create", () => ({
     createProjectsCanvasCreateService: factories.createProjectsCanvasCreateService,
   }));
-  vi.doMock("../../api/toolbox", () => ({
+  vi.doMock("../../../features/toolbox/api/toolbox", () => ({
     createToolboxService: factories.createToolboxService,
   }));
   vi.doMock("../../api/wallet-payment", () => ({

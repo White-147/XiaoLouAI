@@ -3,7 +3,7 @@ import {
   getCreateCreditQuote,
   type CreditQuote,
   type CreditQuoteRequestInput,
-} from "./api";
+} from "../../../lib/api";
 
 type CreateCreditQuoteState = {
   quote: CreditQuote | null;

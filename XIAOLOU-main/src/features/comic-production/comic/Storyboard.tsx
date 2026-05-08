@@ -26,7 +26,7 @@ import {
   type Storyboard as StoryboardItem,
   type Task,
 } from "./api/comic-production";
-import { saveProjectScript } from "../../../lib/project-script-store";
+import { saveProjectScript } from "./state/project-script-store";
 import { useCurrentProjectId } from "../../../lib/session";
 
 function storyboardCover(item: StoryboardItem) {

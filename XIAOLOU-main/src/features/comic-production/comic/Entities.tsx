@@ -33,7 +33,7 @@ import {
   type Asset,
   type Task,
 } from "./api/comic-production";
-import { saveProjectScript } from "../../../lib/project-script-store";
+import { saveProjectScript } from "./state/project-script-store";
 import { useCurrentProjectId } from "../../../lib/session";
 
 const tabs = [

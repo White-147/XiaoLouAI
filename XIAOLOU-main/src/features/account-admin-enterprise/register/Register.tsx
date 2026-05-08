@@ -28,7 +28,7 @@ import {
 import { setCurrentProjectId } from "../../../lib/session";
 import { cn } from "../../../lib/utils";
 import { isLocalLoopbackAccess } from "../../../lib/local-loopback";
-import { GoogleLoginButton } from "../../../components/auth/GoogleLoginButton";
+import { GoogleLoginButton } from "../auth/GoogleLoginButton";
 
 type RegisterMode = "personal" | "enterprise_admin";
 

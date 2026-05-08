@@ -17,7 +17,7 @@ import { createJobsService } from "./api/jobs";
 import { createMediaService } from "./api/media";
 import { createPlaygroundService } from "../features/playground/api/playground";
 import { createProjectsCanvasCreateService } from "./api/projects-canvas-create";
-import { createToolboxService } from "./api/toolbox";
+import { createToolboxService } from "../features/toolbox/api/toolbox";
 import { createWalletPaymentService } from "./api/wallet-payment";
 import {
   resolveCurrentOwnerScope,

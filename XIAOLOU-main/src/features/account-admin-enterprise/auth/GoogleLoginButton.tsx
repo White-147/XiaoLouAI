@@ -1,8 +1,8 @@
 import { Chrome, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getAuthProviders } from "../../lib/api";
-import { startGoogleLogin } from "../../lib/google-auth";
-import { cn } from "../../lib/utils";
+import { getAuthProviders } from "../../../lib/api";
+import { startGoogleLogin } from "../../../lib/google-auth";
+import { cn } from "../../../lib/utils";
 
 type GoogleLoginButtonProps = {
   returnTo?: string;

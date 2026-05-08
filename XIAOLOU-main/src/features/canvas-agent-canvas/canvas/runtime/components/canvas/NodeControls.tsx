@@ -24,7 +24,7 @@ import {
 import { useImageCapabilities } from '../../hooks/useMediaCapabilities';
 import { useFloatingPanelOffset } from '../../hooks/useFloatingPanelOffset';
 import { ReferencePromptInput, type PromptImageReference } from './ReferencePromptInput';
-import { useCreateCreditQuote } from '../../../../../../lib/useCreateCreditQuote';
+import { useCreateCreditQuote } from '../../../../shared/useCreateCreditQuote';
 
 interface NodeControlsProps {
     data: NodeData;

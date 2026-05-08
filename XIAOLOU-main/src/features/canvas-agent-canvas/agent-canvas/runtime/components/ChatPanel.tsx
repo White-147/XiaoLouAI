@@ -82,7 +82,7 @@ import {
     QwenIcon,
     SeedIcon,
 } from './icons/BrandIcons';
-import { useCreateCreditQuote } from '../../../../../lib/useCreateCreditQuote';
+import { useCreateCreditQuote } from '../../../shared/useCreateCreditQuote';
 import {
     canUseXiaolouImageGenerationBridge,
     generateVideoWithXiaolou,

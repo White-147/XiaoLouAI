@@ -9,13 +9,13 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { extractAssets, rewriteScript } from "./api/comic-production";
-import { registerNavigationGuard } from "../../../lib/navigation-guards";
+import { registerNavigationGuard } from "../../home/nav-layout/navigation-guards";
 import {
   getProjectScriptSnapshot,
   reloadProjectScript,
   saveProjectScript,
   useProjectScript,
-} from "../../../lib/project-script-store";
+} from "./state/project-script-store";
 import { useCurrentProjectId } from "../../../lib/session";
 import { cn } from "../../../lib/utils";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PermissionContext } from "../../api";
-import { mergeProfileUpdateContext, resolveAvatarUploadUrl } from "../profile-avatar";
+import { mergeProfileUpdateContext, resolveAvatarUploadUrl } from "../../../features/home/nav-layout/api/profile-avatar";
 
 function createPermissionContext(): PermissionContext {
   return {

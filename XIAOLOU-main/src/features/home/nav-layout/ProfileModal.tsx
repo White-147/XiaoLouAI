@@ -1,7 +1,7 @@
 import { Building2, Camera, KeyRound, LoaderCircle, Mail, Phone, User as UserIcon, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { changePassword, uploadFile, type PermissionContext, updateMe } from "../../../lib/api";
-import { mergeProfileUpdateContext, resolveAvatarUploadUrl } from "../../../lib/api/profile-avatar";
+import { mergeProfileUpdateContext, resolveAvatarUploadUrl } from "./api/profile-avatar";
 import { cn } from "../../../lib/utils";
 
 interface ProfileModalProps {

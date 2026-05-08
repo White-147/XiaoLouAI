@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { getScript, updateScript } from "./api";
-import { clearScriptDraft, getScriptDraft, setScriptDraft } from "./session";
+import { getScript, updateScript } from "../api/comic-production";
+import { clearScriptDraft, getScriptDraft, setScriptDraft } from "../../../../lib/session";
 
 export type ProjectScriptSaveState = "idle" | "saving" | "saved" | "error";
 

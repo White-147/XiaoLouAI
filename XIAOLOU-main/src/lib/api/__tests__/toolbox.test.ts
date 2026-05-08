@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PermissionContext, Task, ToolboxCapability } from "../../api";
 import { resolveCurrentOwnerScope, type ControlOwnerScope } from "../../control-owner-scope";
-import { createToolboxService } from "../toolbox";
+import { createToolboxService } from "../../../features/toolbox/api/toolbox";
 import {
   parseJsonBody,
   SYNTHETIC_ACTOR_ID,

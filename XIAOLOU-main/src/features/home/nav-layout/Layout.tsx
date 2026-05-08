@@ -81,7 +81,7 @@ const CanvasCreate = lazy(() => import("../../canvas-agent-canvas/canvas/CanvasC
 const AgentCanvasCreate = lazy(() => import("../../canvas-agent-canvas/agent-canvas/AgentCanvasCreate"));
 const AgentStudioCanvasCreate = lazy(() => import("../../canvas-agent-canvas/agent-studio/JaazAgentCanvasEmbed"));
 import { ProfileModal } from "./ProfileModal";
-import { GoogleLoginButton } from "../../../components/auth/GoogleLoginButton";
+import { GoogleLoginButton } from "../../account-admin-enterprise/auth/GoogleLoginButton";
 
 const CanvasLoadingFallback = () => (
   <div className="flex h-full w-full items-center justify-center bg-[#f8f6f1] px-6 text-[#171512]">

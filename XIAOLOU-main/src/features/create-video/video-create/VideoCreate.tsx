@@ -19,7 +19,7 @@ import {
   AssetSyncDropzone,
   type AssetSyncDraft,
 } from "../../assets-media-projects/asset-sync/AssetSyncControls";
-import { CreateStudioSplitLayout } from "../../../components/create/CreateStudioSplitLayout";
+import { CreateStudioSplitLayout } from "../../create-workbench/studio-layout/CreateStudioSplitLayout";
 import {
   REFERENCE_ASSET_MIME,
   ReferenceAssetPicker,

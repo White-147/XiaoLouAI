@@ -1,8 +1,8 @@
 /**
  * 剧本分镜拆解专家系统提示词
  *
- * 注意：这里刻意内联一份完整提示词，而不是 import ../../lib/storyboard-breakdown-prompt。
- * 智能画布 Agent 的 Skill 配置需要自包含，避免后续序列化/下发/独立读取配置时丢失跨目录依赖。
+ * 注意：这里刻意内联一份完整提示词。智能画布 Agent 的 Skill 配置需要自包含，
+ * 避免后续序列化、下发或独立读取配置时丢失跨目录依赖。
  */
 const STORYBOARD_BREAKDOWN_SYSTEM_PROMPT = `Role: 电影文字分镜专家
 

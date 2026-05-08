@@ -1,6 +1,6 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-08 16:36 +08
+更新时间：2026-05-08 17:13 +08
 工作目录：`D:\code\XiaoLouAI`
 
 本文件只保留下一棒需要立刻接住的上下文。G14 详细历史已归档到：
@@ -64,7 +64,7 @@ Get-Content .\deploy\records\xiaolouai-refactor-gap-verification.md -Encoding UT
 
 ```text
 Phase: H feature-layout-cleanup
-Owner: H14 assets-media-projects-shared-media-ui
+Owner: H17 old-path-reexport-deletion
 Status: done; next owner should continue function-owner inventory and migration
 
 Done:
@@ -92,30 +92,30 @@ Done:
   backend\services\model-runtime\local-model-worker-sidecar.
 - Playground frontend page moved to XIAOLOU-main\src\features\playground\Playground.tsx.
 - Playground frontend API service moved to XIAOLOU-main\src\features\playground\api\playground.ts.
-- Old Playground page/API paths are thin compatibility re-exports.
+- Old Playground page/API wrappers were deleted in H17 after import scans passed.
 - Playground service test moved with the feature; Vitest now includes feature-local tests.
 - Script Plaza moved to XIAOLOU-main\src\features\comic-production\script-plaza\ScriptPlaza.tsx.
-- Old Script Plaza page path is a thin compatibility re-export.
+- Old Script Plaza page wrapper was deleted in H17 after import scans passed.
 - API Center moved to XIAOLOU-main\src\features\wallet-payments-api-center\api-center\ApiCenter.tsx.
 - API Center now has a feature-local API wrapper at
   XIAOLOU-main\src\features\wallet-payments-api-center\api-center\api\api-center.ts.
-- Old API Center page path is a thin compatibility re-export.
+- Old API Center page wrapper was deleted in H17 after import scans passed.
 - Credit Usage moved to XIAOLOU-main\src\features\wallet-payments-api-center\credit-usage\CreditUsage.tsx.
 - Credit Usage now has a feature-local API wrapper at
   XIAOLOU-main\src\features\wallet-payments-api-center\credit-usage\api\credit-usage.ts.
-- Old Credit Usage page path is a thin compatibility re-export.
+- Old Credit Usage page wrapper was deleted in H17 after import scans passed.
 - Wallet Recharge moved to XIAOLOU-main\src\features\wallet-payments-api-center\wallet-recharge\WalletRecharge.tsx.
 - Wallet Recharge now has a feature-local API wrapper at
   XIAOLOU-main\src\features\wallet-payments-api-center\wallet-recharge\api\wallet-recharge.ts.
-- Old Wallet Recharge page path is a thin compatibility re-export.
+- Old Wallet Recharge page wrapper was deleted in H17 after import scans passed.
 - Assets moved to XIAOLOU-main\src\features\assets-media-projects\assets\Assets.tsx.
 - Assets now has a feature-local API wrapper at
   XIAOLOU-main\src\features\assets-media-projects\assets\api\assets.ts.
-- Old Assets page path is a thin compatibility re-export.
+- Old Assets page wrapper was deleted in H17 after import scans passed.
 - Enterprise Console moved to XIAOLOU-main\src\features\account-admin-enterprise\enterprise-console\EnterpriseConsole.tsx.
 - Enterprise Console now has a feature-local API wrapper at
   XIAOLOU-main\src\features\account-admin-enterprise\enterprise-console\api\enterprise-console.ts.
-- Old Enterprise Console page path is a thin compatibility re-export.
+- Old Enterprise Console page wrapper was deleted in H17 after import scans passed.
 - Register moved to XIAOLOU-main\src\features\account-admin-enterprise\register\Register.tsx.
 - Register now has a feature-local API wrapper at
   XIAOLOU-main\src\features\account-admin-enterprise\register\api\register.ts.
@@ -125,22 +125,46 @@ Done:
 - Super Admin Console moved to XIAOLOU-main\src\features\account-admin-enterprise\super-admin-console\SuperAdminConsole.tsx.
 - Super Admin Console now has a feature-local API wrapper at
   XIAOLOU-main\src\features\account-admin-enterprise\super-admin-console\api\super-admin-console.ts.
-- Old Register, AdminOrders, and SuperAdminConsole page paths are thin compatibility re-exports.
+- Old Register, AdminOrders, and SuperAdminConsole page wrappers were deleted in H17 after import scans passed.
 - App route lazy import and Layout route prefetch now load Super Admin Console from the feature path.
+- Google Login Button moved to XIAOLOU-main\src\features\account-admin-enterprise\auth\GoogleLoginButton.tsx.
+- Old components\auth\GoogleLoginButton.tsx wrapper was deleted in H17 after import scans passed.
+- Register and Layout now import GoogleLoginButton from the account-admin-enterprise feature owner directly.
+- H-stage slip audit found and fixed remaining non-wrapper shared component/helper placements:
+  CreateStudioSplitLayout, project-script-store, useCreateCreditQuote, and profile-avatar.
+- CreateStudioSplitLayout moved to XIAOLOU-main\src\features\create-workbench\studio-layout\CreateStudioSplitLayout.tsx.
+- Old components\create\CreateStudioSplitLayout.tsx wrapper was deleted in H17 after import scans passed.
+- create-image, create-video, and toolbox video-replace import CreateStudioSplitLayout from create-workbench directly.
+- Comic project script state moved to XIAOLOU-main\src\features\comic-production\comic\state\project-script-store.ts.
+- Old lib\project-script-store.ts wrapper was deleted in H17 after import scans passed.
+- Canvas credit quote hook moved to XIAOLOU-main\src\features\canvas-agent-canvas\shared\useCreateCreditQuote.ts.
+- Old lib\useCreateCreditQuote.ts wrapper was deleted in H17 after import scans passed.
+- Profile avatar helper moved to XIAOLOU-main\src\features\home\nav-layout\api\profile-avatar.ts.
+- Old lib\api\profile-avatar.ts wrapper was deleted in H17 after import scans passed.
+- Old-path re-export deletion audit completed after import scans found no remaining runtime callers.
+- Deleted the known H-stage page wrappers under XIAOLOU-main\src\pages, src\pages\create, and src\pages\comic.
+- Deleted the known H-stage component wrappers under XIAOLOU-main\src\components.
+- Deleted single-owner lib wrappers:
+  lib\api\playground.ts, lib\api\profile-avatar.ts, lib\api\toolbox.ts,
+  lib\navigation-guards.ts, lib\project-script-store.ts, lib\storyboard-breakdown-prompt.ts,
+  lib\useCreateCreditQuote.ts, and lib\video-replace\presets.ts.
+- Updated the remaining old-path references before deletion:
+  api.ts and api-compatibility wrapper tests now import toolbox from features\toolbox\api;
+  profile-avatar tests import the feature-local helper; comic navigation guard imports use the home/nav-layout owner.
 - Create Image moved to XIAOLOU-main\src\features\create-image\image-create\ImageCreate.tsx.
 - Create Image now has a feature-local API wrapper at
   XIAOLOU-main\src\features\create-image\image-create\api\create-image.ts.
-- Old pages\create\ImageCreate.tsx is a thin compatibility re-export.
+- Old pages\create\ImageCreate.tsx wrapper was deleted in H17 after import scans passed.
 - App route lazy import and Layout route prefetch now load Create Image from the feature path.
 - Create Video moved to XIAOLOU-main\src\features\create-video\video-create\VideoCreate.tsx.
 - Create Video now has a feature-local API wrapper at
   XIAOLOU-main\src\features\create-video\video-create\api\create-video.ts.
-- Old pages\create\VideoCreate.tsx is a thin compatibility re-export.
+- Old pages\create\VideoCreate.tsx wrapper was deleted in H17 after import scans passed.
 - App route lazy import and Layout route prefetch now load Create Video from the feature path.
 - Comic workflow shell and subpages moved to XIAOLOU-main\src\features\comic-production\comic.
 - Comic workflow now has a feature-local API wrapper at
   XIAOLOU-main\src\features\comic-production\comic\api\comic-production.ts.
-- Old pages\comic\*.tsx files are thin compatibility re-exports.
+- Old pages\comic\*.tsx wrappers were deleted in H17 after import scans passed.
 - App route lazy imports and Layout route prefetch now load comic workflow from the feature path.
 - Canvas Create moved to XIAOLOU-main\src\features\canvas-agent-canvas\canvas\CanvasCreate.tsx.
 - Canvas runtime moved from XIAOLOU-main\src\canvas to
@@ -150,18 +174,18 @@ Done:
   XIAOLOU-main\src\features\canvas-agent-canvas\agent-canvas\runtime.
 - Agent Studio and Jaaz embed moved to XIAOLOU-main\src\features\canvas-agent-canvas\agent-studio.
 - Canvas, Agent Canvas, and Agent Studio now have feature-local API wrappers under their capability folders.
-- Old pages\create canvas/agent-canvas/agent-studio/Jaaz embed paths are thin compatibility re-exports.
+- Old pages\create canvas/agent-canvas/agent-studio/Jaaz embed wrappers were deleted in H17 after import scans passed.
 - Layout lazy imports, route prefetch, Assets warmups, and toolbox model imports now load canvas code from the feature path.
 - Layout moved to XIAOLOU-main\src\features\home\nav-layout\Layout.tsx.
 - Profile modal moved to XIAOLOU-main\src\features\home\nav-layout\ProfileModal.tsx.
 - Navigation guards moved to XIAOLOU-main\src\features\home\nav-layout\navigation-guards.ts.
-- Old components\Layout.tsx, components\modals\ProfileModal.tsx, and lib\navigation-guards.ts are thin compatibility re-exports.
+- Old components\Layout.tsx, components\modals\ProfileModal.tsx, and lib\navigation-guards.ts wrappers were deleted in H17 after import scans passed.
 - App route root now imports Layout from the feature path.
 - Asset sync controls moved to XIAOLOU-main\src\features\assets-media-projects\asset-sync\AssetSyncControls.tsx.
 - Reference asset picker moved to XIAOLOU-main\src\features\assets-media-projects\reference-assets\ReferenceAssetPicker.tsx.
 - Generated media placeholder moved to XIAOLOU-main\src\features\assets-media-projects\media\GenerationPlaceholder.tsx.
 - Old components\create\AssetSyncControls.tsx, components\create\ReferenceAssetPicker.tsx, and
-  components\media\GenerationPlaceholder.tsx are thin compatibility re-exports.
+  components\media\GenerationPlaceholder.tsx wrappers were deleted in H17 after import scans passed.
 - create-image, create-video, toolbox, comic, and assets imports now reference the assets-media-projects owner directly.
 - download-media, media-url-policy, api\media, and api\projects-canvas-create were audited as cross-product/control API foundations and remain in lib.
 - .gitignore now allows committable deploy configs and retained evidence while ignoring:
@@ -183,13 +207,18 @@ Current layout check:
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\register is the registration page and feature-local API wrapper.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\admin-orders is the admin recharge review page and feature-local API wrapper.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\super-admin-console is the super admin route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\auth is the account/auth UI helper owner.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\comic-production\comic is the comic workflow shell, subpages, editors, and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\comic-production\comic\state is the comic workflow state/helper owner.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\create-image\image-create is the create image route and feature-local API wrapper.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\create-video\video-create is the create video route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\create-workbench\studio-layout is the shared create workbench layout owner.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\canvas-agent-canvas\canvas is the native canvas route, runtime, and feature-local API wrapper.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\canvas-agent-canvas\agent-canvas is the agent canvas route, runtime, and feature-local API wrapper.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\canvas-agent-canvas\agent-studio is the Agent Studio/Jaaz embed route and feature-local API wrapper.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\canvas-agent-canvas\shared is the shared canvas-agent-canvas hook/helper owner.
 - D:\code\XiaoLouAI\XIAOLOU-main\src\features\home\nav-layout is the app Layout, route prefetch, profile modal, and navigation guard owner.
+- D:\code\XiaoLouAI\XIAOLOU-main\src\features\home\nav-layout\api is the nav/profile helper API owner.
 - D:\code\XiaoLouAI\backend\services\toolbox\video-replace-sidecar is Python sidecar/runtime code:
   app, scripts, pyproject, local data, weights, sqlite, and venv/runtime artifacts.
 - D:\code\XiaoLouAI\backend\services\model-runtime\local-model-worker-sidecar is Python local model queue-worker sidecar code:
@@ -201,24 +230,21 @@ Current layout check:
   XIAOLOU-main\src\features\assets-media-projects
   XIAOLOU-main\src\features\canvas-agent-canvas
   XIAOLOU-main\src\features\comic-production
+  XIAOLOU-main\src\features\create-workbench
   XIAOLOU-main\src\features\create-image
   XIAOLOU-main\src\features\create-video
   XIAOLOU-main\src\features\playground
   XIAOLOU-main\src\features\toolbox
   XIAOLOU-main\src\features\wallet-payments-api-center
-- Remaining non-wrapper route implementations still need owner-by-owner review:
-  none currently known under XIAOLOU-main\src\pages, src\pages\create, or src\pages\comic.
-- Already-thin page wrappers should not be counted as remaining main implementations:
-  AdminOrders, ApiCenter, Assets, CreditUsage, EnterpriseConsole, Home, Playground,
-  ScriptPlaza, WalletRecharge, create\AgentCanvasCreate, create\AgentStudio,
-  create\CanvasCreate, create\ImageCreate, create\JaazAgentCanvasEmbed,
-  create\VideoCreate, create\ScriptBreakdown, create\StoryboardGrid25,
-  create\VideoReplace, create\VideoReverse, comic\ComicShell, comic\Dubbing, comic\Entities,
-  comic\GlobalSettings, comic\Preview, comic\Storyboard,
-  comic\StoryboardEditor, comic\StoryScript, comic\Video, comic\VideoEditor,
-  Register, SuperAdminConsole.
-- Component/lib compatibility wrappers should not be counted as main implementations:
-  components\Layout.tsx, components\modals\ProfileModal.tsx, lib\navigation-guards.ts.
+- Remaining route implementations or wrappers under XIAOLOU-main\src\pages, src\pages\create, and src\pages\comic:
+  none currently present.
+- Remaining component implementations or wrappers under XIAOLOU-main\src\components:
+  none currently present.
+- Deleted old-path wrappers after H17 import scans:
+  pages\*, pages\create\*, pages\comic\*, components\*, lib\api\playground.ts,
+  lib\api\profile-avatar.ts, lib\api\toolbox.ts, lib\navigation-guards.ts,
+  lib\project-script-store.ts, lib\storyboard-breakdown-prompt.ts,
+  lib\useCreateCreditQuote.ts, lib\video-replace\presets.ts.
 - Remaining shared/API review should be owner-by-owner only:
   XIAOLOU-main\src\lib
   XIAOLOU-main\src\lib\api
@@ -247,9 +273,11 @@ Open technical follow-ups:
 ```text
 Purpose:
 - This list marks only directory/layout cleanup that is exact from current files.
-- "done" means the route or runtime owner has canonical placement plus old wrappers where needed.
+- "done" means the route or runtime owner has canonical placement; old wrappers are not required
+  unless a fresh import scan finds an active caller that cannot be moved in the same baton.
 - "partial" means a named sub-surface is done, but related owner surfaces still have main code outside feature folders.
 - Do not rework done items unless a later route/API behavior change requires it.
+- H17 deleted known old-path re-exports after import scans and route/build tests proved no old callers remain.
 
 Done:
 - top-level-layout: done.
@@ -257,45 +285,51 @@ Done:
 - toolbox: done.
   Frontend toolbox pages/API live under XIAOLOU-main\src\features\toolbox.
   Python video-replace sidecar lives under backend\services\toolbox\video-replace-sidecar.
-  Old toolbox page paths are thin wrappers.
+  Old toolbox page/lib wrapper paths were deleted in H17.
 - playground: done.
   Page, API service, and feature-local test live under XIAOLOU-main\src\features\playground.
-  Old page/API paths are thin wrappers.
-- account-admin-enterprise route/page surfaces: done.
-  Enterprise Console, Register, AdminOrders, and SuperAdminConsole live under
+  Old page/API wrapper paths were deleted in H17.
+- account-admin-enterprise route/page/auth surfaces: done.
+  Enterprise Console, Register, AdminOrders, SuperAdminConsole, and GoogleLoginButton live under
   XIAOLOU-main\src\features\account-admin-enterprise with feature-local API wrappers.
-  Old page paths are thin wrappers.
+  Old page/component wrapper paths were deleted in H17.
 - wallet-payments-api-center route surfaces: done.
   api-center, credit-usage, and wallet-recharge live under
   XIAOLOU-main\src\features\wallet-payments-api-center.
-  Old page paths are thin wrappers.
+  Old page wrapper paths were deleted in H17.
 - create-image frontend route: done.
   Main page and API facade live under XIAOLOU-main\src\features\create-image\image-create.
-  Old pages\create\ImageCreate.tsx is a thin wrapper.
+  Old pages\create\ImageCreate.tsx wrapper was deleted in H17.
 - create-video frontend route: done.
   Main page and API facade live under XIAOLOU-main\src\features\create-video\video-create.
-  Old pages\create\VideoCreate.tsx is a thin wrapper.
+  Old pages\create\VideoCreate.tsx wrapper was deleted in H17.
 - comic-production workflow: done.
   Script Plaza lives under XIAOLOU-main\src\features\comic-production\script-plaza.
   Comic shell, subpages, editors, and API facade live under
   XIAOLOU-main\src\features\comic-production\comic.
-  Old pages\comic\*.tsx files are thin wrappers.
+  Comic project script state lives under XIAOLOU-main\src\features\comic-production\comic\state.
+  Old pages\comic\*.tsx wrappers were deleted in H17.
 - canvas-agent-canvas: done.
   CanvasCreate, AgentCanvasCreate, AgentStudio, JaazAgentCanvasEmbed, and
   the native canvas/agent-canvas runtimes live under
   XIAOLOU-main\src\features\canvas-agent-canvas.
-  Old pages\create canvas paths are thin wrappers.
+  Shared canvas hooks/helpers live under XIAOLOU-main\src\features\canvas-agent-canvas\shared.
+  Old pages\create canvas wrappers were deleted in H17.
+- create-workbench shared layout: done.
+  CreateStudioSplitLayout lives under XIAOLOU-main\src\features\create-workbench\studio-layout.
+  Old components\create\CreateStudioSplitLayout.tsx wrapper was deleted in H17.
 - home/nav/layout: done.
   Home route lives under XIAOLOU-main\src\features\home.
   Layout, route prefetch, ProfileModal, and navigation guards live under
   XIAOLOU-main\src\features\home\nav-layout.
-  Old component/lib paths are thin wrappers.
+  Profile avatar helper lives under XIAOLOU-main\src\features\home\nav-layout\api.
+  Old component/lib wrapper paths were deleted in H17.
 - assets-media-projects: done.
   Assets route and API facade live under
   XIAOLOU-main\src\features\assets-media-projects\assets.
   Shared asset sync controls, reference asset picker, and generated media placeholder UI live under
   XIAOLOU-main\src\features\assets-media-projects.
-  Old component paths are thin wrappers.
+  Old component wrapper paths were deleted in H17.
   download-media, media-url-policy, api\media, and api\projects-canvas-create remain in lib because current usage spans create-image, create-video, toolbox, comic, canvas, home, and assets surfaces.
 - model-runtime local-model-worker sidecar placement: done.
   Python sidecar lives under backend\services\model-runtime\local-model-worker-sidecar.
@@ -337,7 +371,7 @@ partial / not-yet 项优先。
 
 目录收口规则：
 1. 前端主实现放到 XIAOLOU-main\src\features\<product-area>\<capability>。
-2. 旧 pages 文件只保留薄 re-export/route wrapper，直到对应路由确认稳定。
+2. 旧 pages 文件只在路由未稳定时短期保留薄 re-export/route wrapper；稳定并扫清引用后删除。
 3. src\lib 只保留真正跨两个以上 product-area 共享的工具；单功能工具移入 feature。
 4. src\lib\api 可以逐步拆为 feature-local api wrapper；跨域底座留 control-api-client。
 5. .NET 后端继续按 backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\<area> 分区。
@@ -345,7 +379,7 @@ partial / not-yet 项优先。
 7. 不把 Python/backend sidecar 放进 XIAOLOU-main。
 8. 不新增顶层功能目录；不要恢复 tools、services、docs、control-plane-dotnet 顶层目录。
 9. 每次只迁移一个 owner，并同步改 imports、tests、README、handoff 和脚本路径。
-10. 移动后保留兼容 re-export，避免一次性打断路由和测试。
+10. 移动后可短期保留兼容 re-export，避免一次性打断路由和测试；满足删除条件后及时删除。
 
 验证规则：
 1. 前端 owner 必跑 npm --prefix .\XIAOLOU-main run build。

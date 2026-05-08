@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { cn } from "../../lib/utils";
+import { cn } from "../../../lib/utils";
 
 const STORAGE_PREFIX = "xiaolou:create-studio:sidebar:";
 

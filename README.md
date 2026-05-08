@@ -46,7 +46,7 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | 智能体画布 | `/create/agent-canvas`、`/create/agent-studio` | 前端宿主、runtime 和 Jaaz embed 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`。 |
 | 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；资产引用选择器、同步入库控件和生成媒体占位 UI 也由 `assets-media-projects` owner 承载。 |
 | 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`，用于组织成员、企业钱包和项目权限管理。 |
-| 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；注册页和充值审核页分别收口到同一 owner 下的 `register/`、`admin-orders/`。 |
+| 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
 | Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；canonical 会话、消息、记忆和聊天任务调试。 |
 | 积分统计 | `/wallet/usage` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/credit-usage/`，用于个人或平台视角的积分消耗统计。 |
 | API 中心 | `/api-center` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/api-center/`，用于供应商模型、默认链路和 API Key 配置。 |
@@ -77,13 +77,14 @@ locks, `FOR UPDATE SKIP LOCKED`, and `LISTEN/NOTIFY`.
 
 ```text
 XIAOLOU-main/          React + Vite SPA; production output is dist/
-XIAOLOU-main/src/features/account-admin-enterprise/ account/admin/enterprise frontend surfaces
+XIAOLOU-main/src/features/account-admin-enterprise/ account/admin/enterprise/auth frontend surfaces
 XIAOLOU-main/src/features/assets-media-projects/ assets route, reference picker, media UI, and project asset surfaces
-XIAOLOU-main/src/features/canvas-agent-canvas/ canvas and agent-canvas frontend runtimes
-XIAOLOU-main/src/features/comic-production/ comic production frontend surfaces
+XIAOLOU-main/src/features/canvas-agent-canvas/ canvas and agent-canvas frontend runtimes plus shared hooks
+XIAOLOU-main/src/features/comic-production/ comic production frontend surfaces and script state
+XIAOLOU-main/src/features/create-workbench/ shared create workbench shell/layout
 XIAOLOU-main/src/features/create-image/ create image frontend surface
 XIAOLOU-main/src/features/create-video/ create video frontend surface
-XIAOLOU-main/src/features/home/     home product surface and nav/layout shell
+XIAOLOU-main/src/features/home/     home product surface, nav/layout shell, and profile helpers
 XIAOLOU-main/src/features/playground/ Playground frontend surface and API wrapper
 XIAOLOU-main/src/features/wallet-payments-api-center/ wallet/payment/API-center frontend surfaces
 XIAOLOU-main/src/features/toolbox/  toolbox frontend surfaces grouped by capability
@@ -186,8 +187,11 @@ projects, canvas projects, agent-canvas projects, create image/video lists,
 identity/config, project-adjacent assets/storyboards/videos/dubbings/exports,
 admin reads, Playground, capabilities, and Toolbox. Playground and Toolbox now
 live under feature-owned paths. New route-owned code should live under
-`XIAOLOU-main/src/features/<product-area>/`; old page/lib paths may remain thin
-compatibility re-exports during refactors.
+`XIAOLOU-main/src/features/<product-area>/`. During an active move, old
+page/lib/component paths may briefly remain as thin compatibility re-exports,
+but they should be deleted once import scans, route checks, build, and targeted
+tests prove no old-path callers remain. H17 completed that cleanup for the
+known H-stage page/component/lib wrappers.
 
 ### Toolbox Frontend Layout
 

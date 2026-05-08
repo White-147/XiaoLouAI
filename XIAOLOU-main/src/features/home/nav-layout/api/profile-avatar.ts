@@ -1,4 +1,4 @@
-import type { PermissionContext, UploadedFile } from "../api";
+import type { PermissionContext, UploadedFile } from "../../../../lib/api";
 
 type AvatarUploadResult = Pick<UploadedFile, "signedReadUrl" | "urlPath" | "url">;
 
