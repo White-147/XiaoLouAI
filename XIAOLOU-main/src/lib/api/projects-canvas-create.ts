@@ -608,10 +608,17 @@ export function createProjectsCanvasCreateService({
       return controlApiJsonRequest<Script>(`/api/projects/${encodeURIComponent(projectId)}/script`);
     },
 
-    updateScript(projectId: string, content: string) {
+    updateScript(
+      projectId: string,
+      content: string,
+      options?: { episodeScripts?: Record<string, string> },
+    ) {
       return controlApiJsonRequest<Script>(`/api/projects/${encodeURIComponent(projectId)}/script`, {
         method: "PUT",
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({
+          content,
+          ...(options?.episodeScripts ? { episodeScripts: options.episodeScripts } : {}),
+        }),
       });
     },
 

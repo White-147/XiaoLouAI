@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const sessionState = vi.hoisted(() => ({
   actorId: "synthetic-actor",
   clientAssertion: null as string | null,
+  knownActors: [] as unknown[],
   token: null as string | null,
 }));
 
@@ -10,6 +11,17 @@ vi.mock("../../actor-session", () => ({
   getAuthToken: () => sessionState.token,
   getControlApiClientAssertion: () => sessionState.clientAssertion,
   getCurrentActorId: () => sessionState.actorId,
+  isLocalDemoActorId: (actorId = sessionState.actorId) =>
+    new Set([
+      "user_personal_001",
+      "user_demo_001",
+      "user_member_001",
+      "ops_demo_001",
+      "root_demo_001",
+    ]).has(actorId),
+  rememberKnownActor: (actor: unknown) => {
+    sessionState.knownActors.push(actor);
+  },
   setAuthToken: (token: string | null) => {
     sessionState.token = token;
   },
@@ -53,6 +65,7 @@ describe("control-api-client", () => {
   beforeEach(() => {
     sessionState.actorId = "synthetic-actor";
     sessionState.clientAssertion = null;
+    sessionState.knownActors = [];
     sessionState.token = null;
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -106,6 +119,44 @@ describe("control-api-client", () => {
     expect(retriedRequest.headers.get("Authorization")).toBe("Bearer refreshed-client-assertion");
     expect(sessionState.token).toBe("refreshed-user-token");
     expect(sessionState.clientAssertion).toBe("refreshed-client-assertion");
+  });
+
+  it("creates a local demo session before a Control API request when the demo actor has no token", async () => {
+    sessionState.actorId = "root_demo_001";
+    fetchMock
+      .mockResolvedValueOnce(createResponse(JSON.stringify({
+        actorId: "root_demo_001",
+        token: "local-demo-token",
+        controlApiClientAssertion: "local-demo-client-assertion",
+        displayName: "Root Demo",
+        email: "root@example.test",
+      })))
+      .mockResolvedValueOnce(createResponse(JSON.stringify({ items: [], total: 0 })));
+
+    await expect(
+      controlApiJsonRequest("/api/projects?accountOwnerType=user&accountOwnerId=root_demo_001"),
+    ).resolves.toEqual({ items: [], total: 0 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const sessionRequest = getRequestAt(fetchMock, 0);
+    expect(sessionRequest.url).toBe("/api/auth/demo-session");
+    expect(sessionRequest.init.method).toBe("POST");
+    expect(sessionRequest.headers.get("X-Actor-Id")).toBe("root_demo_001");
+    expect(JSON.parse(sessionRequest.init.body as string)).toEqual({ actorId: "root_demo_001" });
+
+    const projectsRequest = getRequestAt(fetchMock, 1);
+    expect(projectsRequest.headers.get("Authorization")).toBe("Bearer local-demo-client-assertion");
+    expect(sessionState.token).toBe("local-demo-token");
+    expect(sessionState.clientAssertion).toBe("local-demo-client-assertion");
+    expect(sessionState.knownActors).toEqual([
+      {
+        id: "root_demo_001",
+        label: "Root Demo",
+        detail: "root@example.test",
+        token: "local-demo-token",
+        controlApiClientAssertion: "local-demo-client-assertion",
+      },
+    ]);
   });
 
   it("repairs protected password auth requests without repairing anonymous auth routes", async () => {

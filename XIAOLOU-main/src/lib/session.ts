@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getCurrentActorId,
   hasSessionCredentials,
+  isLocalDemoActorId,
   useActorId,
 } from "./actor-session";
 import { createProject, getMe, listProjects } from "./api";
@@ -40,6 +41,10 @@ function normalizeActorId(actorId: string | null | undefined) {
 
 function getActorProjectStorageKey(actorId: string | null | undefined) {
   return `${LEGACY_STORAGE_KEY}:${normalizeActorId(actorId)}`;
+}
+
+function shouldUseDefaultProjectFallback(actorId: string) {
+  return DEMO_FALLBACK_ACTOR_IDS.has(actorId) && !isLocalDemoActorId(actorId);
 }
 
 function readStoredProjectContext(): StoredProjectContext | null {
@@ -134,7 +139,7 @@ export function useCurrentProjectId() {
 
     const syncProjectId = async () => {
       try {
-        if (!hasSessionCredentials() && DEMO_FALLBACK_ACTOR_IDS.has(normalizedActorId)) {
+        if (!hasSessionCredentials() && shouldUseDefaultProjectFallback(normalizedActorId)) {
           if (!active) return;
           setCurrentProjectId(DEFAULT_PROJECT_ID, normalizedActorId);
           setProjectIdState(DEFAULT_PROJECT_ID);
@@ -149,7 +154,7 @@ export function useCurrentProjectId() {
         const availableProjectIds = availableProjects.map((item) => item.id);
 
         if (!availableProjectIds.length) {
-          if (DEMO_FALLBACK_ACTOR_IDS.has(normalizedActorId)) {
+          if (shouldUseDefaultProjectFallback(normalizedActorId)) {
             if (!active) return;
             setCurrentProjectId(DEFAULT_PROJECT_ID, normalizedActorId);
             setProjectIdState(DEFAULT_PROJECT_ID);

@@ -2,6 +2,8 @@ import {
   getAuthToken,
   getControlApiClientAssertion,
   getCurrentActorId,
+  isLocalDemoActorId,
+  rememberKnownActor,
   setAuthToken,
   setControlApiClientAssertion,
 } from "../actor-session";
@@ -27,9 +29,12 @@ type SessionRefreshResponse = {
   actorId?: string | null;
   token?: string | null;
   controlApiClientAssertion?: string | null;
+  displayName?: string | null;
+  email?: string | null;
 };
 
 const SESSION_REFRESH_PATH = "/api/auth/session/refresh";
+const DEMO_SESSION_PATH = "/api/auth/demo-session";
 const SESSION_REPAIR_STATUS_CODES = new Set([401, 403]);
 const SESSION_REPAIR_EXCLUDED_PATHS = new Set([
   SESSION_REFRESH_PATH,
@@ -40,12 +45,13 @@ const SESSION_REPAIR_EXCLUDED_PATHS = new Set([
   "/api/auth/password/bootstrap-admin",
   "/api/auth/password/reset/request",
   "/api/auth/password/reset/complete",
-  "/api/auth/demo-session",
+  DEMO_SESSION_PATH,
   "/api/auth/register/personal",
   "/api/auth/register/enterprise-admin",
   "/api/me",
 ]);
 let sessionRefreshPromise: Promise<boolean> | null = null;
+let demoSessionPromise: Promise<boolean> | null = null;
 
 export class ApiRequestError extends Error {
   code: string;
@@ -93,7 +99,6 @@ function buildRequestHeaders(path: string, init?: RequestInit, options: { allowB
 function shouldAttemptSessionRepair(path: string) {
   const normalizedPath = normalizeRoutePath(path);
   return (
-    Boolean(getAuthToken()) &&
     isControlApiClientPath(path) &&
     !SESSION_REPAIR_EXCLUDED_PATHS.has(normalizedPath)
   );
@@ -156,12 +161,81 @@ async function refreshControlApiSessionAssertion() {
   }
 }
 
+async function createLocalDemoSessionAssertion() {
+  const actorId = getCurrentActorId();
+  if (!isLocalDemoActorId(actorId)) {
+    return false;
+  }
+
+  if (demoSessionPromise) {
+    return demoSessionPromise;
+  }
+
+  demoSessionPromise = (async () => {
+    const headers = new Headers();
+    headers.set("Content-Type", "application/json");
+    headers.set("X-Actor-Id", actorId);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}${DEMO_SESSION_PATH}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ actorId }),
+      });
+      if (!response.ok) {
+        return false;
+      }
+
+      const text = await response.text();
+      if (!text) {
+        return false;
+      }
+
+      const payload = JSON.parse(text) as SessionRefreshResponse;
+      if (!payload?.controlApiClientAssertion) {
+        return false;
+      }
+
+      if (payload.token) {
+        setAuthToken(payload.token);
+      }
+      setControlApiClientAssertion(payload.controlApiClientAssertion);
+      rememberKnownActor({
+        id: payload.actorId || actorId,
+        label: payload.displayName || payload.actorId || actorId,
+        detail: payload.email || "",
+        token: payload.token ?? null,
+        controlApiClientAssertion: payload.controlApiClientAssertion,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  try {
+    return await demoSessionPromise;
+  } finally {
+    demoSessionPromise = null;
+  }
+}
+
+async function repairControlApiSessionAssertion(path: string) {
+  if (!shouldAttemptSessionRepair(path)) {
+    return false;
+  }
+
+  return getAuthToken()
+    ? refreshControlApiSessionAssertion()
+    : createLocalDemoSessionAssertion();
+}
+
 async function repairMissingSessionAssertion(path: string) {
   if (!shouldAttemptSessionRepair(path) || getControlApiClientAssertion()) {
     return false;
   }
 
-  return refreshControlApiSessionAssertion();
+  return repairControlApiSessionAssertion(path);
 }
 
 function sendRequest(path: string, init?: RequestInit, options: { allowBodyContentType?: boolean } = {}) {
@@ -180,7 +254,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (
     !repairedBeforeRequest &&
     shouldRetryAfterSessionRepair(path, response.status) &&
-    (await refreshControlApiSessionAssertion())
+    (await repairControlApiSessionAssertion(path))
   ) {
     response = await sendRequest(path, init, { allowBodyContentType: true });
   }
@@ -238,7 +312,7 @@ export async function controlApiJsonRequest<T>(path: string, init?: RequestInit)
   if (
     !repairedBeforeRequest &&
     shouldRetryAfterSessionRepair(path, response.status) &&
-    (await refreshControlApiSessionAssertion())
+    (await repairControlApiSessionAssertion(path))
   ) {
     response = await sendRequest(path, init, requestOptions);
   }
@@ -308,7 +382,7 @@ export async function controlApiStreamRequest(path: string, init?: RequestInit):
   if (
     !repairedBeforeRequest &&
     shouldRetryAfterSessionRepair(path, response.status) &&
-    (await refreshControlApiSessionAssertion())
+    (await repairControlApiSessionAssertion(path))
   ) {
     response = await sendStreamRequest();
   }

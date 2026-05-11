@@ -2,11 +2,14 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Image as ImageIcon,
   LoaderCircle,
   Plus,
   RefreshCw,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Upload,
@@ -15,7 +18,7 @@ import {
   X,
   ZoomIn,
 } from "lucide-react";
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import {
   ReferenceAssetPicker,
   type ReferenceAssetSelection,
@@ -68,19 +71,318 @@ async function waitForTask(taskId: string): Promise<Task | null> {
   return null;
 }
 
+const DEFAULT_EPISODES = [1, 2] as const;
+const EPISODE_SCRIPT_STORAGE_PREFIX = "xiaolou:script-breakdown:episode-scripts:v1";
+const EPISODE_ADD_SETTINGS_STORAGE_PREFIX = "xiaolou:script-breakdown:episode-add-settings:v1";
+const DEFAULT_EPISODE_ADD_SETTINGS = { start: 1, step: 1 };
+
+function episodeScriptStorageKey(projectId: string) {
+  return `${EPISODE_SCRIPT_STORAGE_PREFIX}:${projectId}`;
+}
+
+function episodeAddSettingsStorageKey(projectId: string) {
+  return `${EPISODE_ADD_SETTINGS_STORAGE_PREFIX}:${projectId}`;
+}
+
+function toEpisodeNumber(value: unknown) {
+  const episodeNo = Number(value);
+  return Number.isSafeInteger(episodeNo) && episodeNo > 0 ? episodeNo : null;
+}
+
+function toPositiveInteger(value: unknown, fallback: number) {
+  return toEpisodeNumber(value) ?? fallback;
+}
+
+function hasEpisodeScript(scripts: Record<number, string>, episodeNo: number) {
+  return Object.prototype.hasOwnProperty.call(scripts, episodeNo);
+}
+
+function sortedEpisodes(values: Iterable<number>) {
+  const episodes = Array.from(new Set(Array.from(values).filter((value) => toEpisodeNumber(value) != null))).sort(
+    (a, b) => a - b,
+  );
+  return episodes.length > 0 ? episodes : [...DEFAULT_EPISODES];
+}
+
+function parseEpisodeScripts(value: unknown): Record<number, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.entries(value).reduce<Record<number, string>>((acc, [key, script]) => {
+    const episodeNo = toEpisodeNumber(key);
+    if (episodeNo != null && typeof script === "string") {
+      acc[episodeNo] = script;
+    }
+    return acc;
+  }, {});
+}
+
+function serializeEpisodeScripts(scripts: Record<number, string>) {
+  return Object.entries(scripts).reduce<Record<string, string>>((acc, [episodeNo, script]) => {
+    const normalizedEpisodeNo = toEpisodeNumber(episodeNo);
+    if (normalizedEpisodeNo != null && typeof script === "string") {
+      acc[String(normalizedEpisodeNo)] = script;
+    }
+    return acc;
+  }, {});
+}
+
+function readStoredEpisodeScripts(projectId: string): Record<number, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(episodeScriptStorageKey(projectId));
+    return raw ? parseEpisodeScripts(JSON.parse(raw)) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredEpisodeScripts(projectId: string, scripts: Record<number, string>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      episodeScriptStorageKey(projectId),
+      JSON.stringify(serializeEpisodeScripts(scripts)),
+    );
+  } catch {
+    // Browser storage is a best-effort draft cache; server persistence still runs.
+  }
+}
+
+function readStoredEpisodeAddSettings(projectId: string) {
+  if (typeof window === "undefined") return DEFAULT_EPISODE_ADD_SETTINGS;
+  try {
+    const raw = window.localStorage.getItem(episodeAddSettingsStorageKey(projectId));
+    if (!raw) return DEFAULT_EPISODE_ADD_SETTINGS;
+    const parsed = JSON.parse(raw) as Partial<typeof DEFAULT_EPISODE_ADD_SETTINGS>;
+    return {
+      start: toPositiveInteger(parsed.start, DEFAULT_EPISODE_ADD_SETTINGS.start),
+      step: toPositiveInteger(parsed.step, DEFAULT_EPISODE_ADD_SETTINGS.step),
+    };
+  } catch {
+    return DEFAULT_EPISODE_ADD_SETTINGS;
+  }
+}
+
+function writeStoredEpisodeAddSettings(projectId: string, settings: typeof DEFAULT_EPISODE_ADD_SETTINGS) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(episodeAddSettingsStorageKey(projectId), JSON.stringify(settings));
+  } catch {
+    // Browser storage is best-effort; the controls still use in-memory settings.
+  }
+}
+
+function previewEpisodeNumbers(start: number, step: number, count = 3) {
+  const preview: number[] = [];
+  let next = start;
+  while (preview.length < count && next <= Number.MAX_SAFE_INTEGER - step) {
+    preview.push(next);
+    next += step;
+  }
+  return preview;
+}
+
+function previewFutureEpisodeNumbers(episodes: number[], start: number, step: number, count = 3) {
+  const used = new Set(episodes);
+  const preview: number[] = [];
+  let next = episodes.length > 0 ? Math.max(...episodes) + step : start;
+  while (preview.length < count && next <= Number.MAX_SAFE_INTEGER - step) {
+    while (used.has(next)) {
+      next += step;
+    }
+    preview.push(next);
+    used.add(next);
+    next += step;
+  }
+  return preview;
+}
+
+function nextFutureEpisodeNumber(episodes: number[], start: number, step: number) {
+  return previewFutureEpisodeNumbers(episodes, start, step, 1)[0] ?? start;
+}
+
+function groupStoryboardsByEpisode(items: Storyboard[]) {
+  return items.reduce<Record<number, Storyboard[]>>((acc, item) => {
+    const episodeNo = toEpisodeNumber(item.episodeNo) ?? 1;
+    (acc[episodeNo] ??= []).push(item);
+    return acc;
+  }, {});
+}
+
+function createDraftPromptsByEpisode(groups: Record<number, Storyboard[]>) {
+  return Object.entries(groups).reduce<Record<number, Record<string, string>>>(
+    (acc, [episodeNo, items]) => {
+      const normalizedEpisodeNo = toEpisodeNumber(episodeNo);
+      if (normalizedEpisodeNo == null) return acc;
+      acc[normalizedEpisodeNo] = items.reduce<Record<string, string>>((prompts, item) => {
+        prompts[item.id] = item.script;
+        return prompts;
+      }, {});
+      return acc;
+    },
+    {},
+  );
+}
+
+function projectScriptContentFromEpisodes(scripts: Record<number, string>, fallback: string) {
+  if (hasEpisodeScript(scripts, 1)) {
+    return scripts[1] ?? "";
+  }
+
+  const firstEpisodeNo = sortedEpisodes(Object.keys(scripts).map(Number))[0];
+  return firstEpisodeNo != null && hasEpisodeScript(scripts, firstEpisodeNo)
+    ? (scripts[firstEpisodeNo] ?? "")
+    : fallback;
+}
+
 // ─── component ──────────────────────────────────────────────────────────────
 
 export default function ScriptBreakdown() {
   const [currentProjectId] = useCurrentProjectId();
+  const episodeTabsRef = useRef<HTMLDivElement | null>(null);
+  const episodeSettingsRef = useRef<HTMLDivElement | null>(null);
+  const episodeTabDragRef = useRef({
+    pointerId: -1,
+    startX: 0,
+    startScrollLeft: 0,
+    railWidth: 1,
+  });
+  const [isEpisodeTabDragging, setIsEpisodeTabDragging] = useState(false);
+  const [episodeScrollMetrics, setEpisodeScrollMetrics] = useState({
+    scrollLeft: 0,
+    scrollWidth: 0,
+    clientWidth: 0,
+  });
+  const [episodeSettingsOpen, setEpisodeSettingsOpen] = useState(false);
+  const [episodeAddStartInput, setEpisodeAddStartInput] = useState(String(DEFAULT_EPISODE_ADD_SETTINGS.start));
+  const [episodeAddStepInput, setEpisodeAddStepInput] = useState(String(DEFAULT_EPISODE_ADD_SETTINGS.step));
+  const [episodeSettingsMode, setEpisodeSettingsMode] = useState<"future" | "current">("future");
+  const [deleteEpisodeCandidate, setDeleteEpisodeCandidate] = useState<number | null>(null);
+  const [reorderConflictEpisodes, setReorderConflictEpisodes] = useState<number[]>([]);
+  const [editingEpisode, setEditingEpisode] = useState<number | null>(null);
+  const [editingEpisodeInput, setEditingEpisodeInput] = useState("");
 
   // ── Episode tabs ──
-  const [episodes, setEpisodes] = useState([1, 2]);
+  const [episodes, setEpisodes] = useState<number[]>([...DEFAULT_EPISODES]);
   const [activeEpisode, setActiveEpisode] = useState(1);
 
+  const readEpisodeAddSettingsFromInputs = () => ({
+    start: toPositiveInteger(episodeAddStartInput, DEFAULT_EPISODE_ADD_SETTINGS.start),
+    step: toPositiveInteger(episodeAddStepInput, DEFAULT_EPISODE_ADD_SETTINGS.step),
+  });
+
+  const commitEpisodeAddSettings = () => {
+    const nextSettings = readEpisodeAddSettingsFromInputs();
+    setEpisodeAddStartInput(String(nextSettings.start));
+    setEpisodeAddStepInput(String(nextSettings.step));
+    if (currentProjectId) {
+      writeStoredEpisodeAddSettings(currentProjectId, nextSettings);
+    }
+    return nextSettings;
+  };
+
+  const scrollEpisodeTabs = (direction: -1 | 1) => {
+    const container = episodeTabsRef.current;
+    if (!container) return;
+    container.scrollBy({
+      left: direction * Math.max(180, container.clientWidth * 0.7),
+      behavior: "smooth",
+    });
+  };
+
+  const syncEpisodeScrollMetrics = () => {
+    const container = episodeTabsRef.current;
+    if (!container) return;
+    const nextMetrics = {
+      scrollLeft: container.scrollLeft,
+      scrollWidth: container.scrollWidth,
+      clientWidth: container.clientWidth,
+    };
+    setEpisodeScrollMetrics((current) => (
+      current.scrollLeft === nextMetrics.scrollLeft &&
+      current.scrollWidth === nextMetrics.scrollWidth &&
+      current.clientWidth === nextMetrics.clientWidth
+        ? current
+        : nextMetrics
+    ));
+  };
+
+  const selectEpisode = (episodeNo: number) => {
+    setActiveEpisode(episodeNo);
+  };
+
+  const startEpisodeEdit = (episodeNo: number) => {
+    setActiveEpisode(episodeNo);
+    setEditingEpisode(episodeNo);
+    setEditingEpisodeInput(String(episodeNo));
+  };
+
+  const updateEpisodeScrollFromRailPointer = (clientX: number) => {
+    const container = episodeTabsRef.current;
+    if (!container || container.scrollWidth <= container.clientWidth) return;
+    const drag = episodeTabDragRef.current;
+    const scrollRange = container.scrollWidth - container.clientWidth;
+    const thumbWidth = Math.max(12, (container.clientWidth / container.scrollWidth) * drag.railWidth);
+    const trackRange = Math.max(drag.railWidth - thumbWidth, 1);
+    const scrollDelta = (clientX - drag.startX) * (scrollRange / trackRange);
+    container.scrollLeft = Math.min(Math.max(drag.startScrollLeft + scrollDelta, 0), scrollRange);
+    syncEpisodeScrollMetrics();
+  };
+
+  const handleEpisodeScrollRailPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const container = episodeTabsRef.current;
+    if (!container || container.scrollWidth <= container.clientWidth) return;
+    const rail = event.currentTarget;
+    const rect = rail.getBoundingClientRect();
+    episodeTabDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: container.scrollLeft,
+      railWidth: Math.max(rect.width, 1),
+    };
+    container.style.scrollBehavior = "auto";
+    rail.setPointerCapture(event.pointerId);
+    setIsEpisodeTabDragging(true);
+    event.preventDefault();
+  };
+
+  const handleEpisodeScrollRailPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = episodeTabDragRef.current;
+    if (drag.pointerId !== event.pointerId) return;
+    updateEpisodeScrollFromRailPointer(event.clientX);
+    event.preventDefault();
+  };
+
+  const finishEpisodeScrollRailDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = episodeTabDragRef.current;
+    if (drag.pointerId !== event.pointerId) return;
+    const rail = event.currentTarget;
+    if (rail.hasPointerCapture(event.pointerId)) {
+      rail.releasePointerCapture(event.pointerId);
+    }
+    episodeTabDragRef.current = {
+      pointerId: -1,
+      startX: 0,
+      startScrollLeft: 0,
+      railWidth: 1,
+    };
+    const container = episodeTabsRef.current;
+    if (container) {
+      container.style.scrollBehavior = "";
+    }
+    setIsEpisodeTabDragging(false);
+  };
+
   const handleAddEpisode = () => {
-    const next = episodes[episodes.length - 1] + 1;
-    setEpisodes((prev) => [...prev, next]);
+    const addSettings = commitEpisodeAddSettings();
+    const next = nextFutureEpisodeNumber(episodes, addSettings.start, addSettings.step);
+    setEpisodes((prev) => sortedEpisodes([...prev, next]));
     setActiveEpisode(next);
+    setEpisodeScripts((prev) => {
+      const updated = hasEpisodeScript(prev, next) ? prev : { ...prev, [next]: "" };
+      if (currentProjectId) writeStoredEpisodeScripts(currentProjectId, updated);
+      return updated;
+    });
     // Load any pre-existing storyboards for the new episode
     if (currentProjectId) {
       void listStoryboards(currentProjectId, next)
@@ -89,14 +391,79 @@ export default function ScriptBreakdown() {
     }
   };
 
+  const commitEpisodeEdit = () => {
+    if (editingEpisode == null) return;
+    const previousEpisode = editingEpisode;
+    const nextEpisode = toEpisodeNumber(editingEpisodeInput);
+    if (nextEpisode == null) {
+      setNotice("请输入有效集数");
+      return;
+    }
+    if (nextEpisode === previousEpisode) {
+      setEditingEpisode(null);
+      setEditingEpisodeInput("");
+      return;
+    }
+    if (episodes.includes(nextEpisode)) {
+      setNotice("该集数已存在");
+      return;
+    }
+
+    const movedStoryboards = episodeStoryboards[previousEpisode] ?? [];
+    setEpisodes((prev) => sortedEpisodes(prev.map((episodeNo) => (
+      episodeNo === previousEpisode ? nextEpisode : episodeNo
+    ))));
+    setActiveEpisode(nextEpisode);
+    setEditingEpisode(null);
+    setEditingEpisodeInput("");
+    setNotice(null);
+
+    setEpisodeScripts((prev) => {
+      const updated = { ...prev };
+      updated[nextEpisode] = updated[previousEpisode] ?? "";
+      delete updated[previousEpisode];
+      if (currentProjectId) writeStoredEpisodeScripts(currentProjectId, updated);
+      return updated;
+    });
+    setEpisodeStoryboards((prev) => {
+      const updated = { ...prev };
+      updated[nextEpisode] = (updated[previousEpisode] ?? []).map((item) => ({
+        ...item,
+        episodeNo: nextEpisode,
+      }));
+      delete updated[previousEpisode];
+      return updated;
+    });
+    setEpisodeDraftPrompts((prev) => {
+      const updated = { ...prev };
+      updated[nextEpisode] = updated[previousEpisode] ?? {};
+      delete updated[previousEpisode];
+      return updated;
+    });
+
+    if (currentProjectId && movedStoryboards.length > 0) {
+      void Promise.allSettled(
+        movedStoryboards.map((item) => updateStoryboard(currentProjectId, item.id, { episodeNo: nextEpisode })),
+      ).then((results) => {
+        if (results.some((result) => result.status === "rejected")) {
+          setNotice("部分分镜集数同步失败，请稍后重试");
+        }
+      });
+    }
+  };
+
+  const cancelEpisodeEdit = () => {
+    setEditingEpisode(null);
+    setEditingEpisodeInput("");
+  };
+
   const handleDeleteEpisode = (ep: number) => {
     if (episodes.length <= 1) return;
-    const next = episodes.filter((e) => e !== ep);
-    setEpisodes(next);
-    if (activeEpisode === ep) {
-      const idx = episodes.indexOf(ep);
-      setActiveEpisode(next[Math.max(0, idx - 1)] ?? next[0]);
+    if (episodeHasContent(ep)) {
+      setDeleteEpisodeCandidate(ep);
+      return;
     }
+    deleteEpisode(ep);
   };
 
   // ── Per-episode independent state ──
@@ -112,10 +479,130 @@ export default function ScriptBreakdown() {
   const storyboards = episodeStoryboards[activeEpisode] ?? [];
   const draftPrompts = episodeDraftPrompts[activeEpisode] ?? {};
 
-  const setContent = (text: string) =>
-    setEpisodeScripts((prev) => ({ ...prev, [activeEpisode]: text }));
+  const setContent = (text: string) => {
+    const episodeNo = activeEpisode;
+    setEpisodeScripts((prev) => {
+      const updated = { ...prev, [episodeNo]: text };
+      if (currentProjectId) writeStoredEpisodeScripts(currentProjectId, updated);
+      return updated;
+    });
+  };
 
   /** Seed a fresh storyboard list for `ep` – preserves existing prompt edits. */
+  const episodeHasContent = (episodeNo: number) => {
+    const hasScript = Boolean((episodeScripts[episodeNo] ?? "").trim());
+    const hasStoryboards = (episodeStoryboards[episodeNo]?.length ?? 0) > 0;
+    const hasDraftPrompts = Object.values(episodeDraftPrompts[episodeNo] ?? {}).some((prompt) => prompt.trim());
+    return hasScript || hasStoryboards || hasDraftPrompts;
+  };
+
+  const deleteEpisode = (episodeNo: number) => {
+    const next = episodes.filter((ep) => ep !== episodeNo);
+    setEpisodes(next);
+    if (activeEpisode === episodeNo) {
+      const idx = episodes.indexOf(episodeNo);
+      setActiveEpisode(next[Math.max(0, idx - 1)] ?? next[0] ?? DEFAULT_EPISODE_ADD_SETTINGS.start);
+    }
+    setDeleteEpisodeCandidate(null);
+    setEpisodeScripts((prev) => {
+      const updated = { ...prev };
+      delete updated[episodeNo];
+      if (currentProjectId) writeStoredEpisodeScripts(currentProjectId, updated);
+      return updated;
+    });
+    const deletedStoryboards = episodeStoryboards[episodeNo] ?? [];
+    setEpisodeStoryboards((prev) => {
+      const updated = { ...prev };
+      delete updated[episodeNo];
+      return updated;
+    });
+    setEpisodeDraftPrompts((prev) => {
+      const updated = { ...prev };
+      delete updated[episodeNo];
+      return updated;
+    });
+
+    if (currentProjectId && deletedStoryboards.length > 0) {
+      void Promise.allSettled(
+        deletedStoryboards.map((item) => deleteStoryboard(currentProjectId, item.id)),
+      ).then((results) => {
+        if (results.some((result) => result.status === "rejected")) {
+          setNotice("部分分镜删除失败，请稍后重试");
+        }
+      });
+    }
+  };
+
+  const applyEpisodeSettingsToCurrentEpisodes = () => {
+    const settings = commitEpisodeAddSettings();
+    const orderedEpisodes = sortedEpisodes(episodes);
+    const episodeMap = new Map<number, number>();
+    orderedEpisodes.forEach((episodeNo, index) => {
+      episodeMap.set(episodeNo, settings.start + index * settings.step);
+    });
+    const nextEpisodes = orderedEpisodes.map((episodeNo) => episodeMap.get(episodeNo) ?? episodeNo);
+    const nextEpisodeSet = new Set(nextEpisodes);
+    const conflicts = orderedEpisodes.filter((episodeNo) => (
+      !nextEpisodeSet.has(episodeNo) && episodeHasContent(episodeNo)
+    ));
+    if (conflicts.length > 0) {
+      setReorderConflictEpisodes(conflicts);
+      return false;
+    }
+    const nextActiveEpisode = episodeMap.get(activeEpisode) ?? nextEpisodes[0] ?? settings.start;
+    const movedStoryboards = orderedEpisodes.flatMap((episodeNo) =>
+      (episodeStoryboards[episodeNo] ?? []).map((item) => ({
+        id: item.id,
+        episodeNo: episodeMap.get(episodeNo) ?? episodeNo,
+      })),
+    );
+
+    setEpisodes(nextEpisodes);
+    setActiveEpisode(nextActiveEpisode);
+    setEditingEpisode(null);
+    setEditingEpisodeInput("");
+    setNotice(null);
+    setEpisodeScripts((prev) => {
+      const updated: Record<number, string> = {};
+      orderedEpisodes.forEach((episodeNo) => {
+        const mappedEpisodeNo = episodeMap.get(episodeNo) ?? episodeNo;
+        updated[mappedEpisodeNo] = prev[episodeNo] ?? "";
+      });
+      if (currentProjectId) writeStoredEpisodeScripts(currentProjectId, updated);
+      return updated;
+    });
+    setEpisodeStoryboards((prev) => {
+      const updated: Record<number, Storyboard[]> = {};
+      orderedEpisodes.forEach((episodeNo) => {
+        const mappedEpisodeNo = episodeMap.get(episodeNo) ?? episodeNo;
+        updated[mappedEpisodeNo] = (prev[episodeNo] ?? []).map((item) => ({
+          ...item,
+          episodeNo: mappedEpisodeNo,
+        }));
+      });
+      return updated;
+    });
+    setEpisodeDraftPrompts((prev) => {
+      const updated: Record<number, Record<string, string>> = {};
+      orderedEpisodes.forEach((episodeNo) => {
+        const mappedEpisodeNo = episodeMap.get(episodeNo) ?? episodeNo;
+        updated[mappedEpisodeNo] = prev[episodeNo] ?? {};
+      });
+      return updated;
+    });
+
+    if (currentProjectId && movedStoryboards.length > 0) {
+      void Promise.allSettled(
+        movedStoryboards.map((item) => updateStoryboard(currentProjectId, item.id, { episodeNo: item.episodeNo })),
+      ).then((results) => {
+        if (results.some((result) => result.status === "rejected")) {
+          setNotice("部分分镜集数同步失败，请稍后重试");
+        }
+      });
+    }
+    return true;
+  };
+
   const seedEpisodeStoryboards = (ep: number, items: Storyboard[]) => {
     setEpisodeStoryboards((prev) => ({ ...prev, [ep]: items }));
     setEpisodeDraftPrompts((prev) => {
@@ -146,6 +633,9 @@ export default function ScriptBreakdown() {
   const [pendingScriptAction, setPendingScriptAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("saved");
+  const [scriptsHydrated, setScriptsHydrated] = useState(false);
+  const projectScriptContentRef = useRef("");
+  const skipNextScriptSaveRef = useRef(false);
 
   // ── Per-shot model selection ──
   const [shotModels, setShotModels] = useState<Record<string, string>>({});
@@ -171,31 +661,151 @@ export default function ScriptBreakdown() {
   const [uploadingForShot, setUploadingForShot] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // ── Initial load: seed episode 1 script, then load each episode's storyboards ──
+  // ── Initial load: restore episode scripts and storyboards ──
   useEffect(() => {
-    if (!currentProjectId) return;
-    void getScript(currentProjectId)
-      .then((s) => {
-        setEpisodeScripts((prev) => ({ ...prev, 1: prev[1] ?? s.content ?? "" }));
-      })
-      .catch(() => {});
+    let cancelled = false;
+    setScriptsHydrated(false);
+    projectScriptContentRef.current = "";
+    setEpisodeScripts({});
+    setEpisodeStoryboards({});
+    setEpisodeDraftPrompts({});
+    setRefImages({});
+    setShotModels({});
+    setShowRefPicker(null);
+    setShowModelPicker(null);
+    setNotice(null);
+    setSaveState("saved");
+    setEpisodes([...DEFAULT_EPISODES]);
+    setActiveEpisode(1);
+    setEditingEpisode(null);
+    setEditingEpisodeInput("");
+    setEpisodeSettingsOpen(false);
+    setEpisodeSettingsMode("future");
+    setReorderConflictEpisodes([]);
 
-    // Load storyboards for all known episodes in parallel
+    if (!currentProjectId) {
+      setEpisodeAddStartInput(String(DEFAULT_EPISODE_ADD_SETTINGS.start));
+      setEpisodeAddStepInput(String(DEFAULT_EPISODE_ADD_SETTINGS.step));
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const storedAddSettings = readStoredEpisodeAddSettings(currentProjectId);
+    setEpisodeAddStartInput(String(storedAddSettings.start));
+    setEpisodeAddStepInput(String(storedAddSettings.step));
+
     setLoadingShots(true);
-    const epNums = episodes; // capture current episodes list
     void Promise.allSettled(
-      epNums.map((ep) =>
-        listStoryboards(currentProjectId, ep).then((res) => ({ ep, items: res.items })),
-      ),
+      [
+        getScript(currentProjectId),
+        listStoryboards(currentProjectId),
+      ],
     )
       .then((results) => {
-        for (const r of results) {
-          if (r.status === "fulfilled") seedEpisodeStoryboards(r.value.ep, r.value.items);
+        if (cancelled) return;
+        const [scriptResult, storyboardsResult] = results;
+        const localScripts = readStoredEpisodeScripts(currentProjectId);
+        let nextScripts: Record<number, string> = { ...localScripts };
+        let fallbackScriptContent = "";
+
+        if (scriptResult?.status === "fulfilled") {
+          fallbackScriptContent = scriptResult.value.content ?? "";
+          projectScriptContentRef.current = fallbackScriptContent;
+          nextScripts = {
+            ...parseEpisodeScripts(scriptResult.value.episodeScripts),
+            ...localScripts,
+          };
         }
+
+        const storyboardGroups =
+          storyboardsResult?.status === "fulfilled"
+            ? groupStoryboardsByEpisode(storyboardsResult.value.items)
+            : {};
+        const storyboardEpisodes = Object.keys(storyboardGroups).map(Number);
+        const fallbackEpisode = storyboardEpisodes.length === 1 ? (storyboardEpisodes[0] ?? 1) : 1;
+        if (fallbackScriptContent && !hasEpisodeScript(nextScripts, fallbackEpisode)) {
+          nextScripts[fallbackEpisode] = fallbackScriptContent;
+        }
+        const nextEpisodes = sortedEpisodes([
+          ...DEFAULT_EPISODES,
+          ...Object.keys(nextScripts).map(Number),
+          ...Object.keys(storyboardGroups).map(Number),
+        ]);
+
+        writeStoredEpisodeScripts(currentProjectId, nextScripts);
+        skipNextScriptSaveRef.current = true;
+        setEpisodeScripts(nextScripts);
+        setEpisodeStoryboards(storyboardGroups);
+        setEpisodeDraftPrompts(createDraftPromptsByEpisode(storyboardGroups));
+        setEpisodes(nextEpisodes);
+        setActiveEpisode((current) => (nextEpisodes.includes(current) ? current : (nextEpisodes[0] ?? 1)));
+        setScriptsHydrated(true);
       })
-      .finally(() => setLoadingShots(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .finally(() => {
+        if (!cancelled) setLoadingShots(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [currentProjectId]);
+
+  useEffect(() => {
+    if (!currentProjectId || !scriptsHydrated) return;
+    if (skipNextScriptSaveRef.current) {
+      skipNextScriptSaveRef.current = false;
+      return;
+    }
+
+    setSaveState("saving");
+    const timer = window.setTimeout(() => {
+      const snapshot = { ...episodeScripts };
+      writeStoredEpisodeScripts(currentProjectId, snapshot);
+      void updateScript(currentProjectId, projectScriptContentFromEpisodes(snapshot, projectScriptContentRef.current), {
+        episodeScripts: serializeEpisodeScripts(snapshot),
+      })
+        .then((script) => {
+          projectScriptContentRef.current = script.content ?? projectScriptContentRef.current;
+          setSaveState("saved");
+          setNotice(null);
+        })
+        .catch((err) => {
+          setSaveState("error");
+          setNotice(err instanceof Error ? err.message : "脚本保存失败");
+        });
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [currentProjectId, episodeScripts, scriptsHydrated]);
+
+  useEffect(() => {
+    const container = episodeTabsRef.current;
+    const activeTab = container?.querySelector<HTMLElement>(`[data-episode-tab="${activeEpisode}"]`);
+    activeTab?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    const frame = window.requestAnimationFrame(syncEpisodeScrollMetrics);
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeEpisode, episodes]);
+
+  useEffect(() => {
+    const container = episodeTabsRef.current;
+    if (!container) return;
+    syncEpisodeScrollMetrics();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(syncEpisodeScrollMetrics);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [episodes.length]);
+
+  useEffect(() => {
+    if (!episodeSettingsOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!episodeSettingsRef.current?.contains(event.target as Node)) {
+        setEpisodeSettingsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [episodeSettingsOpen]);
 
   // Close model picker on outside click
   useEffect(() => {
@@ -214,16 +824,30 @@ export default function ScriptBreakdown() {
     }
     setPendingScriptAction(actionKey);
     setSaveState("saving");
+    const ep = activeEpisode;
+    const scriptSnapshot = { ...episodeScripts, [ep]: content };
     try {
-      // Save current episode's text to the project script store
-      await updateScript(currentProjectId, content);
+      writeStoredEpisodeScripts(currentProjectId, scriptSnapshot);
+      // The rewrite job reads the project-level script, so point it at the active
+      // episode temporarily, then restore the canonical episode map after it returns.
+      await updateScript(currentProjectId, content, {
+        episodeScripts: serializeEpisodeScripts(scriptSnapshot),
+      });
       setSaveState("saved");
       await rewriteScript(currentProjectId, instruction);
       // Wait for AI rewrite to complete then read back
       await new Promise((r) => window.setTimeout(r, 2200));
       const updated = await getScript(currentProjectId);
       if (updated.content) {
-        setEpisodeScripts((prev) => ({ ...prev, [activeEpisode]: updated.content }));
+        const nextScripts = { ...scriptSnapshot, [ep]: updated.content };
+        writeStoredEpisodeScripts(currentProjectId, nextScripts);
+        setEpisodeScripts(nextScripts);
+        const saved = await updateScript(
+          currentProjectId,
+          projectScriptContentFromEpisodes(nextScripts, projectScriptContentRef.current),
+          { episodeScripts: serializeEpisodeScripts(nextScripts) },
+        );
+        projectScriptContentRef.current = saved.content ?? projectScriptContentRef.current;
       }
     } catch {
       setSaveState("error");
@@ -246,6 +870,16 @@ export default function ScriptBreakdown() {
     setNotice(null);
     const ep = activeEpisode;
     try {
+      const scriptSnapshot = { ...episodeScripts, [ep]: content };
+      writeStoredEpisodeScripts(currentProjectId, scriptSnapshot);
+      setSaveState("saving");
+      const saved = await updateScript(
+        currentProjectId,
+        projectScriptContentFromEpisodes(scriptSnapshot, projectScriptContentRef.current),
+        { episodeScripts: serializeEpisodeScripts(scriptSnapshot) },
+      );
+      projectScriptContentRef.current = saved.content ?? projectScriptContentRef.current;
+      setSaveState("saved");
       const accepted = await autoGenerateStoryboards(currentProjectId, content, {
         systemPrompt: STORYBOARD_BREAKDOWN_SYSTEM_PROMPT,
         maxShots: BREAKDOWN_MAX_SHOTS,
@@ -403,6 +1037,19 @@ export default function ScriptBreakdown() {
 
   const breakdownElapsed = `${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
   const breakdownProgress = Math.min(Math.round((elapsedSeconds / 300) * 100), 99);
+  const canScrollEpisodes = episodeScrollMetrics.scrollWidth > episodeScrollMetrics.clientWidth + 1;
+  const episodeScrollThumbWidth = canScrollEpisodes && episodeScrollMetrics.scrollWidth > 0
+    ? Math.max(12, (episodeScrollMetrics.clientWidth / episodeScrollMetrics.scrollWidth) * 100)
+    : 100;
+  const episodeScrollThumbLeft = canScrollEpisodes
+    ? (episodeScrollMetrics.scrollLeft /
+        Math.max(episodeScrollMetrics.scrollWidth - episodeScrollMetrics.clientWidth, 1)) *
+      (100 - episodeScrollThumbWidth)
+    : 0;
+  const episodeAddSettings = readEpisodeAddSettingsFromInputs();
+  const episodeAddPreview = episodeSettingsMode === "future"
+    ? previewFutureEpisodeNumbers(episodes, episodeAddSettings.start, episodeAddSettings.step)
+    : previewEpisodeNumbers(episodeAddSettings.start, episodeAddSettings.step);
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -417,7 +1064,72 @@ export default function ScriptBreakdown() {
         onChange={(e) => void handleFileSelected(e)}
       />
 
+      {deleteEpisodeCandidate != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-2xl">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              删除第 {deleteEpisodeCandidate} 集？
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              当前集数含有已编辑脚本、分镜或提示词内容，删除后这些内容会一并移除。
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteEpisodeCandidate(null)}
+                className="h-8 rounded-md border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                data-episode-delete-confirm
+                onClick={() => deleteEpisode(deleteEpisodeCandidate)}
+                className="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Toolbar — 与 /create/video-replace 统一视觉风格 ── */}
+      {reorderConflictEpisodes.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-2xl">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
+              <AlertCircle className="h-4 w-4 text-amber-400" />
+              重排存在内容冲突
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              重排后的集数不包含以下已有集数，且这些集数含有已编辑内容。请先处理这些集数的脚本、分镜或提示词后再重排。
+            </p>
+            <div className="mt-3 flex flex-wrap gap-1">
+              {reorderConflictEpisodes.map((episodeNo) => (
+                <span
+                  key={episodeNo}
+                  className="rounded-md bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-300"
+                >
+                  第 {episodeNo} 集
+                </span>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                data-episode-reorder-conflict-close
+                onClick={() => setReorderConflictEpisodes([])}
+                className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex shrink-0 items-center justify-between border-b border-border bg-card/30 px-6 py-4">
         <div className="flex items-start gap-3">
           <div>
@@ -508,68 +1220,253 @@ export default function ScriptBreakdown() {
       ) : (
         <div className="flex min-h-0 flex-1">
           {/* ── Left: Script editor ── */}
-          <div className="flex w-[40%] min-w-0 flex-col border-r border-border">
+          <div className="flex w-[44%] min-w-0 flex-col border-r border-border">
             {/* Episode tabs */}
-            <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-card/30 px-3">
-              {episodes.map((ep) => (
-                <div key={ep} className="group/tab relative flex items-center">
-                  <button
-                    onClick={() => setActiveEpisode(ep)}
-                    className={cn(
-                      "rounded-md py-1.5 text-xs font-medium transition-colors",
-                      activeEpisode === ep
-                        ? "bg-secondary text-secondary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      episodes.length > 1 ? "pl-3 pr-6" : "px-3",
-                    )}
-                  >
-                    第 {ep} 集
-                    {/* dot indicator when episode has content */}
-                    {(episodeScripts[ep] || (episodeStoryboards[ep]?.length ?? 0) > 0) && (
-                      <span className={cn(
-                        "ml-1.5 inline-block h-1.5 w-1.5 rounded-full",
-                        activeEpisode === ep ? "bg-primary" : "bg-muted-foreground/50",
-                      )} />
-                    )}
-                  </button>
-                  {episodes.length > 1 && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteEpisode(ep);
-                      }}
-                      title="删除此集"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 flex h-4 w-4 items-center justify-center rounded opacity-0 transition-opacity hover:bg-destructive/20 hover:text-destructive group-hover/tab:opacity-100"
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  )}
-                </div>
-              ))}
+            <div className="flex h-14 shrink-0 items-start gap-1.5 border-b border-border bg-card/30 px-3 py-1.5">
               <button
+                type="button"
+                onClick={() => scrollEpisodeTabs(-1)}
+                title="向左滚动集数"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
+                <div
+                  ref={episodeTabsRef}
+                  data-episode-tabs-scroll
+                  className="flex h-8 min-w-0 select-none items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  onScroll={syncEpisodeScrollMetrics}
+                >
+                {episodes.map((ep) => (
+                  <div key={ep} className="group/tab relative flex shrink-0 items-center" data-episode-tab={ep}>
+                    {editingEpisode === ep && (
+                      <input
+                        data-episode-edit-input
+                        autoFocus
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={editingEpisodeInput}
+                        onChange={(event) => setEditingEpisodeInput(event.target.value)}
+                        onClick={(event) => event.stopPropagation()}
+                        onBlur={commitEpisodeEdit}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitEpisodeEdit();
+                          } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelEpisodeEdit();
+                          }
+                        }}
+                        className="absolute inset-0 z-10 h-8 w-[4.75rem] rounded-md border border-primary/50 bg-background px-2 text-center text-xs font-medium text-foreground outline-none ring-2 ring-primary/20"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => selectEpisode(ep)}
+                      onDoubleClick={() => startEpisodeEdit(ep)}
+                      title="双击编辑集数"
+                      className={cn(
+                        "flex h-8 min-w-[4.75rem] items-center justify-center whitespace-nowrap rounded-md py-1.5 text-xs font-medium transition-colors",
+                        activeEpisode === ep
+                          ? "bg-secondary text-secondary-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                        episodes.length > 1 ? "pl-3 pr-6" : "px-3",
+                        editingEpisode === ep && "pointer-events-none opacity-0",
+                      )}
+                    >
+                      第 {ep} 集
+                      {/* dot indicator when episode has content */}
+                      {(episodeScripts[ep] || (episodeStoryboards[ep]?.length ?? 0) > 0) && (
+                        <span className={cn(
+                          "ml-1.5 inline-block h-1.5 w-1.5 rounded-full",
+                          activeEpisode === ep ? "bg-primary" : "bg-muted-foreground/50",
+                        )} />
+                      )}
+                    </button>
+                    {episodes.length > 1 && (
+                      <button
+                        type="button"
+                        data-episode-delete
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteEpisode(ep);
+                        }}
+                        title="删除此集"
+                        className="absolute right-1 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded opacity-0 transition-opacity hover:bg-destructive/20 hover:text-destructive group-hover/tab:opacity-100"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+                <div
+                  data-episode-scroll-rail
+                  className={cn(
+                    "relative h-1.5 rounded-full bg-border/50",
+                    !canScrollEpisodes && "opacity-30",
+                  )}
+                  onPointerDown={handleEpisodeScrollRailPointerDown}
+                  onPointerMove={handleEpisodeScrollRailPointerMove}
+                  onPointerUp={finishEpisodeScrollRailDrag}
+                  onPointerCancel={finishEpisodeScrollRailDrag}
+                >
+                  <div
+                    className={cn(
+                      "absolute inset-y-0 rounded-full transition-colors",
+                      isEpisodeTabDragging ? "bg-primary/70" : "bg-primary/40",
+                    )}
+                    style={{
+                      left: `${episodeScrollThumbLeft}%`,
+                      width: `${episodeScrollThumbWidth}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => scrollEpisodeTabs(1)}
+                title="向右滚动集数"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+
+              <button
+                type="button"
+                data-episode-add
                 onClick={handleAddEpisode}
                 title="添加新一集"
-                className="rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               >
                 +
               </button>
 
+              <div ref={episodeSettingsRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  data-episode-settings
+                  onClick={() => setEpisodeSettingsOpen((open) => !open)}
+                  title="集数设置"
+                  className={cn(
+                    "flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+                    episodeSettingsOpen && "bg-accent text-accent-foreground",
+                  )}
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                </button>
+
+                {episodeSettingsOpen && (
+                  <div className="absolute right-0 top-9 z-40 w-72 rounded-xl border border-border bg-card p-3 text-xs shadow-2xl">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-medium text-foreground">集数设置</span>
+                      <div className="flex rounded-md border border-border bg-background/60 p-0.5 text-[11px]">
+                        <button
+                          type="button"
+                          data-episode-settings-mode="future"
+                          onClick={() => setEpisodeSettingsMode("future")}
+                          className={cn(
+                            "h-6 rounded px-2 text-muted-foreground transition-colors",
+                            episodeSettingsMode === "future" && "bg-primary/15 text-primary",
+                          )}
+                        >
+                          后续新增
+                        </button>
+                        <button
+                          type="button"
+                          data-episode-settings-mode="current"
+                          onClick={() => setEpisodeSettingsMode("current")}
+                          className={cn(
+                            "h-6 rounded px-2 text-muted-foreground transition-colors",
+                            episodeSettingsMode === "current" && "bg-primary/15 text-primary",
+                          )}
+                        >
+                          重排现有
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1">
+                        <span className="text-[11px] text-muted-foreground">起始集数</span>
+                        <input
+                          data-episode-start-input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={episodeAddStartInput}
+                          onChange={(event) => setEpisodeAddStartInput(event.target.value)}
+                          onBlur={commitEpisodeAddSettings}
+                          className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary/60"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-[11px] text-muted-foreground">增加步长</span>
+                        <input
+                          data-episode-step-input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={episodeAddStepInput}
+                          onChange={(event) => setEpisodeAddStepInput(event.target.value)}
+                          onBlur={commitEpisodeAddSettings}
+                          className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary/60"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex h-9 items-center gap-2 overflow-hidden rounded-lg border border-border/70 bg-background/60 px-2">
+                      <div className="shrink-0 text-[11px] text-muted-foreground">预览</div>
+                      <div className="flex min-w-0 items-center gap-1 whitespace-nowrap">
+                        {episodeAddPreview.map((episodeNo) => (
+                          <span
+                            key={episodeNo}
+                            className="rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary"
+                          >
+                            第 {episodeNo} 集
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-episode-settings-apply
+                      onClick={() => {
+                        if (episodeSettingsMode === "current") {
+                          if (!applyEpisodeSettingsToCurrentEpisodes()) return;
+                        } else {
+                          commitEpisodeAddSettings();
+                        }
+                        setEpisodeSettingsOpen(false);
+                      }}
+                      className="mt-3 h-8 w-full rounded-md bg-primary text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    >
+                      应用
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Save status */}
-              <div className="ml-auto flex items-center gap-1.5 text-[11px]">
+              <div className="flex h-8 min-w-[5rem] shrink-0 items-start justify-start text-xs">
                 {saveState === "saving" && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary">
+                  <span className="inline-flex h-8 items-center gap-1 rounded-full bg-primary/10 px-3 text-primary">
                     <LoaderCircle className="h-3 w-3 animate-spin" />
                     保存中
                   </span>
                 )}
                 {saveState === "saved" && content && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-0.5 text-indigo-400">
+                  <span className="inline-flex h-8 items-center gap-1 rounded-full bg-indigo-500/10 px-3 text-indigo-400">
                     <CheckCircle2 className="h-3 w-3" />
                     已保存
                   </span>
                 )}
                 {saveState === "error" && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-destructive">
+                  <span className="inline-flex h-8 items-center gap-1 rounded-full bg-destructive/10 px-3 text-destructive">
                     <AlertCircle className="h-3 w-3" />
                     保存失败
                   </span>

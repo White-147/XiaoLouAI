@@ -276,8 +276,8 @@ public sealed class PostgresProjectSurfaceStore(NpgsqlDataSource dataSource, Pos
         var current = await GetScriptAsync(projectId, cancellationToken);
         var version = Convert.ToInt32(current["version"] ?? 1) + 1;
         var title = NormalizeBlank(request.Title) ?? current["title"]?.ToString() ?? "Draft script";
-        var content = request.Content ?? "";
-        var data = JsonSerializer.Serialize(new Dictionary<string, object?>
+        var content = request.Content ?? current.GetValueOrDefault("content")?.ToString() ?? "";
+        var scriptData = new Dictionary<string, object?>(current)
         {
             ["id"] = current["id"] ?? $"{projectId}:script",
             ["projectId"] = projectId,
@@ -285,7 +285,12 @@ public sealed class PostgresProjectSurfaceStore(NpgsqlDataSource dataSource, Pos
             ["title"] = title,
             ["content"] = content,
             ["updatedAt"] = now,
-        });
+        };
+        if (request.EpisodeScripts is not null)
+        {
+            scriptData["episodeScripts"] = request.EpisodeScripts;
+        }
+        var data = JsonSerializer.Serialize(scriptData);
 
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand(

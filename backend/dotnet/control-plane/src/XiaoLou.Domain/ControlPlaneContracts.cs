@@ -180,6 +180,7 @@ public sealed record ProjectScriptRequest : AccountScope
 {
     public string? Content { get; init; }
     public string? Title { get; init; }
+    public Dictionary<string, string>? EpisodeScripts { get; init; }
 }
 
 public sealed record ProjectTimelineRequest : AccountScope

@@ -198,6 +198,7 @@ export type Script = {
   version: number;
   title: string;
   content: string;
+  episodeScripts?: Record<string, string>;
   updatedAt: string;
 };
 
@@ -1958,8 +1959,12 @@ export async function getScript(projectId: string) {
   return projectsCanvasCreateService.getScript(projectId);
 }
 
-export async function updateScript(projectId: string, content: string) {
-  return projectsCanvasCreateService.updateScript(projectId, content);
+export async function updateScript(
+  projectId: string,
+  content: string,
+  options?: { episodeScripts?: Record<string, string> },
+) {
+  return projectsCanvasCreateService.updateScript(projectId, content, options);
 }
 
 export async function rewriteScript(projectId: string, instruction: string) {

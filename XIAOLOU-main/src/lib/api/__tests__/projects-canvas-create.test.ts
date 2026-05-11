@@ -259,7 +259,12 @@ describe("createProjectsCanvasCreateService", () => {
     await harness.service.getSettings("synthetic project/one");
     await harness.service.updateSettings("synthetic project/one", { tone: "Synthetic tone" });
     await harness.service.getScript("synthetic project/one");
-    await harness.service.updateScript("synthetic project/one", "Synthetic script");
+    await harness.service.updateScript("synthetic project/one", "Synthetic script", {
+      episodeScripts: {
+        "1": "Synthetic episode one",
+        "4": "Synthetic episode four",
+      },
+    });
     await harness.service.listAssets("synthetic project/one", "image_ref");
     await harness.service.getAsset("synthetic project/one", "asset/one");
     await harness.service.createAsset("synthetic project/one", {
@@ -303,7 +308,13 @@ describe("createProjectsCanvasCreateService", () => {
       ["/api/projects/synthetic%20project%2Fone/exports", "POST"],
     ]);
     expect(parseJsonBody(harness.calls[1])).toEqual({ tone: "Synthetic tone" });
-    expect(parseJsonBody(harness.calls[3])).toEqual({ content: "Synthetic script" });
+    expect(parseJsonBody(harness.calls[3])).toEqual({
+      content: "Synthetic script",
+      episodeScripts: {
+        "1": "Synthetic episode one",
+        "4": "Synthetic episode four",
+      },
+    });
     expect(parseJsonBody(harness.calls[6])).toEqual({
       assetType: "image_ref",
       name: "Synthetic asset",
