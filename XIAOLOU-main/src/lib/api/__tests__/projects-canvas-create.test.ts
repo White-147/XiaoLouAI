@@ -523,6 +523,27 @@ describe("createProjectsCanvasCreateService", () => {
         expect.objectContaining({ id: "kling-video", provider: "kling" }),
       ]),
     });
+    const videoCapabilities = await service.getCreateVideoCapabilities("video_edit");
+    const vertexGenerate = videoCapabilities.items.find((item) => item.id === "vertex:veo-3.1-generate-001");
+    const vertexFast = videoCapabilities.items.find((item) => item.id === "vertex:veo-3.1-fast-generate-001");
+    const vertexLite = videoCapabilities.items.find((item) => item.id === "vertex:veo-3.1-lite-generate-001");
+    expect(vertexGenerate?.inputModes.text_to_video).toMatchObject({
+      supportedDurations: ["4s", "6s", "8s"],
+      supportedAspectRatios: ["16:9", "9:16"],
+      supportedResolutions: ["1080p", "720p", "4k"],
+    });
+    expect(vertexFast?.inputModes.multi_param).toMatchObject({
+      supportedDurations: ["4s", "6s", "8s"],
+      supportedAspectRatios: ["16:9", "9:16"],
+      supportedResolutions: ["1080p", "720p", "4k"],
+      maxReferenceImages: 3,
+    });
+    expect(vertexLite?.inputModes.start_end_frame).toMatchObject({
+      supportedDurations: ["4s", "6s", "8s"],
+      supportedAspectRatios: ["16:9", "9:16"],
+      supportedResolutions: ["1080p", "720p"],
+    });
+    expect(vertexLite?.inputModes.multi_param).toBeUndefined();
     await expect(
       service.getCreateCreditQuote("create_image_generate", {
         projectId: "synthetic-project",
@@ -565,6 +586,12 @@ describe("createProjectsCanvasCreateService", () => {
       referenceVideoUrls: ["https://synthetic.invalid/reference.mp4"],
       idempotencyKey: "synthetic-video-key",
     });
+    await service.generateCreateVideos({
+      prompt: "Synthetic Vertex video prompt",
+      model: "vertex:veo-3.1-lite-generate-001",
+      referenceImageUrl: "data:image/jpeg;base64,AAA=",
+      idempotencyKey: "synthetic-vertex-video-key",
+    });
 
     expect(calls.map((call) => [call.path, call.init?.method ?? "GET"])).toEqual([
       ["/api/create/images?accountOwnerType=user&accountOwnerId=synthetic-actor", "GET"],
@@ -598,6 +625,21 @@ describe("createProjectsCanvasCreateService", () => {
           prompt: "Synthetic video prompt",
           model: "synthetic-video-model",
           referenceVideoUrls: ["https://synthetic.invalid/reference.mp4"],
+        },
+      },
+      {
+        jobType: "create_video_generate",
+        domain: "create",
+        lane: "account-media",
+        providerRoute: "closed-api-vertex",
+        idempotencyKey: "synthetic-vertex-video-key",
+        actionCode: "create_video_generate",
+        inputSummary: "Synthetic Vertex video prompt",
+        payload: {
+          prompt: "Synthetic Vertex video prompt",
+          model: "vertex:veo-3.1-lite-generate-001",
+          referenceImageUrl: "data:image/jpeg;base64,AAA=",
+          firstFrameUrl: "data:image/jpeg;base64,AAA=",
         },
       },
     ]);

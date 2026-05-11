@@ -25,6 +25,7 @@ import { useImageCapabilities } from '../../hooks/useMediaCapabilities';
 import { useFloatingPanelOffset } from '../../hooks/useFloatingPanelOffset';
 import { ReferencePromptInput, type PromptImageReference } from './ReferencePromptInput';
 import { useCreateCreditQuote } from '../../../../shared/useCreateCreditQuote';
+import { parseGenerationError } from '../../../../../../lib/generation-error';
 
 interface NodeControlsProps {
     data: NodeData;
@@ -53,6 +54,13 @@ const IMAGE_RATIOS = [
 ];
 
 const MAX_BATCH_COUNT = 10;
+
+function formatGenerationErrorMessage(value: unknown): string | undefined {
+    const raw = String(value || '').trim();
+    if (!raw) return undefined;
+    const parsed = parseGenerationError({ message: raw });
+    return parsed.category === 'unknown' ? raw : parsed.message;
+}
 
 type CanvasImageModelCompat = {
     id: string;
@@ -256,6 +264,7 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
     const [imageSourcePopupPosition, setImageSourcePopupPosition] = useState<{ left: number; top: number } | null>(null);
     const promptMinHeight = isPanelExpanded ? 540 : data.isPromptExpanded ? 300 : 96;
     const promptMaxHeight = isPanelExpanded ? 840 : data.isPromptExpanded ? 420 : 224;
+    const displayErrorMessage = formatGenerationErrorMessage(data.errorMessage);
 
     const [localModels, setLocalModels] = useState<LocalModel[]>([]);
     const [isLoadingLocalModels, setIsLoadingLocalModels] = useState(false);
@@ -841,12 +850,12 @@ const NodeControlsComponent: React.FC<NodeControlsProps> = ({
                     </div>
                 )}
 
-                {data.errorMessage && (
+                {displayErrorMessage && (
                     <div className="mx-4 mb-2 text-red-400 text-xs p-2 bg-red-900/20 rounded-lg border border-red-900/50">
-                        {data.errorMessage}
+                        {displayErrorMessage}
                     </div>
                 )}
-                {!canGenerate && generateDisabledReason && !data.errorMessage && (
+                {!canGenerate && generateDisabledReason && !displayErrorMessage && (
                     <div
                         className={`mx-4 mb-2 flex items-start gap-2 rounded-xl border px-3 py-2 text-[11px] leading-5 ${
                             isDark

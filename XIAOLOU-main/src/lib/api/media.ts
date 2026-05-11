@@ -18,6 +18,7 @@ type ControlMediaRequestScope = {
 type ControlMediaBeginResponse = {
   media_object_id?: string;
   mediaObjectId?: string;
+  bucket?: string;
   upload_session_id?: string;
   uploadSessionId?: string;
   object_key?: string;
@@ -88,6 +89,23 @@ function fileNameForDataUrl(kind: string, nameHint: string, contentType: string)
   return `${toObjectKeySegment(nameHint || kind, "upload")}.${ext}`;
 }
 
+function buildStableLocalObjectContentPath(bucket: string, objectKey: string) {
+  const normalizedBucket = String(bucket || "").trim();
+  const normalizedObjectKey = String(objectKey || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join("/");
+
+  if (!normalizedBucket || !normalizedObjectKey) {
+    return "";
+  }
+
+  return `/api/media/object-content/${encodeURIComponent(normalizedBucket)}/${normalizedObjectKey}`;
+}
+
 export function createMediaService({
   controlApiJsonRequest,
   getCurrentActorId,
@@ -127,6 +145,8 @@ export function createMediaService({
     const mediaObjectId = String(begin.media_object_id || begin.mediaObjectId || "");
     const uploadSessionId = String(begin.upload_session_id || begin.uploadSessionId || "");
     const uploadUrl = String(begin.upload_url || begin.uploadUrl || "");
+    const bucket = String(begin.bucket || "");
+    const stableReadPath = buildStableLocalObjectContentPath(bucket, objectKey);
     if (!mediaObjectId || !uploadSessionId || !uploadUrl) {
       throw createApiRequestError("Control API did not return a usable media upload session", {
         code: "MEDIA_UPLOAD_SESSION_INVALID",
@@ -186,7 +206,7 @@ export function createMediaService({
       sizeBytes: file.size,
       contentType,
       url: signedReadUrl,
-      urlPath: signedReadUrl,
+      urlPath: stableReadPath || signedReadUrl,
       mediaObjectId,
       objectKey,
       signedReadUrl,

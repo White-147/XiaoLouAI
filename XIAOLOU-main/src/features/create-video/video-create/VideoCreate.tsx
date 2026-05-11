@@ -353,6 +353,10 @@ const GENERAL_DURATION_OPTIONS = ["3s", "5s"] as const;
 const FIXED_DURATION_OPTIONS = ["8s"] as const;
 const GENERAL_ASPECT_RATIO_OPTIONS = ["16:9", "1:1", "9:16"] as const;
 const FIXED_ASPECT_RATIO_OPTIONS = ["16:9"] as const;
+const VERTEX_VEO_31_DURATIONS = ["4s", "6s", "8s"];
+const VERTEX_VEO_31_ASPECT_RATIOS = ["16:9", "9:16"];
+const VERTEX_VEO_31_RESOLUTIONS = ["1080p", "720p", "4k"];
+const VERTEX_VEO_31_LITE_RESOLUTIONS = ["1080p", "720p"];
 
 function createImageToVideoCapabilitySet(
   overrides: Partial<MediaCapabilitySet> = {},
@@ -378,8 +382,29 @@ function createImageToVideoCapabilitySet(
     defaultDuration: overrides.defaultDuration || supportedDurations[0] || null,
     defaultAspectRatio: overrides.defaultAspectRatio || supportedAspectRatios[0] || null,
     defaultResolution: overrides.defaultResolution || supportedResolutions[0] || null,
+    ...(overrides.maxReferenceImages !== undefined ? { maxReferenceImages: overrides.maxReferenceImages } : {}),
     note: overrides.note || null,
   };
+}
+
+function createVertexVeo31CapabilitySet(
+  status: MediaModelStatus,
+  supportedResolutions = VERTEX_VEO_31_RESOLUTIONS,
+  overrides: Partial<MediaCapabilitySet> = {},
+): MediaCapabilitySet {
+  return createImageToVideoCapabilitySet({
+    status,
+    supportedDurations: VERTEX_VEO_31_DURATIONS,
+    supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+    supportedResolutions,
+    durationControl: "selectable",
+    aspectRatioControl: "selectable",
+    resolutionControl: "selectable",
+    defaultDuration: "8s",
+    defaultAspectRatio: "16:9",
+    defaultResolution: "720p",
+    ...overrides,
+  });
 }
 
 function inferVideoProvider(id: string): MediaModelCapability["provider"] {
@@ -439,12 +464,101 @@ const FALLBACK_IMAGE_TO_VIDEO_CAPABILITIES: VideoCapability[] = [
   // ── Official Vertex AI Veo models — "vertex:" prefix; name ends with "+" ────
   // Excluded: veo-3.1-generate-preview / veo-3.1-fast-generate-preview (removed 2026-04-02)
   // Excluded: "Veo 3.1 4K" as a model (4K is a resolution param, not a separate model)
-  fallbackVideoModel({ id: "vertex:veo-3.1-generate-001", label: "Veo 3.1+", status: "stable", note: "Veo 3.1 正式版，直接调用 Vertex AI（需配置 VERTEX_PROJECT_ID、VERTEX_GCS_BUCKET 及认证凭据）。", supportsTextToVideo: true, supportsSingleReference: true, inputModes: { text_to_video: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["5s", "8s"], supportedAspectRatios: ["16:9", "9:16"], supportedResolutions: ["1080p", "720p", "480p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "8s", defaultAspectRatio: "16:9", defaultResolution: "720p" }), single_reference: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["5s", "8s"], supportedAspectRatios: ["16:9", "9:16"], supportedResolutions: ["1080p", "720p", "480p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "8s", defaultAspectRatio: "16:9", defaultResolution: "720p" }) } }),
-  fallbackVideoModel({ id: "vertex:veo-3.1-fast-generate-001", label: "Veo 3.1 Fast+", status: "stable", note: "Veo 3.1 Fast 正式版，速度更快，直接调用 Vertex AI。", supportsTextToVideo: true, supportsSingleReference: true, inputModes: { text_to_video: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["5s", "8s"], supportedAspectRatios: ["16:9", "9:16"], supportedResolutions: ["1080p", "720p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "8s", defaultAspectRatio: "16:9", defaultResolution: "720p" }), single_reference: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["5s", "8s"], supportedAspectRatios: ["16:9", "9:16"], supportedResolutions: ["1080p", "720p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "8s", defaultAspectRatio: "16:9", defaultResolution: "720p" }) } }),
-  fallbackVideoModel({ id: "vertex:veo-3.1-lite-generate-001", label: "Veo 3.1 Lite+", status: "preview", note: "Veo 3.1 Lite，Preview 阶段。当前仅开放文生视频；图生/首尾帧能力待官方正式确认后再开放。", supportsTextToVideo: true, supportsSingleReference: false, inputModes: { text_to_video: createImageToVideoCapabilitySet({ status: "preview", supportedDurations: ["5s", "8s"], supportedAspectRatios: ["16:9", "9:16"], supportedResolutions: ["720p", "480p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "5s", defaultAspectRatio: "16:9", defaultResolution: "720p" }) } }),
+  fallbackVideoModel({
+    id: "vertex:veo-3.1-generate-001",
+    label: "Veo 3.1+",
+    provider: "google-vertex",
+    status: "stable",
+    note: "Veo 3.1 正式版，直接调用 Vertex AI（需配置 VERTEX_PROJECT_ID、VERTEX_GCS_BUCKET 及认证凭据）。",
+    supportsTextToVideo: true,
+    supportsSingleReference: true,
+    supportsStartEndFrame: true,
+    supportsMultiReference: true,
+    maxReferenceImages: 3,
+    maxReferenceImagesSource: "official",
+    inputModes: {
+      text_to_video: createVertexVeo31CapabilitySet("stable"),
+      single_reference: createVertexVeo31CapabilitySet("stable"),
+      start_end_frame: createVertexVeo31CapabilitySet("stable"),
+      multi_param: createVertexVeo31CapabilitySet("stable", VERTEX_VEO_31_RESOLUTIONS, {
+        maxReferenceImages: 3,
+      }),
+    },
+  }),
+  fallbackVideoModel({
+    id: "vertex:veo-3.1-fast-generate-001",
+    label: "Veo 3.1 Fast+",
+    provider: "google-vertex",
+    status: "stable",
+    note: "Veo 3.1 Fast 正式版，速度更快，直接调用 Vertex AI。",
+    supportsTextToVideo: true,
+    supportsSingleReference: true,
+    supportsStartEndFrame: true,
+    supportsMultiReference: true,
+    maxReferenceImages: 3,
+    maxReferenceImagesSource: "official",
+    inputModes: {
+      text_to_video: createVertexVeo31CapabilitySet("stable"),
+      single_reference: createVertexVeo31CapabilitySet("stable"),
+      start_end_frame: createVertexVeo31CapabilitySet("stable"),
+      multi_param: createVertexVeo31CapabilitySet("stable", VERTEX_VEO_31_RESOLUTIONS, {
+        maxReferenceImages: 3,
+      }),
+    },
+  }),
+  fallbackVideoModel({
+    id: "vertex:veo-3.1-lite-generate-001",
+    label: "Veo 3.1 Lite+",
+    provider: "google-vertex",
+    status: "preview",
+    note: "Veo 3.1 Lite Preview，按 Vertex AI 官方能力开放文生、单参考图和首尾帧；参考资产图不支持。",
+    supportsTextToVideo: true,
+    supportsSingleReference: true,
+    supportsStartEndFrame: true,
+    supportsMultiReference: false,
+    inputModes: {
+      text_to_video: createVertexVeo31CapabilitySet("preview", VERTEX_VEO_31_LITE_RESOLUTIONS),
+      single_reference: createVertexVeo31CapabilitySet("preview", VERTEX_VEO_31_LITE_RESOLUTIONS),
+      start_end_frame: createVertexVeo31CapabilitySet("preview", VERTEX_VEO_31_LITE_RESOLUTIONS),
+    },
+  }),
 ];
 
 const FALLBACK_MULTI_PARAM_CAPABILITIES: VideoCapability[] = [
+  fallbackVideoModel({
+    id: "vertex:veo-3.1-generate-001",
+    label: "Veo 3.1+",
+    provider: "google-vertex",
+    status: "stable",
+    note: "Vertex AI 官方参考资产图能力，最多 3 张 asset reference image。",
+    supportsTextToVideo: false,
+    supportsSingleReference: false,
+    supportsMultiReference: true,
+    maxReferenceImages: 3,
+    maxReferenceImagesSource: "official",
+    inputModes: {
+      multi_param: createVertexVeo31CapabilitySet("stable", VERTEX_VEO_31_RESOLUTIONS, {
+        maxReferenceImages: 3,
+      }),
+    },
+  }),
+  fallbackVideoModel({
+    id: "vertex:veo-3.1-fast-generate-001",
+    label: "Veo 3.1 Fast+",
+    provider: "google-vertex",
+    status: "stable",
+    note: "Vertex AI 官方参考资产图能力，最多 3 张 asset reference image。",
+    supportsTextToVideo: false,
+    supportsSingleReference: false,
+    supportsMultiReference: true,
+    maxReferenceImages: 3,
+    maxReferenceImagesSource: "official",
+    inputModes: {
+      multi_param: createVertexVeo31CapabilitySet("stable", VERTEX_VEO_31_RESOLUTIONS, {
+        maxReferenceImages: 3,
+      }),
+    },
+  }),
   fallbackVideoModel({ id: "pixverse-c1", label: "PixVerse C1 Fusion", status: "experimental", note: "PixVerse C1 Fusion 静态 fallback：按官方 reference-to-video 规则支持最多 3 张参考图、5s/8s、360p/540p/720p/1080p 与 8 种显式画幅。", supportsTextToVideo: false, supportsSingleReference: false, supportsMultiReference: true, maxReferenceImages: 3, maxReferenceImagesSource: "official", inputModes: { multi_param: createImageToVideoCapabilitySet({ status: "experimental", supportedDurations: ["5s", "8s"], supportedAspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "2:3", "3:2", "21:9"], supportedResolutions: ["360p", "540p", "720p", "1080p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "5s", defaultAspectRatio: "16:9", defaultResolution: "720p", maxReferenceImages: 3 }) } }),
   fallbackVideoModel({ id: "veo3.1-components", label: "veo3.1-components", status: "stable", note: "当前已验证稳定的 Yunwu components 多参考视频基线模型；现阶段稳定验证通过的是 3 张参考图组合。", supportsTextToVideo: false, supportsSingleReference: false, supportsMultiReference: true, maxReferenceImages: 3, maxReferenceImagesSource: "integrated", inputModes: { multi_param: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["8s"], supportedAspectRatios: ["16:9"], supportedResolutions: ["720p"], durationControl: "fixed", aspectRatioControl: "fixed", resolutionControl: "fixed", defaultDuration: "8s", defaultAspectRatio: "16:9", defaultResolution: "720p", note: "当前固定走 Yunwu /v1/video/create；现阶段稳定验证通过的是 3 张参考图，并优先保留 scene / character / prop。4 张及以上提交当前更容易被 provider 策略拦截。" }) } }),
   fallbackVideoModel({ id: "veo_3_1-components", label: "veo_3_1-components", status: "experimental", note: "已按 Yunwu 官方 components 多参考视频模型接入，待继续验证真实效果。", supportsTextToVideo: false, supportsSingleReference: false, supportsMultiReference: true, maxReferenceImages: 7, maxReferenceImagesSource: "integrated", inputModes: { multi_param: createImageToVideoCapabilitySet({ status: "experimental", supportedDurations: ["8s"], supportedAspectRatios: ["16:9"], supportedResolutions: ["720p"], durationControl: "fixed", aspectRatioControl: "fixed", resolutionControl: "fixed", defaultDuration: "8s", defaultAspectRatio: "16:9", defaultResolution: "720p" }) } }),
@@ -728,8 +842,38 @@ const FALLBACK_START_END_CAPABILITIES: VideoCapability[] = [
   fallbackVideoModel({ id: "kling-video", label: "kling-video", status: "stable", note: "已用真实 Yunwu 首尾帧任务复测通过；当前保留为首尾帧默认模型。接口可快速受理，但最终出片耗时较长（实测约 5-6 分钟）。", supportsTextToVideo: false, supportsSingleReference: false, supportsStartEndFrame: true, inputModes: { start_end_frame: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["5s", "10s"], supportedAspectRatios: ["16:9"], supportedResolutions: ["自动"], durationControl: "selectable", aspectRatioControl: "fixed", resolutionControl: "fixed", defaultDuration: "5s", defaultAspectRatio: "16:9", defaultResolution: "自动", note: "已通过真实首尾帧任务验证并成功出片；当前保留官方已确认可用的 5s / 10s 与 16:9。" }) } }),
   fallbackVideoModel({ id: "doubao-seedance-2-0-260128", label: "Seedance 2.0", status: "stable", note: "字节跳动 Seedance 2.0 首尾帧模式，adaptive 画幅，4-15s，720p/480p。", supportsTextToVideo: false, supportsSingleReference: false, supportsStartEndFrame: true, inputModes: { start_end_frame: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["4s", "5s", "6s", "7s", "8s", "9s", "10s", "11s", "12s", "13s", "14s", "15s"], supportedAspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"], supportedResolutions: ["720p", "480p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "5s", defaultAspectRatio: "adaptive", defaultResolution: "720p" }) } }),
   // Vertex Veo first+last frame support
-  fallbackVideoModel({ id: "vertex:veo-3.1-generate-001", label: "Veo 3.1+", status: "stable", supportsTextToVideo: false, supportsSingleReference: false, supportsStartEndFrame: true, inputModes: { start_end_frame: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["5s", "8s"], supportedAspectRatios: ["16:9", "9:16"], supportedResolutions: ["1080p", "720p", "480p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "8s", defaultAspectRatio: "16:9", defaultResolution: "720p" }) } }),
-  fallbackVideoModel({ id: "vertex:veo-3.1-fast-generate-001", label: "Veo 3.1 Fast+", status: "stable", supportsTextToVideo: false, supportsSingleReference: false, supportsStartEndFrame: true, inputModes: { start_end_frame: createImageToVideoCapabilitySet({ status: "stable", supportedDurations: ["5s", "8s"], supportedAspectRatios: ["16:9", "9:16"], supportedResolutions: ["1080p", "720p"], durationControl: "selectable", aspectRatioControl: "selectable", resolutionControl: "selectable", defaultDuration: "8s", defaultAspectRatio: "16:9", defaultResolution: "720p" }) } }),
+  fallbackVideoModel({
+    id: "vertex:veo-3.1-generate-001",
+    label: "Veo 3.1+",
+    provider: "google-vertex",
+    status: "stable",
+    supportsTextToVideo: false,
+    supportsSingleReference: false,
+    supportsStartEndFrame: true,
+    inputModes: { start_end_frame: createVertexVeo31CapabilitySet("stable") },
+  }),
+  fallbackVideoModel({
+    id: "vertex:veo-3.1-fast-generate-001",
+    label: "Veo 3.1 Fast+",
+    provider: "google-vertex",
+    status: "stable",
+    supportsTextToVideo: false,
+    supportsSingleReference: false,
+    supportsStartEndFrame: true,
+    inputModes: { start_end_frame: createVertexVeo31CapabilitySet("stable") },
+  }),
+  fallbackVideoModel({
+    id: "vertex:veo-3.1-lite-generate-001",
+    label: "Veo 3.1 Lite+",
+    provider: "google-vertex",
+    status: "preview",
+    supportsTextToVideo: false,
+    supportsSingleReference: false,
+    supportsStartEndFrame: true,
+    inputModes: {
+      start_end_frame: createVertexVeo31CapabilitySet("preview", VERTEX_VEO_31_LITE_RESOLUTIONS),
+    },
+  }),
 ];
 
 function resolveImageToVideoInputMode(referenceUrl?: string | null): VideoInputMode {

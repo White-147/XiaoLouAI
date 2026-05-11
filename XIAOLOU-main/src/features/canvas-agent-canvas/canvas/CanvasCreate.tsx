@@ -40,6 +40,7 @@ import { isRetiredLegacyMediaUrl } from "../../../lib/media-url-policy";
 import { useCurrentProjectId } from "../../../lib/session";
 import { useTheme } from "../../../lib/theme";
 import { generateGridThumbnail } from "../../../lib/grid-thumbnail";
+import { parseGenerationError } from "../../../lib/generation-error";
 import {
   setCanvasHostServices,
   clearCanvasHostServices,
@@ -238,6 +239,22 @@ function isTerminalGenerationLookupError(err: unknown) {
   );
 }
 
+function shouldUseProjectAssetFallback(projectId?: string | null) {
+  const normalized = String(projectId || "").trim();
+  return Boolean(normalized) && !/^(agent_)?canvas_/i.test(normalized);
+}
+
+function describeTaskFailure(
+  task: Pick<Awaited<ReturnType<typeof getTask>>, "outputSummary" | "currentStage">,
+  fallback: string,
+) {
+  const reason =
+    String(task.outputSummary || "").trim() ||
+    String(task.currentStage || "").trim() ||
+    "";
+  return reason ? parseGenerationError(new Error(reason)).message : fallback;
+}
+
 async function waitForCreateImageResult(taskId: string) {
   const deadline = Date.now() + CREATE_IMAGE_TIMEOUT_MS;
   let lastStatus = "queued";
@@ -253,7 +270,7 @@ async function waitForCreateImageResult(taskId: string) {
     }
     lastStatus = task.status || lastStatus;
     if (["failed", "cancelled", "canceled"].includes(task.status)) {
-      throw new Error(task.outputSummary || task.currentStage || "图片创作任务失败。");
+      throw new Error(describeTaskFailure(task, "图片创作任务失败。"));
     }
     try {
       const response = await listCreateImages();
@@ -285,7 +302,7 @@ async function waitForCreateVideoResult(taskId: string, projectId?: string) {
     }
     lastStatus = task.status || lastStatus;
     if (["failed", "cancelled", "canceled"].includes(task.status)) {
-      throw new Error(task.outputSummary || task.currentStage || "视频创作任务失败。");
+      throw new Error(describeTaskFailure(task, "视频创作任务失败。"));
     }
     let matched:
       | Awaited<ReturnType<typeof listCreateVideos>>["items"][number]
@@ -301,7 +318,7 @@ async function waitForCreateVideoResult(taskId: string, projectId?: string) {
       if (isTerminalGenerationLookupError(err)) throw err;
       console.warn("[CanvasCreate] waitForCreateVideoResult transient listCreateVideos failure:", err);
     }
-    if (projectId) {
+    if (shouldUseProjectAssetFallback(projectId)) {
       try {
         const assetResponse = await listAssets(projectId, "video_ref");
         const matchedAsset = assetResponse.items.find(
@@ -318,8 +335,7 @@ async function waitForCreateVideoResult(taskId: string, projectId?: string) {
           };
         }
       } catch (err) {
-        if (isTerminalGenerationLookupError(err)) throw err;
-        console.warn("[CanvasCreate] waitForCreateVideoResult transient listAssets failure:", err);
+        console.warn("[CanvasCreate] waitForCreateVideoResult optional listAssets failure:", err);
       }
     }
     if (task.status === "succeeded" && ++succeededWithoutUrl > 6) {
@@ -378,7 +394,7 @@ async function recoverImageGeneration(taskId: string): Promise<HostRecoverGenera
     if (["failed", "cancelled", "canceled"].includes(task.status || "")) {
       return {
         status: "failed",
-        error: task.outputSummary || task.currentStage || "图片创作任务失败。",
+        error: describeTaskFailure(task, "图片创作任务失败。"),
       };
     }
   } catch (err) {
@@ -421,7 +437,7 @@ async function recoverVideoGeneration(
     if (["failed", "cancelled", "canceled"].includes(task.status || "")) {
       return {
         status: "failed",
-        error: task.outputSummary || task.currentStage || "视频创作任务失败。",
+        error: describeTaskFailure(task, "视频创作任务失败。"),
       };
     }
   } catch (err) {
@@ -449,7 +465,7 @@ async function recoverVideoGeneration(
     }
   } catch { /* fall through */ }
 
-  if (projectId) {
+  if (shouldUseProjectAssetFallback(projectId)) {
     try {
       const assetResponse = await listAssets(projectId, "video_ref");
       const matchedAsset = assetResponse.items.find(

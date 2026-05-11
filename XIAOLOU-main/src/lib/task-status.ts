@@ -1,4 +1,5 @@
 import type { Task } from "./api";
+import { parseGenerationError } from "./generation-error";
 
 const FAILED_STATUSES = new Set(["failed", "cancelled", "canceled", "error"]);
 const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "retry_waiting", "pending", "processing"]);
@@ -73,5 +74,6 @@ export function getTaskFailureReason(
     String(task.outputSummary || "").trim() ||
     String(task.currentStage || "").trim() ||
     "";
-  return reason || "任务失败，但未记录具体原因。请查看服务器日志。";
+  if (!reason) return "任务失败，但未记录具体原因。请查看服务器日志。";
+  return parseGenerationError(new Error(reason)).message;
 }

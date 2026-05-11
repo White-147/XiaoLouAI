@@ -9,9 +9,9 @@ import { NodeData, NodeType } from '../../../types';
 import { useVideoSettings, ReferenceType, type VideoMaterialTabId } from './useVideoSettings';
 import { AssetLibraryModal } from './AssetLibraryModal';
 import { GoogleIcon, KlingIcon, HailuoIcon } from '../../icons/BrandIcons';
-import { buildCanvasApiUrl, resolveCanvasMediaUrl } from '../../../integrations/twitcanvaRuntimePaths';
 import { useFloatingPanelOffset } from '../../../hooks/useFloatingPanelOffset';
 import { ReferencePromptInput, type PromptImageReference } from '../ReferencePromptInput';
+import { uploadAsset } from '../../../services/assetService';
 
 export interface VideoSettingsPanelProps {
     data: NodeData;
@@ -86,6 +86,22 @@ function getNodeMediaLabel(type: 'video' | 'image' | 'audio') {
     if (type === 'video') return '视频';
     if (type === 'audio') return '音频';
     return '图片';
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = String(reader.result || '');
+            if (!dataUrl.startsWith('data:')) {
+                reject(new Error('Invalid file data'));
+                return;
+            }
+            resolve(dataUrl);
+        };
+        reader.onerror = () => reject(new Error('Read failed'));
+        reader.readAsDataURL(file);
+    });
 }
 
 const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
@@ -209,35 +225,13 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
         if (!files || files.length === 0) return;
         for (const file of Array.from(files)) {
             try {
-                const reader = new FileReader();
-                const base64 = await new Promise<string>((resolve, reject) => {
-                    reader.onload = () => resolve((reader.result as string).split(',')[1]);
-                    reader.onerror = () => reject(new Error('Read failed'));
-                    reader.readAsDataURL(file);
-                });
                 const ext = file.name.split('.').pop()?.toLowerCase() || '';
                 const isVideo = ['mp4', 'mov', 'webm', 'avi'].includes(ext);
                 const isAudio = ['mp3', 'wav', 'ogg', 'aac', 'm4a', 'flac'].includes(ext);
                 const mediaType = isVideo ? 'video' : isAudio ? 'audio' : 'image';
+                const dataUrl = await readFileAsDataUrl(file);
+                const assetUrl = await uploadAsset(dataUrl, mediaType, `video-reference:${category}:${file.name}`);
 
-                const response = await fetch(buildCanvasApiUrl('/library'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: file.name,
-                        category,
-                        sourceUrl: `data:${file.type};base64,${base64}`,
-                        meta: { type: mediaType },
-                    }),
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Upload failed: ${response.status}`);
-                }
-
-                const created = await response.json();
-                const createdAsset = (created && typeof created === 'object' && created.asset) ? created.asset : created;
-                const assetUrl = resolveCanvasMediaUrl(String(createdAsset?.url || ''));
                 if (assetUrl) {
                     onAttachAsset?.(data.id, assetUrl, mediaType);
                 }
@@ -260,26 +254,8 @@ const VideoSettingsPanelComponent: React.FC<VideoSettingsPanelProps> = ({
         }
         setFrameSlotUploading(slot);
         try {
-            const reader = new FileReader();
-            const base64 = await new Promise<string>((resolve, reject) => {
-                reader.onload = () => resolve((reader.result as string).split(',')[1]);
-                reader.onerror = () => reject(new Error('Read failed'));
-                reader.readAsDataURL(file);
-            });
-            const response = await fetch(buildCanvasApiUrl('/library'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: file.name,
-                    category: slot === 'start' ? 'FirstFrame' : 'LastFrame',
-                    sourceUrl: `data:${file.type};base64,${base64}`,
-                    meta: { type: 'image' },
-                }),
-            });
-            if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
-            const created = await response.json();
-            const createdAsset = (created && typeof created === 'object' && created.asset) ? created.asset : created;
-            const assetUrl = resolveCanvasMediaUrl(String(createdAsset?.url || ''));
+            const dataUrl = await readFileAsDataUrl(file);
+            const assetUrl = await uploadAsset(dataUrl, 'image', `video-${slot}-frame:${file.name}`);
             if (assetUrl) {
                 onSetFrameSlot?.(data.id, assetUrl, slot);
             }

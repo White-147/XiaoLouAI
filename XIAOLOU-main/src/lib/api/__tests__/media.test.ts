@@ -95,6 +95,7 @@ describe("createMediaService", () => {
         if (path === "/api/media/upload-begin") {
           return {
             media_object_id: "synthetic-media-object",
+            bucket: "xiaolou-staging",
             upload_session_id: "synthetic-upload-session",
             upload_url: "https://synthetic-storage.example/upload/media-object",
           };
@@ -121,7 +122,8 @@ describe("createMediaService", () => {
       sizeBytes: 20,
       contentType: "image/png",
       url: signedReadUrl,
-      urlPath: signedReadUrl,
+      urlPath:
+        "/api/media/object-content/xiaolou-staging/media/frontend/synthetic-actor-example/synthetic-media-client-Synthetic-Portrait-01.png",
       mediaObjectId: "synthetic-media-object",
       objectKey: "media/frontend/synthetic-actor-example/synthetic-media-client-Synthetic-Portrait-01.png",
       signedReadUrl,

@@ -18,6 +18,7 @@ builder.Services.AddSingleton<IObjectStorageSigner, ObjectStorageSigner>();
 builder.Services.AddSingleton(sp => VertexOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
 builder.Services.AddSingleton<VertexAccessTokenProvider>();
 builder.Services.AddSingleton<VertexGeminiImageClient>();
+builder.Services.AddSingleton<VertexVeoVideoClient>();
 builder.Services.AddSingleton<LocalObjectStorageWriter>();
 builder.Services.AddHostedService<ClosedApiWorkerService>();
 

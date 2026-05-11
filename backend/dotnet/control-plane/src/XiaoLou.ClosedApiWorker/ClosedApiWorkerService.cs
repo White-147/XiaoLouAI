@@ -14,6 +14,7 @@ internal sealed class ClosedApiWorkerService(
     PostgresJobNotificationListener listener,
     IOptions<ClosedApiWorkerOptions> options,
     VertexGeminiImageClient vertexImages,
+    VertexVeoVideoClient vertexVideos,
     LocalObjectStorageWriter storageWriter,
     ILogger<ClosedApiWorkerService> logger,
     IHostApplicationLifetime lifetime) : BackgroundService
@@ -105,6 +106,13 @@ internal sealed class ClosedApiWorkerService(
                 return;
             }
 
+            if (ClosedApiJobPayload.TryReadVideoJob(job, out var videoRequest)
+                && VertexModelRouting.IsVertexVideoModel(videoRequest.Model))
+            {
+                await CompleteVertexVideoJobAsync(jobId, worker, videoRequest, cancellationToken);
+                return;
+            }
+
             await CompleteCompatibilityStubAsync(jobId, worker, job, cancellationToken);
         }
         catch (VertexProviderException ex)
@@ -170,6 +178,85 @@ internal sealed class ClosedApiWorkerService(
             cancellationToken);
     }
 
+    private async Task CompleteVertexVideoJobAsync(
+        Guid jobId,
+        ClosedApiWorkerOptions worker,
+        ClosedApiVideoJobRequest videoRequest,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation(
+            "Generating Vertex Veo video for job {JobId} with model {Model}.",
+            jobId,
+            videoRequest.Model);
+
+        var generated = await vertexVideos.GenerateVideoAsync(
+            videoRequest,
+            token => jobs.HeartbeatAsync(jobId, worker.WorkerId, worker.LeaseSeconds, token),
+            cancellationToken);
+        var stored = await storageWriter.WriteGeneratedMediaAsync(
+            jobId,
+            videoRequest.Model,
+            generated.MimeType,
+            generated.Bytes,
+            cancellationToken);
+
+        var thumbnailUrl = !string.IsNullOrWhiteSpace(videoRequest.FirstFrameUrl)
+            ? videoRequest.FirstFrameUrl
+            : videoRequest.ReferenceImageUrls.FirstOrDefault()
+                ?? videoRequest.MultiReferenceImages.Values.SelectMany(value => value).FirstOrDefault();
+
+        await jobs.SucceedAsync(
+            jobId,
+            JsonSerializer.Serialize(new
+            {
+                worker = worker.WorkerId,
+                kind = "closed-api",
+                provider = "google-vertex",
+                providerRoute = worker.ProviderRoute,
+                status = "succeeded",
+                executionMode = ClosedApiWorkerOptions.ExecutionMode,
+                runtimeBoundary = ClosedApiWorkerOptions.RuntimeBoundary,
+                adapterStatus = "vertex_veo_video_connected",
+                isStubbed = false,
+                isSimulated = false,
+                jobType = videoRequest.JobType,
+                model = videoRequest.Model,
+                rawModel = VertexModelRouting.StripVertexPrefix(videoRequest.Model),
+                prompt = videoRequest.Prompt,
+                duration = videoRequest.Duration,
+                aspectRatio = videoRequest.AspectRatio,
+                resolution = videoRequest.Resolution,
+                generateAudio = videoRequest.GenerateAudio,
+                videoMode = videoRequest.VideoMode,
+                firstFrameUrl = videoRequest.FirstFrameUrl,
+                lastFrameUrl = videoRequest.LastFrameUrl,
+                motionReferenceVideoUrl = videoRequest.MotionReferenceVideoUrl,
+                referenceImageUrls = videoRequest.ReferenceImageUrls,
+                referenceImages = videoRequest.ReferenceImages.Select(reference => new
+                {
+                    source = reference.Source,
+                    referenceType = reference.ReferenceType,
+                }),
+                multiReferenceImages = videoRequest.MultiReferenceImages,
+                referenceVideoUrls = videoRequest.ReferenceVideoUrls,
+                referenceAudioUrls = videoRequest.ReferenceAudioUrls,
+                vertexOperationName = generated.OperationName,
+                vertexGcsUri = generated.GcsUri,
+                raiMediaFilteredCount = generated.RaiMediaFilteredCount,
+                raiMediaFilteredReasons = generated.RaiMediaFilteredReasons,
+                videoUrl = stored.Url,
+                resultUrl = stored.Url,
+                thumbnailUrl,
+                mimeType = stored.MimeType,
+                bucket = stored.Bucket,
+                objectKey = stored.ObjectKey,
+                urlExpiresAt = stored.ExpiresAt,
+                outputSummary = "Vertex Veo video generation completed.",
+                completedAt = DateTimeOffset.UtcNow,
+            }),
+            cancellationToken);
+    }
+
     private async Task CompleteCompatibilityStubAsync(
         Guid jobId,
         ClosedApiWorkerOptions worker,
@@ -190,7 +277,7 @@ internal sealed class ClosedApiWorkerService(
                 isStubbed = true,
                 isSimulated = true,
                 jobType = job.TryGetValue("job_type", out var jobType) ? jobType?.ToString() : null,
-                contract = "ClosedApiWorker now executes Vertex image jobs. Non-image closed-api jobs remain stubbed until their provider adapters are implemented.",
+                contract = "ClosedApiWorker now executes Vertex image jobs and Vertex Veo video jobs. Other closed-api jobs remain stubbed until their provider adapters are implemented.",
                 requiredForRealExecution = new[]
                 {
                     "provider_adapter_for_job_type",

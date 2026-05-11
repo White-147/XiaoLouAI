@@ -9,6 +9,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { AlertTriangle, Loader2, Maximize2, ImageIcon as ImageIcon, Film, Pencil, Video, GripVertical, Download, Expand, Shrink, HardDrive } from 'lucide-react';
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { classifyCanvasPersistedUrl } from '../../utils/canvasPersistence';
+import { parseGenerationError } from '../../../../../../lib/generation-error';
 
 /**
  * Return a URL that is safe to hand to <img src>/<video src>, or undefined
@@ -25,6 +26,13 @@ function safeRenderableMediaUrl(value: unknown): string | undefined {
         return undefined;
     }
     return value;
+}
+
+function formatGenerationErrorMessage(value: unknown): string | undefined {
+    const raw = String(value || '').trim();
+    if (!raw) return undefined;
+    const parsed = parseGenerationError({ message: raw });
+    return parsed.category === 'unknown' ? raw : parsed.message;
 }
 
 interface NodeContentProps {
@@ -82,6 +90,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     const isLocalModel = data.type === NodeType.LOCAL_IMAGE_MODEL || data.type === NodeType.LOCAL_VIDEO_MODEL;
     const resultMediaUrl = safeRenderableMediaUrl(data.resultUrl);
     const resultPosterUrl = safeRenderableMediaUrl(data.lastFrame);
+    const displayErrorMessage = formatGenerationErrorMessage(data.errorMessage);
 
     // Sync local state ONLY when data.prompt changes externally (not from our own update)
     useEffect(() => {
@@ -144,7 +153,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                             <div className="min-w-0">
                                 <div className="font-medium text-red-200">本次生成失败，已保留上次成功结果</div>
                                 <div className="mt-0.5 line-clamp-2 break-words text-red-100/80">
-                                    {data.errorMessage || '可重新生成以重试。'}
+                                    {displayErrorMessage || '可重新生成以重试。'}
                                 </div>
                             </div>
                         </div>
@@ -255,7 +264,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                             </div>
                             <div className="text-sm font-medium text-red-300">生成失败</div>
                             <div className="max-h-40 w-full overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-red-500/5 px-2 py-1.5 text-[11px] leading-5 text-red-200 ring-1 ring-inset ring-red-500/20">
-                                {data.errorMessage || '任务已失败，但未记录具体原因。请查看浏览器控制台或服务器日志。'}
+                                {displayErrorMessage || '任务已失败，但未记录具体原因。请查看浏览器控制台或服务器日志。'}
                             </div>
                             <div className="text-[10px] text-neutral-500">可重新生成以重试。</div>
                         </div>

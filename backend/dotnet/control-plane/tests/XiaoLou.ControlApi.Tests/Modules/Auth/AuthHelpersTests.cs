@@ -418,6 +418,7 @@ public sealed class AuthHelpersTests
     [Theory]
     [InlineData("GET", "/api/playground", true)]
     [InlineData("POST", "/api/media/upload-begin", true)]
+    [InlineData("GET", "/api/media/object-content/xiaolou-staging/media/frontend/sample.png", false)]
     [InlineData("GET", "/api/windows-native/status", false)]
     [InlineData("POST", "/api/internal/jobs/lease", false)]
     public void IsPublicClientApiRequest_ClassifiesAllowedFrontendSurface(
@@ -433,6 +434,7 @@ public sealed class AuthHelpersTests
     [Theory]
     [InlineData("/api/playground", true)]
     [InlineData("/api/media/upload-begin", true)]
+    [InlineData("/api/media/object-content/xiaolou-staging/media/frontend/sample.png", false)]
     [InlineData("/api/wallets", true)]
     [InlineData("/api/windows-native/status", false)]
     [InlineData("/api/internal/jobs/lease", false)]

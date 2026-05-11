@@ -60,9 +60,14 @@ internal sealed class LocalObjectStorageWriter(
         {
             "image/jpeg" => ".jpg",
             "image/webp" => ".webp",
+            "video/mp4" => ".mp4",
+            "video/webm" => ".webm",
             _ => ".png",
         };
-        return $"{prefix}/generated/vertex/images/{DateTimeOffset.UtcNow:yyyy/MM/dd}/{jobId:N}-{safeModel}{extension}";
+        var mediaPath = mimeType.StartsWith("video/", StringComparison.Ordinal)
+            ? "closed-api/videos"
+            : "vertex/images";
+        return $"{prefix}/generated/{mediaPath}/{DateTimeOffset.UtcNow:yyyy/MM/dd}/{jobId:N}-{safeModel}{extension}";
     }
 
     private static string NormalizePrefix(string? value, string fallback)
@@ -89,6 +94,8 @@ internal sealed class LocalObjectStorageWriter(
         {
             "image/jpeg" => "image/jpeg",
             "image/webp" => "image/webp",
+            "video/mp4" => "video/mp4",
+            "video/webm" => "video/webm",
             _ => "image/png",
         };
     }

@@ -67,6 +67,7 @@ const PERSISTED_PATH_PREFIXES = [
   '/library/',
   '/canvas-library/',
   '/twitcanva-library/',
+  '/api/media/object-content/',
 ];
 
 /** Matches the serialization placeholder that sqlite-store.js emits when a
@@ -81,6 +82,58 @@ const PERSISTED_URL_MAX_LEN = 2048;
 // ─────────────────────────────────────────────────────────────────────────────
 // Low-level predicates
 // ─────────────────────────────────────────────────────────────────────────────
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function encodeObjectKeyPath(value: string): string {
+  return value
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/');
+}
+
+function isStableMediaObjectKeyAllowed(objectKey: string): boolean {
+  return objectKey.startsWith('media/frontend/') || objectKey.startsWith('media/generated/');
+}
+
+export function toStableLocalObjectContentUrl(value: string): string | null {
+  const normalized = String(value || '').trim();
+  if (!normalized) return null;
+
+  try {
+    const parsed = new URL(
+      normalized,
+      typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
+    );
+    if (parsed.searchParams.get('xiaolou_purpose') !== 'read' || !parsed.searchParams.has('expires')) {
+      return null;
+    }
+
+    const pathParts = parsed.pathname.split('/').filter(Boolean);
+    if (pathParts.length < 2) return null;
+
+    const bucket = safeDecodeURIComponent(pathParts[0]).trim();
+    const objectKey = safeDecodeURIComponent(pathParts.slice(1).join('/'))
+      .trim()
+      .replace(/^\/+/, '')
+      .replace(/\\/g, '/');
+    if (!bucket || !isStableMediaObjectKeyAllowed(objectKey)) {
+      return null;
+    }
+
+    return `/api/media/object-content/${encodeURIComponent(bucket)}/${encodeObjectKeyPath(objectKey)}`;
+  } catch {
+    return null;
+  }
+}
 
 function isLocalCanvasMediaUrl(value: string): boolean {
   if (!value || value.startsWith('data:') || value.startsWith('blob:')) {
@@ -173,7 +226,8 @@ export function sanitizePersistedCanvasString(value: unknown): string | null {
     // Apply cache-bust strip to keep snapshots stable; safe for other classes
     // too, stripCanvasRuntimeCacheBust is a no-op for non-local URLs.
     const stripped = stripCanvasRuntimeCacheBust(value as string);
-    return stripped ?? null;
+    if (!stripped) return null;
+    return toStableLocalObjectContentUrl(stripped) ?? stripped;
   }
   return null;
 }

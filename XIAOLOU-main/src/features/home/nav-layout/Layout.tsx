@@ -541,6 +541,7 @@ export default function Layout() {
   const isDark = theme === "dark";
   const themeToggleLabel = isDark ? "切换到浅色" : "切换到深色";
   const canAccessAgentCanvas =
+    permissionContext?.permissions.canCreateProject === true ||
     (isLoopback && actorId === SUPER_ADMIN_DEMO_ACTOR_ID) ||
     permissionContext?.platformRole === "super_admin";
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1820,9 +1821,9 @@ export default function Layout() {
               <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-background px-6 text-center">
                 <div className="max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
                   <ShieldCheck className="mx-auto h-10 w-10 text-muted-foreground" />
-                  <h2 className="mt-4 text-lg font-semibold text-foreground">Super admin only</h2>
+                  <h2 className="mt-4 text-lg font-semibold text-foreground">暂无智能画布权限</h2>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    The intelligent canvas beta is visible only to super administrators.
+                    当前账号没有创作项目权限，请切换到已注册账号。
                   </p>
                 </div>
               </div>
@@ -1848,9 +1849,9 @@ export default function Layout() {
               <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-background px-6 text-center">
                 <div className="max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
                   <ShieldCheck className="mx-auto h-10 w-10 text-muted-foreground" />
-                  <h2 className="mt-4 text-lg font-semibold text-foreground">Super admin only</h2>
+                  <h2 className="mt-4 text-lg font-semibold text-foreground">暂无智能体画布权限</h2>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    The agent studio canvas is visible only to super administrators.
+                    当前账号没有创作项目权限，请切换到已注册账号。
                   </p>
                 </div>
               </div>

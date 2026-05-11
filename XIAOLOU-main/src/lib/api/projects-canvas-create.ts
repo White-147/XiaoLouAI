@@ -204,6 +204,11 @@ const WINDOWS_NATIVE_IMAGE_CAPABILITIES: MediaModelCapability[] = [
   },
 ];
 
+const VERTEX_VEO_31_DURATIONS = ["4s", "6s", "8s"];
+const VERTEX_VEO_31_ASPECT_RATIOS = ["16:9", "9:16"];
+const VERTEX_VEO_31_RESOLUTIONS = ["1080p", "720p", "4k"];
+const VERTEX_VEO_31_LITE_RESOLUTIONS = ["1080p", "720p"];
+
 const WINDOWS_NATIVE_VIDEO_CAPABILITIES: MediaModelCapability[] = [
   {
     id: "vertex:veo-3.1-generate-001",
@@ -214,27 +219,27 @@ const WINDOWS_NATIVE_VIDEO_CAPABILITIES: MediaModelCapability[] = [
     recommended: true,
     inputModes: {
       text_to_video: mediaCapabilitySet("stable", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p", "480p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_RESOLUTIONS,
         defaultDuration: "8s",
       }),
       single_reference: mediaCapabilitySet("stable", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p", "480p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_RESOLUTIONS,
         defaultDuration: "8s",
       }),
       start_end_frame: mediaCapabilitySet("stable", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p", "480p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_RESOLUTIONS,
         defaultDuration: "8s",
       }),
       multi_param: mediaCapabilitySet("stable", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16"],
-        supportedResolutions: ["1080p", "720p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_RESOLUTIONS,
         defaultDuration: "8s",
         maxReferenceImages: 3,
       }),
@@ -248,27 +253,27 @@ const WINDOWS_NATIVE_VIDEO_CAPABILITIES: MediaModelCapability[] = [
     status: "stable",
     inputModes: {
       text_to_video: mediaCapabilitySet("stable", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_RESOLUTIONS,
         defaultDuration: "8s",
       }),
       single_reference: mediaCapabilitySet("stable", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_RESOLUTIONS,
         defaultDuration: "8s",
       }),
       start_end_frame: mediaCapabilitySet("stable", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_RESOLUTIONS,
         defaultDuration: "8s",
       }),
       multi_param: mediaCapabilitySet("stable", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16"],
-        supportedResolutions: ["1080p", "720p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_RESOLUTIONS,
         defaultDuration: "8s",
         maxReferenceImages: 3,
       }),
@@ -282,21 +287,21 @@ const WINDOWS_NATIVE_VIDEO_CAPABILITIES: MediaModelCapability[] = [
     status: "preview",
     inputModes: {
       text_to_video: mediaCapabilitySet("preview", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_LITE_RESOLUTIONS,
         defaultDuration: "8s",
       }),
       single_reference: mediaCapabilitySet("preview", {
-        supportedDurations: ["4s", "6s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_LITE_RESOLUTIONS,
         defaultDuration: "8s",
       }),
       start_end_frame: mediaCapabilitySet("preview", {
-        supportedDurations: ["5s", "8s"],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
-        supportedResolutions: ["1080p", "720p"],
+        supportedDurations: VERTEX_VEO_31_DURATIONS,
+        supportedAspectRatios: VERTEX_VEO_31_ASPECT_RATIOS,
+        supportedResolutions: VERTEX_VEO_31_LITE_RESOLUTIONS,
         defaultDuration: "8s",
       }),
     },
@@ -331,6 +336,27 @@ const WINDOWS_NATIVE_VIDEO_CAPABILITIES: MediaModelCapability[] = [
     },
   },
 ];
+
+function isVertexVeoModel(model?: string | null) {
+  return String(model || "").trim().toLowerCase().startsWith("vertex:veo-");
+}
+
+function normalizeCreateVideoPayloadForProvider(
+  input: Omit<GenerateCreateVideosInput, "idempotencyKey">,
+) {
+  const body = { ...input };
+  const mode = normalizeVideoMode(body.videoMode);
+  const referenceImageUrl = String(body.referenceImageUrl || "").trim();
+  if (
+    isVertexVeoModel(body.model) &&
+    referenceImageUrl &&
+    !String(body.firstFrameUrl || "").trim() &&
+    (!mode || mode === "image_to_video" || mode === "single_reference")
+  ) {
+    body.firstFrameUrl = referenceImageUrl;
+  }
+  return body;
+}
 
 function canvasProjectSummaryTime(value: string | null | undefined) {
   if (!value) return Number.NEGATIVE_INFINITY;
@@ -493,11 +519,17 @@ export function createProjectsCanvasCreateService({
     },
 
     generateCreateVideos(input: GenerateCreateVideosInput) {
-      const { idempotencyKey, ...body } = input;
+      const { idempotencyKey, ...rawBody } = input;
+      const body = normalizeCreateVideoPayloadForProvider(rawBody);
+      const providerRoute =
+        isVertexVeoModel(body.model)
+          ? "closed-api-vertex"
+          : null;
       return createCanonicalJob({
         jobType: "create_video_generate",
         domain: "create",
         lane: "account-media",
+        ...(providerRoute ? { providerRoute } : {}),
         idempotencyKey,
         actionCode: "create_video_generate",
         inputSummary: body.prompt,

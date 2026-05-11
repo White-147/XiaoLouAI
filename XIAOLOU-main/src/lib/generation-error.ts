@@ -2,6 +2,7 @@ export type GenerationErrorCategory =
   | "web_balance_insufficient"
   | "provider_balance_insufficient"
   | "provider_quota_exhausted"
+  | "provider_content_filtered"
   | "queue_timeout"
   | "provider_not_configured"
   | "input_invalid"
@@ -93,7 +94,12 @@ export function parseGenerationError(error: unknown): {
     embedded?.message ||
     (e.message || "").trim() ||
     "\u751f\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002";
-  const code = String(embedded?.code || e.code || e.name || "").toUpperCase();
+  const errorName = String(e.name || "").trim();
+  const code = String(
+    embedded?.code ||
+      e.code ||
+      (errorName && errorName !== "Error" ? errorName : ""),
+  ).toUpperCase();
   const status = embedded?.status ?? e.status;
   const text = normalizeText(rawMessage);
 
@@ -116,6 +122,16 @@ export function parseGenerationError(error: unknown): {
     category = "provider_quota_exhausted";
     hint =
       "\u5f53\u524d Gemini / Vertex \u914d\u989d\u6216\u8c03\u7528\u901f\u7387\u9650\u5236\u5df2\u89e6\u53d1\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\uff1b\u82e5\u6301\u7eed\u51fa\u73b0\uff0c\u8bf7\u68c0\u67e5 Google Cloud / Vertex \u9879\u76ee quota\u3002";
+  } else if (
+    text.includes("content filter blocked") ||
+    text.includes("filtered count") ||
+    text.includes("rai media filtered") ||
+    text.includes("raimediafiltered") ||
+    (text.includes("veo could not generate") && text.includes("prompt provided"))
+  ) {
+    category = "provider_content_filtered";
+    hint =
+      "Vertex Veo 内容安全过滤了本次请求。通常是提示词或参考图包含血液、伤害、过强暴力等受限内容；请弱化为非血腥动作描述后重试，例如改成“角色拔刀并甩落刀身上的红色光效/雨水”。";
   } else if (
     code === "YUNWU_TASK_TIMEOUT" ||
     code === "ALIYUN_TASK_TIMEOUT" ||

@@ -10,6 +10,7 @@ import { AlertTriangle, Loader2, Maximize2, ImageIcon as ImageIcon, Film, GripVe
 import { NodeData, NodeStatus, NodeType } from '../../types';
 import { classifyCanvasPersistedUrl } from '../../utils/canvasPersistence';
 import { getNodeContentHeight, getNodeWidth } from '../../utils/nodeGeometry';
+import { parseGenerationError } from '../../../../../../lib/generation-error';
 
 /**
  * Return a URL that is safe to hand to <img src>/<video src>, or undefined
@@ -26,6 +27,13 @@ function safeRenderableMediaUrl(value: unknown): string | undefined {
         return undefined;
     }
     return value;
+}
+
+function formatGenerationErrorMessage(value: unknown): string | undefined {
+    const raw = String(value || '').trim();
+    if (!raw) return undefined;
+    const parsed = parseGenerationError({ message: raw });
+    return parsed.category === 'unknown' ? raw : parsed.message;
 }
 
 interface NodeContentProps {
@@ -86,6 +94,7 @@ export const NodeContent: React.FC<NodeContentProps> = ({
     const compactErrorScale = Math.max(1, Math.min(1.8, nodeWidth / 365));
     const errorPanelWidth = Math.min(Math.max(260, nodeWidth * 0.68), Math.max(260, nodeWidth - 36));
     const errorScrollMaxHeight = Math.max(150, Math.min(nodeContentHeight * 0.6, 520));
+    const displayErrorMessage = formatGenerationErrorMessage(data.errorMessage);
 
     // Sync local state ONLY when data.prompt changes externally (not from our own update)
     useEffect(() => {
@@ -161,9 +170,9 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                                 <div
                                     className="mt-0.5 overflow-y-auto whitespace-pre-wrap break-words text-red-100/80"
                                     style={{ maxHeight: Math.max(56, nodeContentHeight * 0.28) }}
-                                    title={data.errorMessage || undefined}
+                                    title={displayErrorMessage || undefined}
                                 >
-                                    {data.errorMessage || '可重新生成以重试。'}
+                                    {displayErrorMessage || '可重新生成以重试。'}
                                 </div>
                             </div>
                         </div>
@@ -268,9 +277,9 @@ export const NodeContent: React.FC<NodeContentProps> = ({
                                     fontSize: 11 * errorScale,
                                     lineHeight: `${18 * errorScale}px`,
                                 }}
-                                title={data.errorMessage || undefined}
+                                title={displayErrorMessage || undefined}
                             >
-                                {data.errorMessage || '任务已失败，但未记录具体原因。请查看浏览器控制台或服务器日志。'}
+                                {displayErrorMessage || '任务已失败，但未记录具体原因。请查看浏览器控制台或服务器日志。'}
                             </div>
                             <div
                                 className="text-neutral-500"

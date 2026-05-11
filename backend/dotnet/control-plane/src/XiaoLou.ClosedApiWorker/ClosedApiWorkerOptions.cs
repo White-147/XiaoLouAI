@@ -4,9 +4,9 @@ namespace XiaoLou.ClosedApiWorker;
 
 internal sealed class ClosedApiWorkerOptions
 {
-    public const string ExecutionMode = "vertex-image-adapter";
+    public const string ExecutionMode = "vertex-media-adapter";
     public const string RuntimeBoundary = "canonical-queue-worker";
-    public const string AdapterStatus = "vertex_image_connected";
+    public const string AdapterStatus = "vertex_media_connected";
 
     public string WorkerId { get; init; } = "closed-api-worker-1";
     public string Lane { get; init; } = AccountLanes.Media;

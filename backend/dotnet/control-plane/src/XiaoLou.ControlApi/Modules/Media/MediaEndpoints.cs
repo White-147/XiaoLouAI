@@ -77,6 +77,36 @@ internal static class MediaEndpoints
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
+        endpoints.MapGet("/api/media/object-content/{bucket}/{**objectKey}", (
+            string bucket,
+            string? objectKey,
+            HttpContext httpContext,
+            IOptions<ObjectStorageOptions> storage) =>
+        {
+            var normalizedBucket = DecodeRouteValue(bucket).Trim();
+            var normalizedObjectKey = DecodeRouteValue(objectKey ?? "").TrimStart('/').Replace('\\', '/');
+            if (!IsStableMediaObjectKeyAllowed(normalizedObjectKey))
+            {
+                return Results.NotFound();
+            }
+
+            if (!TryResolveLocalObjectPath(storage.Value, normalizedBucket, normalizedObjectKey, out var filePath))
+            {
+                return Results.NotFound();
+            }
+
+            ApplyLocalObjectCors(httpContext);
+            if (!File.Exists(filePath))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.File(
+                File.OpenRead(filePath),
+                GetContentType(filePath),
+                enableRangeProcessing: true);
+        });
+
         endpoints.MapMethods("/{bucket}/{**objectKey}", ["OPTIONS"], (
             string bucket,
             string? objectKey,
@@ -150,6 +180,24 @@ internal static class MediaEndpoints
         });
 
         return endpoints;
+    }
+
+    private static string DecodeRouteValue(string value)
+    {
+        try
+        {
+            return Uri.UnescapeDataString(value);
+        }
+        catch
+        {
+            return value;
+        }
+    }
+
+    private static bool IsStableMediaObjectKeyAllowed(string objectKey)
+    {
+        return objectKey.StartsWith("media/frontend/", StringComparison.Ordinal)
+            || objectKey.StartsWith("media/generated/", StringComparison.Ordinal);
     }
 
     private static bool CanHandleLocalObjectRequest(ObjectStorageOptions options, string bucket, string? objectKey)

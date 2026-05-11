@@ -38,6 +38,56 @@ public static class JobStatuses
     public const string RetryWaiting = "retry_waiting";
 }
 
+public static class JobProviderRoutes
+{
+    public const string ClosedApi = "closed-api";
+    public const string ClosedApiVertex = "closed-api-vertex";
+
+    public static string? NormalizeForCreateJob(string? requestedRoute, string? jobType, JsonElement payload)
+    {
+        if (IsVertexVeoCreateVideoJob(jobType, payload))
+        {
+            return ClosedApiVertex;
+        }
+
+        return string.IsNullOrWhiteSpace(requestedRoute) ? null : requestedRoute.Trim();
+    }
+
+    public static bool IsVertexVeoCreateVideoJob(string? jobType, JsonElement payload)
+    {
+        return string.Equals(jobType?.Trim(), "create_video_generate", StringComparison.Ordinal)
+            && IsVertexVeoModel(FirstPayloadText(payload, "model", "videoModel", "video_model"));
+    }
+
+    public static bool IsVertexVeoModel(string? model)
+    {
+        return model?.Trim().StartsWith("vertex:veo-", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static string? FirstPayloadText(JsonElement payload, params string[] propertyNames)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var propertyName in propertyNames)
+        {
+            if (payload.TryGetProperty(propertyName, out var property) &&
+                property.ValueKind == JsonValueKind.String)
+            {
+                var value = property.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value.Trim();
+                }
+            }
+        }
+
+        return null;
+    }
+}
+
 public record AccountScope
 {
     public string? AccountId { get; init; }

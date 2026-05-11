@@ -10,7 +10,7 @@ import { uploadDataUrlAsFile } from '../../../../../lib/api';
  */
 export const uploadAsset = async (
     dataUrl: string,
-    type: 'image' | 'video' = 'image',
+    type: 'image' | 'video' | 'audio' = 'image',
     prompt: string = ''
 ): Promise<string> => {
     try {

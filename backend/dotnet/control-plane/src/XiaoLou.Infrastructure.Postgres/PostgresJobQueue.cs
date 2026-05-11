@@ -21,6 +21,8 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
             cancellationToken);
 
         var lane = AccountLanes.Normalize(request.Lane, AccountLanes.Media);
+        var jobType = string.IsNullOrWhiteSpace(request.JobType) ? "generic" : request.JobType.Trim();
+        var providerRoute = JobProviderRoutes.NormalizeForCreateJob(request.ProviderRoute, jobType, request.Payload);
         await using var command = new NpgsqlCommand(
             """
             INSERT INTO jobs (
@@ -41,8 +43,8 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
         command.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId);
         command.Parameters.AddWithValue("createdByUserId", NpgsqlDbType.Text, (object?)request.CreatedByUserId ?? DBNull.Value);
         command.Parameters.AddWithValue("lane", NpgsqlDbType.Text, lane);
-        command.Parameters.AddWithValue("jobType", NpgsqlDbType.Text, string.IsNullOrWhiteSpace(request.JobType) ? "generic" : request.JobType.Trim());
-        command.Parameters.AddWithValue("providerRoute", NpgsqlDbType.Text, (object?)request.ProviderRoute ?? DBNull.Value);
+        command.Parameters.AddWithValue("jobType", NpgsqlDbType.Text, jobType);
+        command.Parameters.AddWithValue("providerRoute", NpgsqlDbType.Text, (object?)providerRoute ?? DBNull.Value);
         command.Parameters.AddWithValue("idempotencyKey", NpgsqlDbType.Text, (object?)request.IdempotencyKey ?? DBNull.Value);
         command.Parameters.AddWithValue("payload", NpgsqlDbType.Jsonb, Jsonb.From(request.Payload));
         command.Parameters.AddWithValue("priority", NpgsqlDbType.Integer, request.Priority);

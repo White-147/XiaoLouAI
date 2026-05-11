@@ -6,6 +6,11 @@ internal static class ClientRoutePolicy
 {
     internal static bool IsPublicClientApiRequest(PathString path)
     {
+        if (path.StartsWithSegments("/api/media/object-content"))
+        {
+            return false;
+        }
+
         return path.StartsWithSegments("/api/accounts/ensure")
             || path.StartsWithSegments("/api/auth")
             || string.Equals(path.Value, "/api/me", StringComparison.OrdinalIgnoreCase)
