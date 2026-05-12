@@ -1,10 +1,11 @@
+import type { ControlOwnerScope } from "../../../lib/control-owner-scope";
+import type { Task } from "../../../lib/api/jobs-types";
 import type {
   QwenOmniModel,
   StoryboardGrid25Reference,
-  Task,
   ToolboxCapability,
-} from "../../../lib/api";
-import type { ControlOwnerScope } from "../../../lib/control-owner-scope";
+  ToolboxCapabilityRunType,
+} from "./toolbox-types";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -33,11 +34,6 @@ type ToolboxRunResponse = Record<string, unknown> & {
   status?: string;
   job?: ControlJobRecord;
 };
-
-type ToolboxCapabilityRunType =
-  | "character_replace"
-  | "motion_transfer"
-  | "upscale_restore";
 
 export type ToolboxServiceDeps = {
   controlApiJsonRequest: ControlApiJsonRequest;

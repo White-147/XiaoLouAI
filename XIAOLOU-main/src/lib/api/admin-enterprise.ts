@@ -1,10 +1,11 @@
 import type {
+  AdminOrderReviewInput,
   AdminRechargeOrder,
   PlatformAccount,
   PricingRule,
   UpdatePlatformAccountInput,
-  WalletRechargeOrder,
-} from "../api";
+} from "./admin-enterprise-types";
+import type { WalletRechargeOrder } from "./wallet-types";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -51,7 +52,7 @@ export function createAdminEnterpriseService({
 
     async reviewAdminOrder(
       orderId: string,
-      input: { decision: "approve" | "reject"; note?: string },
+      input: AdminOrderReviewInput,
     ): Promise<WalletRechargeOrder> {
       void orderId;
       void input;

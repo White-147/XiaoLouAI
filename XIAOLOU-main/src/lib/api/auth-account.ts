@@ -22,9 +22,8 @@ import type {
   RequestPasswordResetInput,
   UpdateOrganizationMemberAccountInput,
   UpdateMeInput,
-  Wallet,
-  WalletOwnerType,
-} from "../api";
+} from "./auth-account-types";
+import type { Wallet, WalletOwnerType } from "./wallet-types";
 import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;

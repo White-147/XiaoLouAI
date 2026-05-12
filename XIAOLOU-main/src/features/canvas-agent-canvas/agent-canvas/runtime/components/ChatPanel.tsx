@@ -15,7 +15,6 @@ import {
     Box,
     Check,
     ChevronDown,
-    Film,
     Globe2,
     ImageIcon,
     Lightbulb,
@@ -23,9 +22,7 @@ import {
     Loader2,
     MessageSquare,
     MessageSquarePlus,
-    MousePointer2,
     PanelRightClose,
-    Paperclip,
     Plus,
     Search,
     Send,
@@ -34,13 +31,18 @@ import {
     Sparkles,
     Square,
     Trash2,
-    Users,
     Video,
     X,
     Zap,
 } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
 import { AssetLibraryPanel } from './AssetLibraryPanel';
+import { ChatPanelAgentMoreMenu } from './ChatPanelAgentMoreMenu';
+import { ChatPanelImageAttachmentMenu } from './ChatPanelImageAttachmentMenu';
+import {
+    ChatPanelVideoAttachmentSlots,
+    buildVideoSlotDefinitions,
+} from './ChatPanelVideoAttachmentSlots';
 import {
     useChatAgent,
     ChatMessage as ChatMessageType,
@@ -56,14 +58,6 @@ import {
     type NativeAgentToolInfo,
 } from '../services/nativeAgentCatalog';
 import {
-    createXiaolouAsset,
-    uploadXiaolouMediaFile,
-    type XiaolouAssetLibraryItem,
-    type XiaolouUploadedMedia,
-} from '../integrations/xiaolouAssetBridge';
-import {
-    CANVAS_IMAGE_MODELS,
-    DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID,
     getCanvasImageQualityOptions,
     getCanvasImageResolutionOptions,
     normalizeCanvasImageOutputCount,
@@ -72,6 +66,33 @@ import {
     shouldShowCanvasImageResolution,
     type CanvasImageModel,
 } from '../config/canvasImageModels';
+import {
+    COT_TEXT_MODEL_IDS,
+    MODEL_PREFERENCE_TABS,
+    PREFERRED_IMAGE_TOOL_IDS,
+    PREFERRED_TEXT_MODEL_IDS,
+    PREFERRED_VIDEO_TOOL_IDS,
+    areModelPoolsEqual,
+    getCanvasImageModelForTool,
+    getModelBrandKey,
+    getModelOptionFingerprint,
+    getVideoModelIdForTool,
+    normalizeSelectedModelPool,
+    normalizeToolKey,
+    pickPreferredModel,
+    toTextModelOptions,
+    toToolModelOptions,
+    toggleModelPoolId,
+    type ComposerModelOption,
+    type ModelPreferenceTab,
+} from './chatPanelModelOptions';
+import {
+    getVideoAttachAccept,
+    mediaUrlForPayload,
+    type AttachedMedia,
+    type VideoAttachSlot,
+} from './chatPanelMediaAttachments';
+import { useChatPanelMediaAttachments } from './useChatPanelMediaAttachments';
 import {
     BlackForestLabsIcon,
     GeminiIcon,
@@ -99,12 +120,8 @@ import type { BridgeMediaCapabilitySet, BridgeMediaModelCapability } from '../ty
 
 type ComposerMenu = 'more' | 'skills' | 'mode' | 'model' | 'imageAttach' | 'imageSettings' | 'videoSettings' | 'videoShot' | 'videoAttach' | 'share' | null;
 type ComposerMode = 'agent' | 'image' | 'video';
-type ModelPreferenceTab = 'cot' | 'image' | 'video' | '3d';
 type VideoComposerMode = 'reference' | 'start_end_frame' | 'multi_param' | 'video_edit' | 'motion_control';
 type VideoApiMode = 'image_to_video' | 'start_end_frame' | 'multi_param' | 'video_edit' | 'motion_control' | 'video_extend';
-type VideoFrameRole = 'firstFrame' | 'lastFrame';
-type VideoAttachSlot = 'image' | 'video' | 'audio' | VideoFrameRole;
-type AssetLibraryMediaFilter = 'image' | 'video' | 'audio';
 
 const COMPOSER_MODES: Array<{
     value: ComposerMode;
@@ -152,25 +169,6 @@ const VIDEO_CAPABILITY_API_MODES: VideoApiMode[] = [
     'video_extend',
     'motion_control',
 ];
-
-const VIDEO_MODEL_ID_ALIASES: Record<string, string> = {
-    xiaolou_video_pixverse_c1: 'pixverse-c1',
-    xiaolou_video_pixverse_v6: 'pixverse-v6',
-    xiaolou_video_doubao_seedance_2_0_260128: 'doubao-seedance-2-0-260128',
-    xiaolou_video_doubao_seedance_2_0_fast_260128: 'doubao-seedance-2-0-fast-260128',
-    xiaolou_video_vertex_veo_3_1_generate_001: 'vertex:veo-3.1-generate-001',
-    xiaolou_video_vertex_veo_3_1_fast_generate_001: 'vertex:veo-3.1-fast-generate-001',
-    xiaolou_video_vertex_veo_3_1_lite_generate_001: 'vertex:veo-3.1-lite-generate-001',
-    xiaolou_video_kling_video: 'kling-video',
-    xiaolou_video_kling_omni_video: 'kling-omni-video',
-    xiaolou_video_kling_multi_image2video: 'kling-multi-image2video',
-    xiaolou_video_kling_multi_elements: 'kling-multi-elements',
-    xiaolou_video_veo3_1: 'veo3.1',
-    xiaolou_video_veo3_1_pro: 'veo3.1-pro',
-    xiaolou_video_veo3_1_fast: 'veo3.1-fast',
-    xiaolou_video_veo_3_1_4k: 'veo_3_1-4K',
-    xiaolou_video_veo_3_1_fast_4k: 'veo_3_1-fast-4K',
-};
 
 const SKILL_CATEGORIES = [
     { id: 'video', label: 'Video' },
@@ -222,43 +220,6 @@ const SKILLS = [
         description: '延展品牌调性、版式和视觉语言。',
         prompt: '请使用品牌视觉延展 Skill，保持品牌一致性并生成多方向创意。',
     },
-];
-
-type ComposerModelOption = {
-    id: string;
-    label: string;
-    provider: string;
-    kind: 'text' | 'image' | 'video' | '3d';
-};
-
-const MODEL_PREFERENCE_TABS: Array<{ value: ModelPreferenceTab; label: string }> = [
-    { value: 'cot', label: 'CoT' },
-    { value: 'image', label: 'Image' },
-    { value: 'video', label: 'Video' },
-    { value: '3d', label: '3D' },
-];
-
-const COT_TEXT_MODEL_IDS = [
-    'qwen3.6-plus',
-    'vertex:gemini-3-flash-preview',
-];
-
-const PREFERRED_TEXT_MODEL_IDS = [
-    ...COT_TEXT_MODEL_IDS,
-    'qwen-plus',
-    'vertex:gemini-3.1-pro-preview',
-];
-
-const PREFERRED_IMAGE_TOOL_IDS = [
-    'xiaolou_image_vertex_gemini_3_pro_image_preview',
-    'xiaolou_image_doubao_seedream_5_0_260128',
-    'xiaolou_image_gemini_3_pro_image_preview',
-];
-
-const PREFERRED_VIDEO_TOOL_IDS = [
-    'xiaolou_video_doubao_seedance_2_0_260128',
-    'xiaolou_video_vertex_veo_3_1_generate_001',
-    'xiaolou_video_pixverse_c1',
 ];
 
 const PREFERRED_IMAGE_RESOLUTION = '2K';
@@ -320,27 +281,6 @@ const RATIO_DISPLAY: Record<string, string> = {
     '1024x1024': '1:1',
     '1536x1024': '3:2',
     '1024x1536': '2:3',
-};
-
-interface AttachedMedia {
-    type: 'image' | 'video' | 'audio';
-    url: string;
-    nodeId: string;
-    base64?: string;
-    frameRole?: VideoFrameRole;
-    previewUrl?: string;
-    uploadedUrl?: string;
-    assetId?: string;
-}
-
-type VideoSlotDefinition = {
-    id: string;
-    label: string;
-    type: AttachedMedia['type'];
-    slot: VideoAttachSlot;
-    media?: AttachedMedia | null;
-    disabled?: boolean;
-    extraCount?: number;
 };
 
 interface ChatPanelProps {
@@ -538,83 +478,6 @@ function formatDate(dateStr: string) {
     return date.toLocaleDateString('zh-CN');
 }
 
-function isMediaFile(file: File) {
-    return file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/');
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
-        reader.readAsDataURL(file);
-    });
-}
-
-function modelDisplayName(model: NativeAgentModelInfo) {
-    return model.display_name?.trim() || model.model;
-}
-
-function toolDisplayName(tool: NativeAgentToolInfo) {
-    return tool.display_name?.trim() || tool.id.replace(/^xiaolou_(image|video)_/, '');
-}
-
-function toTextModelOptions(models: NativeAgentModelInfo[]): ComposerModelOption[] {
-    return models
-        .filter((model) => !model.type || model.type === 'text')
-        .map((model) => ({
-            id: model.model,
-            label: modelDisplayName(model),
-            provider: model.provider,
-            kind: 'text' as const,
-        }));
-}
-
-function toToolModelOptions(tools: NativeAgentToolInfo[], kind: 'image' | 'video'): ComposerModelOption[] {
-    return tools
-        .filter((tool) => tool.type === kind)
-        .map((tool) => ({
-            id: tool.id,
-            label: toolDisplayName(tool),
-            provider: tool.provider,
-            kind,
-        }));
-}
-
-function pickPreferredModel(options: ComposerModelOption[], preferredIds: string[]) {
-    return preferredIds.find((id) => options.some((option) => option.id === id)) || options[0]?.id || '';
-}
-
-function normalizeSelectedModelPool(
-    selectedIds: string[],
-    options: ComposerModelOption[],
-    preferredIds: string[],
-) {
-    const optionIds = new Set(options.map((option) => option.id));
-    const kept = Array.from(new Set(selectedIds)).filter((id) => optionIds.has(id));
-    if (kept.length) return kept;
-    const preferred = preferredIds.filter((id) => optionIds.has(id));
-    if (preferred.length) return preferred;
-    return options.slice(0, 1).map((option) => option.id);
-}
-
-function toggleModelPoolId(selectedIds: string[], id: string) {
-    if (!id) return selectedIds;
-    const selected = new Set(selectedIds);
-    if (selected.has(id)) {
-        selected.delete(id);
-    } else {
-        selected.add(id);
-    }
-    return Array.from(selected);
-}
-
-function areModelPoolsEqual(a: string[], b: string[]) {
-    if (a.length !== b.length) return false;
-    const bSet = new Set(b);
-    return a.every((id) => bSet.has(id));
-}
-
 function modelOptionDescription(option: ComposerModelOption) {
     if (option.kind === 'image') {
         if (option.label.includes('Gemini')) return '小楼 Vertex / Gemini 图像生成能力。';
@@ -650,26 +513,6 @@ function modelOptionTime(option: ComposerModelOption) {
     return '';
 }
 
-function getModelOptionFingerprint(option: ComposerModelOption) {
-    return `${option.provider} ${option.id} ${option.label}`.toLowerCase();
-}
-
-function getModelBrandKey(option: ComposerModelOption) {
-    const value = getModelOptionFingerprint(option);
-
-    if (/nano[\s_-]*banana|banana/.test(value)) return 'nano-banana';
-    if (/openai|gpt[\s_-]*image|gpt-image|dall/.test(value)) return 'openai';
-    if (/black[\s_-]*forest|bfl|flux/.test(value)) return 'bfl';
-    if (/seedream|seedance|doubao|volcengine|volces|bytedance|byte[\s_-]*dance|ark/.test(value)) return 'seed';
-    if (/qwen|dashscope|tongyi|aliyun|alibaba/.test(value)) return 'qwen';
-    if (/gemini|google|vertex|veo|imagen/.test(value)) return 'google';
-    if (/kling|kuaishou/.test(value)) return 'kling';
-    if (/pixverse/.test(value)) return 'pixverse';
-    if (/grok|xai|x\.ai/.test(value)) return 'grok';
-
-    return null;
-}
-
 function getModelOptionIcon(
     option: ComposerModelOption,
     size = 16,
@@ -701,56 +544,6 @@ function getModelOptionIcon(
                 ? <Video size={size} strokeWidth={1.85} className={className} />
                 : <Sparkles size={size} strokeWidth={1.85} className={className} />;
     }
-}
-
-function normalizeToolKey(value?: string | null) {
-    return String(value || '')
-        .trim()
-        .toLowerCase()
-        .replace(/^xiaolou_(image|video)_/, '')
-        .replace(/^vertex:/, 'vertex_')
-        .replace(/[^a-z0-9]+/g, '_')
-        .replace(/^_+|_+$/g, '');
-}
-
-function getCanvasImageModelForTool(toolId?: string, toolLabel?: string): CanvasImageModel {
-    const defaultModel =
-        CANVAS_IMAGE_MODELS.find((model) => model.id === DEFAULT_XIAOLOU_TEXT_TO_IMAGE_MODEL_ID) ||
-        CANVAS_IMAGE_MODELS[0];
-    const toolKey = normalizeToolKey(toolId);
-    const labelKey = normalizeToolKey(toolLabel);
-
-    return (
-        CANVAS_IMAGE_MODELS.find((model) => normalizeToolKey(model.id) === toolKey) ||
-        CANVAS_IMAGE_MODELS.find((model) => normalizeToolKey(model.name) === labelKey) ||
-        CANVAS_IMAGE_MODELS.find((model) => toolKey.includes(normalizeToolKey(model.id))) ||
-        CANVAS_IMAGE_MODELS.find((model) => labelKey.includes(normalizeToolKey(model.name))) ||
-        defaultModel
-    );
-}
-
-function getVideoModelIdForTool(
-    toolId: string | undefined,
-    toolLabel: string | undefined,
-    capabilities: BridgeMediaModelCapability[],
-) {
-    const direct = toolId ? VIDEO_MODEL_ID_ALIASES[toolId] : undefined;
-    if (direct) return direct;
-
-    const toolKey = normalizeToolKey(toolId);
-    const labelKey = normalizeToolKey(toolLabel);
-    const matched = capabilities.find((item) => {
-        const idKey = normalizeToolKey(item.id);
-        const capabilityLabelKey = normalizeToolKey(item.label);
-        return (
-            idKey === toolKey ||
-            idKey === labelKey ||
-            toolKey.includes(idKey) ||
-            labelKey.includes(idKey) ||
-            capabilityLabelKey === labelKey
-        );
-    });
-    return matched?.id || toolId || '';
 }
 
 function capabilityOptions(values?: string[]) {
@@ -883,64 +676,6 @@ function getCapabilityStatusLabel(status?: string) {
     return status || '';
 }
 
-function resolveUploadedMediaUrl(uploaded: XiaolouUploadedMedia | null | undefined) {
-    return uploaded?.signedReadUrl || uploaded?.url || uploaded?.urlPath || '';
-}
-
-function mediaUrlForPayload(media: AttachedMedia) {
-    const durableUrl = media.uploadedUrl || media.url;
-    if (durableUrl) return durableUrl;
-    return media.type === 'image' && media.base64 ? `data:image/png;base64,${media.base64}` : media.url;
-}
-
-function mediaPreviewUrl(media: AttachedMedia) {
-    return media.previewUrl || media.url;
-}
-
-function inferComposerMediaType(file: File): AttachedMedia['type'] {
-    if (file.type.startsWith('image/')) return 'image';
-    if (file.type.startsWith('audio/')) return 'audio';
-    return 'video';
-}
-
-function assetCategoryForMediaType(type: AttachedMedia['type']) {
-    if (type === 'audio') return 'Sound Effect';
-    return 'Others';
-}
-
-function assetTypeForMediaType(type: AttachedMedia['type']) {
-    if (type === 'video') return 'video_ref';
-    if (type === 'audio') return 'audio';
-    return 'image_ref';
-}
-
-function mediaAttachmentFromCanvasNode(node: unknown): AttachedMedia | null {
-    if (!node || typeof node !== 'object') return null;
-    const record = node as Record<string, unknown>;
-    const rawType = String(record.type || record.nodeType || '').toLowerCase();
-    const type: AttachedMedia['type'] | null = rawType.includes('video')
-        ? 'video'
-        : rawType.includes('audio')
-            ? 'audio'
-            : rawType.includes('image')
-                ? 'image'
-                : null;
-    if (!type) return null;
-
-    const url = String(record.resultUrl || record.url || record.mediaUrl || '').trim();
-    if (!url) return null;
-    const id = String(record.id || `canvas-${Date.now()}`).trim();
-    const previewUrl = type === 'video'
-        ? String(record.lastFrame || record.thumbnailUrl || url || '').trim()
-        : url;
-    return {
-        type,
-        url,
-        previewUrl: previewUrl || url,
-        nodeId: id,
-    };
-}
-
 function isSeedanceVideoModelId(modelId?: string | null) {
     return String(modelId || '').startsWith('doubao-seedance');
 }
@@ -970,25 +705,6 @@ function getVideoMultiReferenceImageLimit(
         return fallback;
     }
     return Math.min(fallback, 3);
-}
-
-function getVideoAttachMediaType(slot: VideoAttachSlot): AttachedMedia['type'] {
-    if (slot === 'video') return 'video';
-    if (slot === 'audio') return 'audio';
-    return 'image';
-}
-
-function getVideoAttachAccept(slot: VideoAttachSlot | null) {
-    if (slot === 'video') return 'video/*';
-    if (slot === 'audio') return 'audio/*';
-    if (slot) return 'image/*';
-    return null;
-}
-
-function getVideoSlotIcon(type: AttachedMedia['type']) {
-    if (type === 'video') return Video;
-    if (type === 'audio') return AudioLines;
-    return ImageIcon;
 }
 
 function snap32(value: number): number {
@@ -1132,8 +848,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 }) => {
     const isDark = canvasTheme === 'dark';
     const [message, setMessage] = useState('');
-    const [attachedMedia, setAttachedMedia] = useState<AttachedMedia[]>([]);
-    const [isDragOver, setIsDragOver] = useState(false);
     const [showConversationMenu, setShowConversationMenu] = useState(false);
     const [historySearch, setHistorySearch] = useState('');
     const [showChineseTip, setShowChineseTip] = useState(true);
@@ -1172,9 +886,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const [videoQualityMode, setVideoQualityMode] = useState('std');
     const [videoGenerateAudio, setVideoGenerateAudio] = useState(false);
     const [selectedVideoShot, setSelectedVideoShot] = useState('');
-    const [pendingVideoAttachSlot, setPendingVideoAttachSlot] = useState<VideoAttachSlot | null>(null);
-    const [activeVideoAttachSlotId, setActiveVideoAttachSlotId] = useState<string | null>(null);
-    const [assetLibraryMediaFilter, setAssetLibraryMediaFilter] = useState<AssetLibraryMediaFilter | null>(null);
     const [isGeneratingComposerVideo, setIsGeneratingComposerVideo] = useState(false);
     const [showThinkingConfirm, setShowThinkingConfirm] = useState(false);
     const [thinkingConfirmNeverAsk, setThinkingConfirmNeverAsk] = useState(() => (
@@ -1207,18 +918,40 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const pendingVideoAttachSlotRef = useRef<VideoAttachSlot | null>(null);
     const videoSettingsButtonRef = useRef<HTMLButtonElement>(null);
     const videoShotButtonRef = useRef<HTMLButtonElement>(null);
     const [videoFloatingMenuLayout, setVideoFloatingMenuLayout] = useState<FloatingPanelLayout | null>(null);
 
-    const updatePendingVideoAttachSlot = (slot: VideoAttachSlot | null) => {
-        pendingVideoAttachSlotRef.current = slot;
-        setPendingVideoAttachSlot(slot);
-        if (!slot) {
-            setActiveVideoAttachSlotId(null);
-        }
-    };
+    const {
+        activeVideoAttachSlotId,
+        assetLibraryMediaFilter,
+        attachedMedia,
+        clearAttachedMedia,
+        handleAssetLibrarySelect,
+        handleDragEnter,
+        handleDragLeave,
+        handleDragOver,
+        handleDrop,
+        handlePickFromCanvas,
+        handleUploadFiles,
+        isDragOver,
+        openAssetLibraryForVideoSlot,
+        openLocalUploadForVideoSlot,
+        pendingVideoAttachSlot,
+        removeAttachment,
+        resetVideoAttachmentState,
+        setActiveVideoAttachSlotId,
+        setAssetLibraryMediaFilter,
+        setVideoAttachmentLimits,
+        updatePendingVideoAttachSlot,
+    } = useChatPanelMediaAttachments({
+        composerMode,
+        fileInputRef,
+        getCanvasSnapshot,
+        focusComposer: () => textareaRef.current?.focus(),
+        closeActiveMenu: () => setActiveMenu(null),
+        setShowAssetLibrary,
+    });
 
     useEffect(() => {
         if (!activeMenu && !showConversationMenu && !showThinkingConfirm) return;
@@ -1651,66 +1384,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const showVideoReferenceSlot = videoComposerMode !== 'start_end_frame' && currentVideoMaxReferenceVideos > 0;
     const showImageReferenceSlot = currentVideoMaxReferenceImages > 0 || videoComposerMode === 'start_end_frame' || videoComposerMode === 'reference';
     const showAudioReferenceSlot = currentVideoMaxReferenceAudios > 0;
-    const firstFrameMedia = videoImages.find((item) => item.frameRole === 'firstFrame') || videoImages[0] || null;
-    const lastFrameMedia = videoImages.find((item) => item.frameRole === 'lastFrame') ||
-        videoImages.find((item) => item.nodeId !== firstFrameMedia?.nodeId) ||
-        null;
-    const referenceImageSlotCount = showImageReferenceSlot && videoComposerMode !== 'start_end_frame'
-        ? Math.max(
-            1,
-            Math.min(
-                currentVideoMaxReferenceImages || 1,
-                videoImages.length + (videoImages.length < (currentVideoMaxReferenceImages || 1) ? 1 : 0),
-            ),
-        )
-        : 0;
-    const videoSlotDefinitions: VideoSlotDefinition[] = videoComposerMode === 'start_end_frame'
-        ? [
-            {
-                id: 'firstFrame',
-                label: '首帧',
-                type: 'image' as const,
-                slot: 'firstFrame' as const,
-                media: firstFrameMedia,
-                disabled: false,
-            },
-            {
-                id: 'lastFrame',
-                label: '尾帧',
-                type: 'image' as const,
-                slot: 'lastFrame' as const,
-                media: lastFrameMedia,
-                disabled: !firstFrameMedia,
-            },
-        ]
-        : ([
-            ...Array.from({ length: referenceImageSlotCount }, (_, index) => ({
-                id: `image-${index}`,
-                label: '图片',
-                type: 'image' as const,
-                slot: 'image' as const,
-                media: videoImages[index] || null,
-                disabled: index > videoImages.length,
-            })),
-            showVideoReferenceSlot ? {
-                id: 'video',
-                label: '视频',
-                type: 'video' as const,
-                slot: 'video' as const,
-                media: videoRefs[0] || null,
-                extraCount: Math.max(videoRefs.length - 1, 0),
-                disabled: false,
-            } : null,
-            showAudioReferenceSlot ? {
-                id: 'audio',
-                label: '音频',
-                type: 'audio' as const,
-                slot: 'audio' as const,
-                media: videoAudioRefs[0] || null,
-                extraCount: Math.max(videoAudioRefs.length - 1, 0),
-                disabled: false,
-            } : null,
-        ] as Array<VideoSlotDefinition | null>).filter((item): item is VideoSlotDefinition => Boolean(item));
+    const videoSlotDefinitions = buildVideoSlotDefinitions({
+        videoComposerMode,
+        videoImages,
+        videoRefs,
+        videoAudioRefs,
+        showImageReferenceSlot,
+        showVideoReferenceSlot,
+        showAudioReferenceSlot,
+        currentVideoMaxReferenceImages,
+    });
     const hasVideoCapability = Boolean(currentVideoModelCapability && currentVideoCapabilitySet?.supported !== false);
     const imageCreditQuote = useCreateCreditQuote(
         'create_image_generate',
@@ -1806,100 +1489,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }, [supportsVideoAudioOutput, videoGenerateAudio]);
 
     useEffect(() => {
-        pendingVideoAttachSlotRef.current = null;
-        setPendingVideoAttachSlot(null);
-        setActiveVideoAttachSlotId(null);
-        setAssetLibraryMediaFilter(null);
-    }, [composerMode, currentVideoModelId, videoComposerMode]);
+        resetVideoAttachmentState();
+    }, [composerMode, currentVideoModelId, resetVideoAttachmentState, videoComposerMode]);
 
-    const getVideoAttachLimit = (slot: VideoAttachSlot) => {
-        if (slot === 'firstFrame' || slot === 'lastFrame') return 1;
-        if (slot === 'image') return Math.max(currentVideoMaxReferenceImages || 1, 1);
-        if (slot === 'video') return Math.max(currentVideoMaxReferenceVideos || 1, 1);
-        return Math.max(currentVideoMaxReferenceAudios || 1, 1);
-    };
-
-    const applyVideoAttachmentsForSlot = (
-        previous: AttachedMedia[],
-        incoming: AttachedMedia[],
-        slot: VideoAttachSlot | null,
-    ) => {
-        if (!slot) return [...previous, ...incoming];
-        const mediaType = getVideoAttachMediaType(slot);
-        const matching = incoming
-            .filter((item) => item.type === mediaType)
-            .map((item) => ({ ...item, frameRole: undefined }));
-        if (!matching.length) return previous;
-
-        if (slot === 'firstFrame' || slot === 'lastFrame') {
-            const role = slot;
-            const replacedNodeId = role === 'firstFrame' ? firstFrameMedia?.nodeId : lastFrameMedia?.nodeId;
-            return [
-                ...previous.filter((item) => item.nodeId !== replacedNodeId && item.frameRole !== role),
-                { ...matching[0], frameRole: role },
-            ];
-        }
-
-        const limit = getVideoAttachLimit(slot);
-        const currentCount = previous.filter((item) => item.type === mediaType).length;
-        if (limit <= 1) {
-            return [
-                ...previous.filter((item) => item.type !== mediaType),
-                matching[0],
-            ];
-        }
-        const remaining = Math.max(limit - currentCount, 0);
-        if (remaining <= 0) return previous;
-        return [...previous, ...matching.slice(0, remaining)];
-    };
-
-    const handleDragEnter = (e: React.DragEvent) => {
-        e.preventDefault();
-        setIsDragOver(true);
-    };
-
-    const handleDragLeave = (e: React.DragEvent) => {
-        e.preventDefault();
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-            setIsDragOver(false);
-        }
-    };
-
-    const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault();
-    };
-
-    const handleDrop = async (e: React.DragEvent) => {
-        e.preventDefault();
-        setIsDragOver(false);
-
-        const nodeData = e.dataTransfer.getData('application/json');
-        if (!nodeData) return;
-
-        try {
-            const { nodeId, url, type } = JSON.parse(nodeData);
-            if (!url || (type !== 'image' && type !== 'video' && type !== 'audio')) return;
-
-            const nextAttachment = {
-                type,
-                url,
-                nodeId,
-                previewUrl: url,
-            };
-            setAttachedMedia((prev) => applyVideoAttachmentsForSlot(
-                prev,
-                [nextAttachment],
-                composerMode === 'video' ? pendingVideoAttachSlotRef.current : null,
-            ));
-            updatePendingVideoAttachSlot(null);
-        } catch (err) {
-            console.error('Failed to parse dropped node data:', err);
-        }
-    };
-
-    const removeAttachment = (nodeId: string) => {
-        setAttachedMedia((prev) => prev.filter((item) => item.nodeId !== nodeId));
-    };
+    useEffect(() => {
+        setVideoAttachmentLimits({
+            image: Math.max(currentVideoMaxReferenceImages || 1, 1),
+            video: Math.max(currentVideoMaxReferenceVideos || 1, 1),
+            audio: Math.max(currentVideoMaxReferenceAudios || 1, 1),
+        });
+    }, [
+        currentVideoMaxReferenceAudios,
+        currentVideoMaxReferenceImages,
+        currentVideoMaxReferenceVideos,
+        setVideoAttachmentLimits,
+    ]);
 
     const buildComposerInstruction = (skill: AgentCanvasSkill | null = selectedSkill) => {
         const imageModelLabel = autoModelPreference
@@ -2106,7 +1710,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
         const nodeId = `agent-video-${Date.now()}`;
         setMessage('');
-        setAttachedMedia([]);
+        clearAttachedMedia();
         setActiveMenu(null);
         setIsGeneratingComposerVideo(true);
         if (textareaRef.current) {
@@ -2187,7 +1791,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         const outgoingMessage = currentMessage || (currentSkill ? `使用 Skill：${currentSkill.title}` : '');
 
         setMessage('');
-        setAttachedMedia([]);
+        clearAttachedMedia();
         setSelectedSkill(null);
         setActiveMenu(null);
         if (textareaRef.current) {
@@ -2244,7 +1848,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const handleNewChat = () => {
         startNewChat();
         setMessage('');
-        setAttachedMedia([]);
+        clearAttachedMedia();
         setSelectedSkill(null);
         setActiveMenu(null);
         setShowConversationMenu(false);
@@ -2302,105 +1906,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         setActiveMenu(null);
     };
 
-    const buildAttachmentFromLocalFile = async (file: File, index: number): Promise<AttachedMedia> => {
-        const type = inferComposerMediaType(file);
-        const localDataUrl = type === 'image' ? await readFileAsDataUrl(file) : '';
-        const baseAttachment: AttachedMedia = {
-            type,
-            url: localDataUrl,
-            previewUrl: localDataUrl || undefined,
-            nodeId: `upload-${Date.now()}-${index}-${file.name}`,
-            base64: type === 'image' ? localDataUrl.split(',')[1] || undefined : undefined,
-        };
-
-        try {
-            const uploaded = await uploadXiaolouMediaFile(file, `agent-canvas-${type}-reference`);
-            const uploadedUrl = resolveUploadedMediaUrl(uploaded);
-            if (!uploadedUrl) {
-                if (baseAttachment.url) return baseAttachment;
-                const fallbackUrl = await readFileAsDataUrl(file);
-                return { ...baseAttachment, url: fallbackUrl, previewUrl: fallbackUrl };
-            }
-
-            let asset: XiaolouAssetLibraryItem | null = null;
-            try {
-                asset = await createXiaolouAsset({
-                    assetType: assetTypeForMediaType(type),
-                    name: file.name,
-                    category: assetCategoryForMediaType(type),
-                    mediaKind: type,
-                    mediaUrl: uploadedUrl,
-                    sourceUrl: uploadedUrl,
-                    previewUrl: type === 'image' ? uploadedUrl : uploadedUrl,
-                    scope: 'manual',
-                    sourceModule: 'canvas',
-                });
-            } catch (assetError) {
-                console.warn('[ChatPanel] Local upload succeeded but project asset sync failed:', assetError);
-            }
-
-            const durableUrl = asset?.url || uploadedUrl;
-            return {
-                ...baseAttachment,
-                url: durableUrl,
-                uploadedUrl,
-                previewUrl: asset?.previewUrl || (type === 'image' ? localDataUrl || durableUrl : durableUrl),
-                assetId: asset?.id,
-                base64: undefined,
-            };
-        } catch (uploadError) {
-            console.warn('[ChatPanel] Failed to upload local file through Xiaolou media service:', uploadError);
-            if (baseAttachment.url) return baseAttachment;
-            const fallbackUrl = await readFileAsDataUrl(file);
-            return { ...baseAttachment, url: fallbackUrl, previewUrl: fallbackUrl };
-        }
-    };
-
-    const handleUploadFiles = async (files: FileList | null) => {
-        const pendingSlot = composerMode === 'video' ? pendingVideoAttachSlotRef.current : null;
-        const pendingMediaType = pendingSlot ? getVideoAttachMediaType(pendingSlot) : null;
-        const selectedFiles = Array.from(files || []).filter((file) => {
-            if (!isMediaFile(file)) return false;
-            if (!pendingMediaType) return true;
-            return file.type.startsWith(`${pendingMediaType}/`);
-        });
-        if (!selectedFiles.length) {
-            updatePendingVideoAttachSlot(null);
-            if (fileInputRef.current) {
-                fileInputRef.current.value = '';
-            }
-            return;
-        }
-
-        const nextAttachments = await Promise.all(
-            selectedFiles.map((file, index) => buildAttachmentFromLocalFile(file, index)),
-        );
-
-        setAttachedMedia((prev) => applyVideoAttachmentsForSlot(prev, nextAttachments, pendingSlot));
-        setActiveMenu(null);
-        updatePendingVideoAttachSlot(null);
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-    };
-
-    const handleAssetLibrarySelect = async (url: string, type: 'image' | 'video' | 'audio') => {
-        const nextAttachment = {
-            type,
-            url,
-            previewUrl: url,
-            nodeId: `library-${Date.now()}`,
-        };
-        setAttachedMedia((prev) => applyVideoAttachmentsForSlot(
-            prev,
-            [nextAttachment],
-            composerMode === 'video' ? pendingVideoAttachSlotRef.current : null,
-        ));
-        updatePendingVideoAttachSlot(null);
-        setAssetLibraryMediaFilter(null);
-        setShowAssetLibrary(false);
-    };
-
     const handleSkillSelect = (skill: AgentCanvasSkill) => {
         setSelectedSkill(skill);
         setComposerMode('agent');
@@ -2426,39 +1931,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         setComposerMode('agent');
         setShowThinkingConfirm(false);
         handleNewChat();
-    };
-
-    const handlePickFromCanvas = (slot?: VideoAttachSlot) => {
-        if (slot) {
-            updatePendingVideoAttachSlot(slot);
-        }
-        const snapshot = getCanvasSnapshot?.();
-        const selectedNodeIds = new Set((snapshot?.selectedNodeIds || []).map(String));
-        const selectedMedia = (snapshot?.nodes || [])
-            .filter((node) => {
-                const nodeId = String((node as Record<string, unknown> | null)?.id || '');
-                return nodeId && selectedNodeIds.has(nodeId);
-            })
-            .map(mediaAttachmentFromCanvasNode)
-            .filter((item): item is AttachedMedia => Boolean(item));
-        const targetSlot = slot || (composerMode === 'video' ? pendingVideoAttachSlotRef.current : null);
-        const targetType = targetSlot ? getVideoAttachMediaType(targetSlot) : 'image';
-        const matchingMedia = selectedMedia.filter((item) => item.type === targetType);
-        if (matchingMedia.length) {
-            setAttachedMedia((prev) => applyVideoAttachmentsForSlot(
-                prev,
-                matchingMedia,
-                composerMode === 'video' ? targetSlot : null,
-            ));
-            updatePendingVideoAttachSlot(null);
-            setActiveMenu(null);
-            setIsDragOver(false);
-            return;
-        }
-        setActiveMenu(null);
-        setIsDragOver(true);
-        textareaRef.current?.focus();
-        window.setTimeout(() => setIsDragOver(false), 1400);
     };
 
     if (!shouldRenderPanel) return null;
@@ -2530,16 +2002,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 .join(',')
             : 'image/*,video/*');
 
-    const openLocalUploadForVideoSlot = (slot: VideoAttachSlot) => {
-        updatePendingVideoAttachSlot(slot);
+    const toggleImageAttachMenu = () => {
+        setActiveMenu((value) => value === 'imageAttach' ? null : 'imageAttach');
+    };
+
+    const openLocalUploadForImageAttachment = () => {
         setActiveMenu(null);
+        updatePendingVideoAttachSlot(null);
         window.setTimeout(() => fileInputRef.current?.click(), 0);
     };
 
-    const openAssetLibraryForVideoSlot = (slot: VideoAttachSlot) => {
-        updatePendingVideoAttachSlot(slot);
-        setAssetLibraryMediaFilter(getVideoAttachMediaType(slot));
+    const openAssetLibraryForImageAttachment = () => {
         setActiveMenu(null);
+        updatePendingVideoAttachSlot(null);
+        setAssetLibraryMediaFilter('image');
+        setShowAssetLibrary(true);
+    };
+
+    const toggleAgentMoreMenu = () => {
+        setActiveMenu((value) => value === 'more' ? null : 'more');
+    };
+
+    const openLocalUploadFromAgentMoreMenu = () => {
+        updatePendingVideoAttachSlot(null);
+        setAssetLibraryMediaFilter(null);
+        window.setTimeout(() => fileInputRef.current?.click(), 0);
+    };
+
+    const openAssetLibraryFromAgentMoreMenu = () => {
+        setActiveMenu(null);
+        updatePendingVideoAttachSlot(null);
+        setAssetLibraryMediaFilter(null);
         setShowAssetLibrary(true);
     };
 
@@ -2549,52 +2042,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         updatePendingVideoAttachSlot(isSameSlot ? null : slot);
         setActiveVideoAttachSlotId(isSameSlot ? null : slotId);
         setActiveMenu(isSameSlot ? null : 'videoAttach');
-    };
-
-    const renderVideoAttachMenu = (slot: VideoAttachSlot) => {
-        const mediaType = getVideoAttachMediaType(slot);
-        const uploadLabel = mediaType === 'video'
-            ? '从本地上传视频'
-            : mediaType === 'audio'
-                ? '音频'
-                : '从本地上传图片';
-        return (
-            <div className="absolute bottom-[calc(100%+8px)] left-0 z-50 w-[212px] rounded-xl border border-neutral-100 bg-white p-2 shadow-2xl" data-agent-active-menu-root>
-                <button
-                    type="button"
-                    onClick={() => openLocalUploadForVideoSlot(slot)}
-                    className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2 py-2 text-sm text-neutral-900 hover:bg-neutral-50"
-                >
-                    <Paperclip size={16} />
-                    {uploadLabel}
-                </button>
-                <button
-                    type="button"
-                    onClick={() => openAssetLibraryForVideoSlot(slot)}
-                    className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left text-sm text-neutral-900 hover:bg-neutral-50"
-                >
-                    <Users size={16} className="mt-0.5 shrink-0" />
-                    <span className="min-w-0">
-                        <span className="block whitespace-nowrap">从素材库选择</span>
-                        {mediaType === 'audio' && (
-                            <span className="mt-0.5 block text-xs leading-4 text-neutral-400">
-                                角色素材需通过素材库审核后方可使用
-                            </span>
-                        )}
-                    </span>
-                </button>
-                {mediaType !== 'audio' && (
-                    <button
-                        type="button"
-                        onClick={() => handlePickFromCanvas(slot)}
-                        className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2 py-2 text-sm text-neutral-900 hover:bg-neutral-50"
-                    >
-                        <MousePointer2 size={16} />
-                        从画布选择
-                    </button>
-                )}
-            </div>
-        );
     };
 
     const handleComposerAction = () => {
@@ -3080,49 +2527,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                         <div className="mb-1 flex min-h-[128px] flex-col gap-3">
                             {composerMode === 'video' ? (
                                 <div className="flex flex-col items-start gap-2">
-                                    <div className="flex max-w-[300px] flex-wrap gap-2">
-                                        {videoSlotDefinitions.map((slot) => {
-                                            const media = slot.media || null;
-                                            const SlotIcon = getVideoSlotIcon(slot.type);
-                                            return (
-                                                <div key={slot.id} className="relative" data-agent-active-menu-root>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => toggleVideoAttachMenu(slot.id, slot.slot, slot.disabled)}
-                                                        disabled={slot.disabled}
-                                                        className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-2xl text-xs font-medium leading-tight transition-colors ${slot.disabled
-                                                            ? 'cursor-not-allowed bg-neutral-100/55 text-neutral-300'
-                                                            : activeMenu === 'videoAttach' && activeVideoAttachSlotId === slot.id
-                                                                ? 'bg-neutral-200 text-neutral-800'
-                                                                : 'bg-neutral-100/80 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700'
-                                                        }`}
-                                                        aria-label={`添加${slot.label}`}
-                                                    >
-                                                        {media ? (
-                                                            media.type === 'image' ? (
-                                                                <img src={mediaPreviewUrl(media)} alt="" className="h-full w-full object-cover" />
-                                                            ) : media.type === 'video' ? (
-                                                                <Film size={16} />
-                                                            ) : (
-                                                                <AudioLines size={16} />
-                                                            )
-                                                        ) : (
-                                                            <>
-                                                                <SlotIcon size={16} />
-                                                                <span className="max-w-[3.5rem] truncate text-center">{slot.label}</span>
-                                                            </>
-                                                        )}
-                                                        {!!slot.extraCount && slot.extraCount > 0 && (
-                                                            <span className="absolute right-0.5 top-0.5 rounded-full bg-neutral-900 px-1 py-0.5 text-[9px] font-semibold text-white">
-                                                                +{slot.extraCount}
-                                                            </span>
-                                                        )}
-                                                    </button>
-                                                    {activeMenu === 'videoAttach' && activeVideoAttachSlotId === slot.id && renderVideoAttachMenu(slot.slot)}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                                    <ChatPanelVideoAttachmentSlots
+                                        slots={videoSlotDefinitions}
+                                        activeSlotId={activeVideoAttachSlotId}
+                                        menuOpen={activeMenu === 'videoAttach'}
+                                        onToggleSlot={toggleVideoAttachMenu}
+                                        onLocalUpload={openLocalUploadForVideoSlot}
+                                        onAssetLibrary={openAssetLibraryForVideoSlot}
+                                        onPickFromCanvas={handlePickFromCanvas}
+                                    />
                                     {selectedVideoShot && (
                                         <button
                                             type="button"
@@ -3136,56 +2549,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                     )}
                                 </div>
                             ) : (
-                                <div className="relative w-fit" data-agent-active-menu-root>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setActiveMenu((value) => value === 'imageAttach' ? null : 'imageAttach');
-                                        }}
-                                        className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl text-neutral-300 transition-colors hover:text-neutral-500 ${activeMenu === 'imageAttach' ? 'bg-neutral-100' : 'bg-neutral-100/80 hover:bg-neutral-100'}`}
-                                        aria-label="添加图片参考"
-                                    >
-                                        <Plus size={20} strokeWidth={1.7} />
-                                    </button>
-
-                                    {activeMenu === 'imageAttach' && composerMode === 'image' && (
-                                        <div className="absolute bottom-[calc(100%+8px)] left-0 z-50 w-[174px] rounded-xl border border-neutral-100 bg-white p-2 shadow-2xl" data-agent-active-menu-root>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setActiveMenu(null);
-                                                    updatePendingVideoAttachSlot(null);
-                                                    window.setTimeout(() => fileInputRef.current?.click(), 0);
-                                                }}
-                                                className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2 py-2 text-sm text-neutral-900 hover:bg-neutral-50"
-                                            >
-                                                <Paperclip size={16} />
-                                                从本地上传图片
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setActiveMenu(null);
-                                                    updatePendingVideoAttachSlot(null);
-                                                    setAssetLibraryMediaFilter('image');
-                                                    setShowAssetLibrary(true);
-                                                }}
-                                                className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2 py-2 text-sm text-neutral-900 hover:bg-neutral-50"
-                                            >
-                                                <Users size={16} />
-                                                从素材库选择
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handlePickFromCanvas()}
-                                                className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2 py-2 text-sm text-neutral-900 hover:bg-neutral-50"
-                                            >
-                                                <MousePointer2 size={16} />
-                                                从画布选择
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
+                                <ChatPanelImageAttachmentMenu
+                                    isOpen={activeMenu === 'imageAttach'}
+                                    onToggle={toggleImageAttachMenu}
+                                    onLocalUpload={openLocalUploadForImageAttachment}
+                                    onAssetLibrary={openAssetLibraryForImageAttachment}
+                                    onPickFromCanvas={handlePickFromCanvas}
+                                />
                             )}
                             <textarea
                                 ref={textareaRef}
@@ -3220,7 +2590,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                         <Tooltip label="更多">
                                             <button
                                                 type="button"
-                                                onClick={() => setActiveMenu((value) => value === 'more' ? null : 'more')}
+                                                onClick={toggleAgentMoreMenu}
                                                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${activeMenu === 'more' ? 'bg-neutral-100 text-neutral-950' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'}`}
                                                 aria-label="更多"
                                             >
@@ -3229,61 +2599,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                                         </Tooltip>
 
                                         {activeMenu === 'more' && (
-                                            <div className="absolute bottom-11 left-0 z-50 w-60 rounded-xl border border-neutral-100 bg-white p-2 shadow-2xl">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        updatePendingVideoAttachSlot(null);
-                                                        setAssetLibraryMediaFilter(null);
-                                                        window.setTimeout(() => fileInputRef.current?.click(), 0);
-                                                    }}
-                                                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-neutral-900 hover:bg-neutral-50"
-                                                >
-                                                    <Paperclip size={16} />
-                                                    上传文件
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setActiveMenu(null);
-                                                        updatePendingVideoAttachSlot(null);
-                                                        setAssetLibraryMediaFilter(null);
-                                                        setShowAssetLibrary(true);
-                                                    }}
-                                                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-neutral-900 hover:bg-neutral-50"
-                                                >
-                                                    <Users size={16} />
-                                                    从素材库选择
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setCanvasFilesEnabled((value) => !value);
-                                                    }}
-                                                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm text-neutral-900 transition-colors ${canvasFilesEnabled ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`}
-                                                    aria-pressed={canvasFilesEnabled}
-                                                >
-                                                    <span className="flex items-center gap-3">
-                                                        <Box size={16} />
-                                                        读取画布文件
-                                                    </span>
-                                                    {canvasFilesEnabled && <Check size={15} />}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setWebSearchEnabled((value) => !value);
-                                                    }}
-                                                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm text-neutral-900 transition-colors ${webSearchEnabled ? 'bg-neutral-100' : 'hover:bg-neutral-50'}`}
-                                                    aria-pressed={webSearchEnabled}
-                                                >
-                                                    <span className="flex items-center gap-3">
-                                                        <Globe2 size={16} />
-                                                        联网搜索
-                                                    </span>
-                                                    <SwitchIndicator checked={webSearchEnabled} />
-                                                </button>
-                                            </div>
+                                            <ChatPanelAgentMoreMenu
+                                                canvasFilesEnabled={canvasFilesEnabled}
+                                                webSearchEnabled={webSearchEnabled}
+                                                onUploadFile={openLocalUploadFromAgentMoreMenu}
+                                                onAssetLibrary={openAssetLibraryFromAgentMoreMenu}
+                                                onToggleCanvasFiles={() => setCanvasFilesEnabled((value) => !value)}
+                                                onToggleWebSearch={() => setWebSearchEnabled((value) => !value)}
+                                            />
                                         )}
                                     </div>
 

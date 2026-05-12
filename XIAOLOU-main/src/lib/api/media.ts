@@ -1,4 +1,4 @@
-import type { UploadedFile } from "../api";
+import type { UploadedFile } from "./media-types";
 import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;

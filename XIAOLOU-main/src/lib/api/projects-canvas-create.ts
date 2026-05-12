@@ -30,7 +30,7 @@ import type {
   Timeline,
   VideoItem,
   VideoMultiReferenceImages,
-} from "../api";
+} from "./projects-canvas-create-types";
 import type { CanonicalJobInput, TaskAccepted } from "./jobs";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;

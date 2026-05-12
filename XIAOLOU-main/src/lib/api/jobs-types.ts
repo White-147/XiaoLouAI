@@ -1,0 +1,23 @@
+export type Task = {
+  id: string;
+  type: string;
+  domain: string;
+  projectId: string | null;
+  storyboardId: string | null;
+  actorId?: string;
+  actionCode?: string;
+  walletId?: string | null;
+  status: string;
+  progressPercent: number;
+  currentStage: string;
+  etaSeconds: number;
+  inputSummary: string | null;
+  outputSummary: string | null;
+  quotedCredits?: number;
+  frozenCredits?: number;
+  settledCredits?: number;
+  billingStatus?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};

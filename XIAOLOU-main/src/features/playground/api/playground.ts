@@ -8,7 +8,7 @@ import type {
   PlaygroundMemoryPreference,
   PlaygroundMessage,
   PlaygroundModel,
-} from "../../../lib/api";
+} from "../../../lib/api/playground-types";
 import type { ControlOwnerScope } from "../../../lib/control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;

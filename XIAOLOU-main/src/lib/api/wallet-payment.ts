@@ -8,7 +8,7 @@ import type {
   WalletOwnerType,
   WalletRechargeCapabilities,
   WalletRechargeOrder,
-} from "../api";
+} from "./wallet-types";
 import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;

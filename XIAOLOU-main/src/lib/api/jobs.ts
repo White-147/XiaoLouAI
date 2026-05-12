@@ -1,4 +1,4 @@
-import type { Task } from "../api";
+import type { Task } from "./jobs-types";
 import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
