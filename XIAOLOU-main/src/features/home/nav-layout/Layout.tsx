@@ -39,7 +39,6 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import {
   getMe,
-  ensureJaazServices,
   listProjects,
   loginWithEmail,
   requestPasswordReset,
@@ -48,10 +47,6 @@ import {
   registerPersonalUser,
   registerEnterpriseAdmin,
   exchangeGoogleLogin,
-  syncAgentStudioAsset,
-  syncAgentStudioCanvasProject,
-  type AgentStudioAssetSyncInput,
-  type AgentStudioCanvasProjectSyncInput,
   type PermissionContext,
   type RegisterPersonalInput,
   type RegisterEnterpriseAdminInput,
@@ -72,14 +67,13 @@ import {
 } from "../../../lib/actor-session";
 import { isLocalLoopbackAccess, SUPER_ADMIN_DEMO_ACTOR_ID } from "../../../lib/local-loopback";
 import { runNavigationGuards } from "./navigation-guards";
-import { getCurrentProjectId, setCurrentProjectId } from "../../../lib/session";
+import { setCurrentProjectId } from "../../../lib/session";
 import { useTheme } from "../../../lib/theme";
 import { cn } from "../../../lib/utils";
 import { removeGoogleLoginParams } from "../../../lib/google-auth";
 // Lazy-load the canvas shells so users who never open them pay no parse cost.
 const CanvasCreate = lazy(() => import("../../canvas-agent-canvas/canvas/CanvasCreate"));
 const AgentCanvasCreate = lazy(() => import("../../canvas-agent-canvas/agent-canvas/AgentCanvasCreate"));
-const AgentStudioCanvasCreate = lazy(() => import("../../canvas-agent-canvas/agent-studio/JaazAgentCanvasEmbed"));
 import { ProfileModal } from "./ProfileModal";
 import { GoogleLoginButton } from "../../account-admin-enterprise/auth/GoogleLoginButton";
 
@@ -121,7 +115,6 @@ const routePrefetchEntries: RoutePrefetchEntry[] = [
   { matches: (path) => pathMatches(path, "/create/storyboard-25"), loaders: [() => import("../../toolbox/storyboard-25/StoryboardGrid25")] },
   { matches: (path) => pathMatches(path, "/create/canvas"), loaders: [() => import("../../canvas-agent-canvas/canvas/CanvasCreate")] },
   { matches: (path) => pathMatches(path, "/create/agent-canvas"), loaders: [() => import("../../canvas-agent-canvas/agent-canvas/AgentCanvasCreate")] },
-  { matches: (path) => pathMatches(path, "/create/agent-studio"), loaders: [() => import("../../canvas-agent-canvas/agent-studio/JaazAgentCanvasEmbed")] },
   {
     matches: (path) => pathMatches(path, "/comic/global"),
     loaders: [() => import("../../comic-production/comic/ComicShell"), () => import("../../comic-production/comic/GlobalSettings")],
@@ -244,7 +237,6 @@ export default function Layout() {
   const navigate = useNavigate();
   const isCanvasRoute = location.pathname === "/create/canvas";
   const isAgentCanvasRoute = location.pathname === "/create/agent-canvas";
-  const isAgentStudioCanvasRoute = location.pathname === "/create/agent-studio";
   const [isCollapsed, setIsCollapsed] = useState(true);
   /** 收起侧栏时，带子菜单项的浮层（不自动展开侧栏） */
   const [collapsedNavFlyout, setCollapsedNavFlyout] = useState<{
@@ -278,7 +270,6 @@ export default function Layout() {
   // Canvas mounting policy: canvas shells are mounted only for their routes.
   const hasMountedCanvas = isCanvasRoute;
   const hasMountedAgentCanvas = isAgentCanvasRoute;
-  const [hasMountedAgentStudioCanvas, setHasMountedAgentStudioCanvas] = useState(isAgentStudioCanvasRoute);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [resetStep, setResetStep] = useState<"request" | "complete">("request");
   const [resetForm, setResetForm] = useState({
@@ -326,97 +317,6 @@ export default function Layout() {
     setCurrentActorId("guest");
     navigate("/home");
   }, [actorId, navigate]);
-
-  useEffect(() => {
-    if (isAgentStudioCanvasRoute) {
-      setHasMountedAgentStudioCanvas(true);
-    }
-  }, [isAgentStudioCanvasRoute]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const allowedOrigins = new Set([window.location.origin]);
-    try {
-      const configuredJaazUrl =
-        String(import.meta.env.VITE_JAAZ_AGENT_CANVAS_URL || "/create/agent-canvas").trim() ||
-        "/create/agent-canvas";
-      allowedOrigins.add(new URL(configuredJaazUrl, window.location.href).origin);
-    } catch {
-      // Keep same-origin as the safe default.
-    }
-
-    const handleMessage = (event: MessageEvent) => {
-      if (!allowedOrigins.has(event.origin)) return;
-      const message = event.data as {
-        type?: string;
-        asset?: AgentStudioAssetSyncInput;
-        project?: AgentStudioCanvasProjectSyncInput;
-      } | null;
-
-      if (
-        message?.type === "xiaolou:agent-asset:upsert" &&
-        message.asset?.fileUrl
-      ) {
-        const projectId = getCurrentProjectId(actorId);
-        void syncAgentStudioAsset(projectId, message.asset)
-          .then((asset) => {
-            window.dispatchEvent(
-              new CustomEvent("xiaolou:agent-asset:synced", {
-                detail: { projectId, asset },
-              }),
-            );
-          })
-          .catch((error) => {
-            console.warn("[Layout] Failed to sync Jaaz asset:", error);
-          });
-        return;
-      }
-
-      if (
-        message?.type === "xiaolou:agent-canvas-project:upsert" &&
-        message.project?.canvasId
-      ) {
-        if (message.project?.source === "canvas_load") return;
-        const projectId = getCurrentProjectId(actorId);
-        void syncAgentStudioCanvasProject(projectId, message.project)
-          .then((projectAsset) => {
-            window.dispatchEvent(
-              new CustomEvent("xiaolou:agent-canvas-project:synced", {
-                detail: { projectId, asset: projectAsset },
-              }),
-            );
-          })
-          .catch((error) => {
-            console.warn("[Layout] Failed to sync Jaaz canvas project:", error);
-            window.dispatchEvent(
-              new CustomEvent("xiaolou:agent-canvas-project:sync-failed", {
-                detail: { projectId, error },
-              }),
-            );
-          });
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [actorId]);
-
-  useEffect(() => {
-    if (!isAgentStudioCanvasRoute) return;
-
-    const keepJaazAlive = () => {
-      void ensureJaazServices().catch((error) => {
-        if (import.meta.env.DEV) {
-          console.warn("[jaaz] keepalive failed", error);
-        }
-      });
-    };
-
-    keepJaazAlive();
-    const intervalId = window.setInterval(keepJaazAlive, 60_000);
-    return () => window.clearInterval(intervalId);
-  }, [isAgentStudioCanvasRoute]);
 
   useEffect(() => {
     let active = true;
@@ -560,7 +460,6 @@ export default function Layout() {
 
   const visibleNavItems = useMemo(() => {
     const agentCanvasNavItem: NavItem = { name: "智能画布", path: "/create/agent-canvas", icon: Sparkles };
-    const agentStudioCanvasNavItem: NavItem = { name: "智能体画布", path: "/create/agent-studio", icon: Sparkles };
     const baseItems = showCreateImageVideoNav
       ? navItems
       : navItems.filter(
@@ -571,7 +470,7 @@ export default function Layout() {
       ? baseItems
       : baseItems.filter((item) => item.path !== "/wallet/usage");
     const betaItems = canAccessAgentCanvas
-      ? walletScopedItems.flatMap((item) => (item.path === "/create/canvas" ? [item, agentCanvasNavItem, agentStudioCanvasNavItem] : [item]))
+      ? walletScopedItems.flatMap((item) => (item.path === "/create/canvas" ? [item, agentCanvasNavItem] : [item]))
       : walletScopedItems;
 
     return betaItems;
@@ -1787,7 +1686,7 @@ export default function Layout() {
       />
 
       <main className="relative flex h-full flex-1 flex-col overflow-hidden bg-background">
-        {!isCanvasRoute && !isAgentCanvasRoute && !isAgentStudioCanvasRoute ? <Outlet /> : null}
+        {!isCanvasRoute && !isAgentCanvasRoute ? <Outlet /> : null}
 
         {hasMountedCanvas ? (
           <div
@@ -1822,34 +1721,6 @@ export default function Layout() {
                 <div className="max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
                   <ShieldCheck className="mx-auto h-10 w-10 text-muted-foreground" />
                   <h2 className="mt-4 text-lg font-semibold text-foreground">暂无智能画布权限</h2>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    当前账号没有创作项目权限，请切换到已注册账号。
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {hasMountedAgentStudioCanvas ? (
-          <div
-            className={cn(
-              "absolute inset-0 bg-background",
-              isAgentStudioCanvasRoute ? "block" : "pointer-events-none hidden",
-            )}
-            aria-hidden={!isAgentStudioCanvasRoute}
-          >
-            {canAccessAgentCanvas ? (
-              <Suspense fallback={<CanvasLoadingFallback />}>
-                <AgentStudioCanvasCreate />
-              </Suspense>
-            ) : loadingAccount ? (
-              <CanvasLoadingFallback />
-            ) : (
-              <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-background px-6 text-center">
-                <div className="max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
-                  <ShieldCheck className="mx-auto h-10 w-10 text-muted-foreground" />
-                  <h2 className="mt-4 text-lg font-semibold text-foreground">暂无智能体画布权限</h2>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     当前账号没有创作项目权限，请切换到已注册账号。
                   </p>

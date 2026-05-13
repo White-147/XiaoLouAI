@@ -34,7 +34,6 @@ const Placeholder = ({ title }: { title: string }) => (
 
 const CanvasRoutePlaceholder = () => null;
 const AgentCanvasRoutePlaceholder = () => null;
-const AgentStudioRoutePlaceholder = () => null;
 
 function DeferredRoute(props: { children: ReactNode }) {
   return (
@@ -157,7 +156,6 @@ export default function App() {
             />
             <Route path="canvas" element={<CanvasRoutePlaceholder />} />
             <Route path="agent-canvas" element={<AgentCanvasRoutePlaceholder />} />
-            <Route path="agent-studio" element={<AgentStudioRoutePlaceholder />} />
           </Route>
 
           <Route

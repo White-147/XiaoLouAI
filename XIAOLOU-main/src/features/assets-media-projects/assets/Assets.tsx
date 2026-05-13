@@ -81,7 +81,7 @@ const SOURCE_MODULE_LABEL: Record<AssetSourceModule, string> = {
   video_create: "视频创作",
   canvas: "画布",
   video_replace: "人物替换",
-  agent_studio: "智能体画布",
+  agent_studio: "智能画布",
 };
 
 type AssetFormState = {
@@ -133,79 +133,6 @@ function getAgentCanvasProjectMeta(asset: Asset): Record<string, unknown> {
   return asset.sourceMetadata && typeof asset.sourceMetadata === "object"
     ? asset.sourceMetadata
     : {};
-}
-
-function getAgentCanvasProjectEditPath(asset: Asset) {
-  const meta = getAgentCanvasProjectMeta(asset);
-  const canvasId = typeof meta.canvasId === "string" ? meta.canvasId.trim() : "";
-  const sessionId = typeof meta.sessionId === "string" ? meta.sessionId.trim() : "";
-  if (!canvasId) return "/create/agent-studio";
-  const params = new URLSearchParams({ canvasId });
-  if (sessionId) params.set("sessionId", sessionId);
-  return `/create/agent-studio?${params.toString()}`;
-}
-
-const agentCanvasProjectPrefetchInFlight = new Set<string>();
-const AGENT_CANVAS_PREFETCH_TTL_MS = 2 * 60 * 1000;
-const AGENT_CANVAS_PREFETCH_INDEX_KEY = "xiaolou:jaaz-prefetch:index";
-
-function rememberJaazPrefetchCacheKey(key: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const now = Date.now();
-    const previous = JSON.parse(
-      window.sessionStorage.getItem(AGENT_CANVAS_PREFETCH_INDEX_KEY) || "[]",
-    ) as Array<{ key: string; cachedAt: number }>;
-    const next = [
-      { key, cachedAt: now },
-      ...previous.filter((item) => item.key !== key),
-    ].slice(0, 6);
-    for (const item of previous) {
-      if (!next.some((entry) => entry.key === item.key)) {
-        window.sessionStorage.removeItem(item.key);
-      }
-    }
-    window.sessionStorage.setItem(AGENT_CANVAS_PREFETCH_INDEX_KEY, JSON.stringify(next));
-  } catch {
-    // Prefetch cache is best-effort only.
-  }
-}
-
-function writeJaazPrefetchCache(key: string, payload: unknown) {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(
-      key,
-      JSON.stringify({
-        cachedAt: Date.now(),
-        ttlMs: AGENT_CANVAS_PREFETCH_TTL_MS,
-        payload,
-      }),
-    );
-    rememberJaazPrefetchCacheKey(key);
-  } catch {
-    // Large canvases can exceed sessionStorage quota; opening still works without cache.
-  }
-}
-
-function prefetchAgentCanvasProject(asset: Asset) {
-  const meta = getAgentCanvasProjectMeta(asset);
-  const canvasId = typeof meta.canvasId === "string" ? meta.canvasId.trim() : "";
-  const sessionId = typeof meta.sessionId === "string" ? meta.sessionId.trim() : "";
-  if (!canvasId || agentCanvasProjectPrefetchInFlight.has(canvasId)) return;
-
-  agentCanvasProjectPrefetchInFlight.add(canvasId);
-  writeJaazPrefetchCache(`xiaolou:jaaz-prefetch:canvas:${canvasId}`, {
-    retired: true,
-    canvasId,
-  });
-  if (sessionId) {
-    writeJaazPrefetchCache(`xiaolou:jaaz-prefetch:chat:${sessionId}:latest`, {
-      retired: true,
-      sessionId,
-    });
-  }
-  window.setTimeout(() => agentCanvasProjectPrefetchInFlight.delete(canvasId), 5000);
 }
 
 function assetMatchesQuery(asset: Asset, rawQuery: string) {
@@ -385,8 +312,8 @@ function fetchProjectAssets(projectId: string) {
 
 type SidebarSection =
   | "assets"
-  | "agent-studio-assets"
-  | "agent-studio-projects"
+  | "agent-canvas-assets"
+  | "legacy-agent-canvas-project-assets"
   | "agent-canvas-projects"
   | "canvas-projects";
 
@@ -704,22 +631,7 @@ export default function Assets() {
     void loadAgentCanvasProjects();
   }, [loadAgentCanvasProjects]);
 
-  useEffect(() => {
-    const refreshAfterAgentAssetSync = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
-      if (detail?.projectId && detail.projectId !== currentProjectId) return;
-      void loadAssets({ force: true, silent: true });
-    };
-
-    window.addEventListener("xiaolou:agent-asset:synced", refreshAfterAgentAssetSync);
-    window.addEventListener("xiaolou:agent-canvas-project:synced", refreshAfterAgentAssetSync);
-    return () => {
-      window.removeEventListener("xiaolou:agent-asset:synced", refreshAfterAgentAssetSync);
-      window.removeEventListener("xiaolou:agent-canvas-project:synced", refreshAfterAgentAssetSync);
-    };
-  }, [currentProjectId, loadAssets]);
-
-  const agentStudioAssets = useMemo(
+  const agentCanvasSyncedAssets = useMemo(
     () =>
       assets.filter(
         (asset) => asset.sourceModule === "agent_studio" && !isAgentCanvasProjectAsset(asset),
@@ -727,7 +639,7 @@ export default function Assets() {
     [assets],
   );
 
-  const agentStudioProjectAssets = useMemo(
+  const legacyAgentCanvasProjectAssets = useMemo(
     () => assets.filter((asset) => isAgentCanvasProjectAsset(asset)),
     [assets],
   );
@@ -783,14 +695,14 @@ export default function Assets() {
     });
   }, [assets, filter, query]);
 
-  const agentStudioFilteredAssets = useMemo(
-    () => agentStudioAssets.filter((asset) => assetMatchesQuery(asset, query)),
-    [agentStudioAssets, query],
+  const filteredAgentCanvasSyncedAssets = useMemo(
+    () => agentCanvasSyncedAssets.filter((asset) => assetMatchesQuery(asset, query)),
+    [agentCanvasSyncedAssets, query],
   );
 
-  const agentStudioFilteredProjectAssets = useMemo(
-    () => agentStudioProjectAssets.filter((asset) => assetMatchesQuery(asset, query)),
-    [agentStudioProjectAssets, query],
+  const filteredLegacyAgentCanvasProjectAssets = useMemo(
+    () => legacyAgentCanvasProjectAssets.filter((asset) => assetMatchesQuery(asset, query)),
+    [legacyAgentCanvasProjectAssets, query],
   );
 
   const assetDateGroups = useMemo(
@@ -798,14 +710,14 @@ export default function Assets() {
     [filteredAssets],
   );
 
-  const agentStudioAssetDateGroups = useMemo(
-    () => groupByLocalDate(agentStudioFilteredAssets, (asset) => asset.createdAt),
-    [agentStudioFilteredAssets],
+  const agentCanvasSyncedAssetDateGroups = useMemo(
+    () => groupByLocalDate(filteredAgentCanvasSyncedAssets, (asset) => asset.createdAt),
+    [filteredAgentCanvasSyncedAssets],
   );
 
-  const agentStudioProjectDateGroups = useMemo(
-    () => groupByLocalDate(agentStudioFilteredProjectAssets, (asset) => asset.updatedAt || asset.createdAt),
-    [agentStudioFilteredProjectAssets],
+  const legacyAgentCanvasProjectDateGroups = useMemo(
+    () => groupByLocalDate(filteredLegacyAgentCanvasProjectAssets, (asset) => asset.updatedAt || asset.createdAt),
+    [filteredLegacyAgentCanvasProjectAssets],
   );
 
   const canvasProjectDateGroups = useMemo(
@@ -1138,50 +1050,50 @@ export default function Assets() {
           <div className="my-2" />
 
           <button
-            onClick={() => setActiveSection("agent-studio-assets")}
+            onClick={() => setActiveSection("agent-canvas-assets")}
             className={cn(
               "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              activeSection === "agent-studio-assets"
+              activeSection === "agent-canvas-assets"
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-accent hover:text-foreground",
             )}
           >
             <span className="flex items-center gap-3">
               <Sparkles className="h-4 w-4" />
-              智能体画布资产
+              智能画布资产
             </span>
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-xs",
-                activeSection === "agent-studio-assets" ? "bg-primary/20" : "bg-secondary",
+                activeSection === "agent-canvas-assets" ? "bg-primary/20" : "bg-secondary",
               )}
             >
-              {agentStudioAssets.length}
+              {agentCanvasSyncedAssets.length}
             </span>
           </button>
 
           <div className="my-2" />
 
           <button
-            onClick={() => setActiveSection("agent-studio-projects")}
+            onClick={() => setActiveSection("legacy-agent-canvas-project-assets")}
             className={cn(
               "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              activeSection === "agent-studio-projects"
+              activeSection === "legacy-agent-canvas-project-assets"
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-accent hover:text-foreground",
             )}
           >
             <span className="flex items-center gap-3">
               <LayoutGrid className="h-4 w-4" />
-              Jaaz 智能体画布项目
+              历史智能画布工程
             </span>
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-xs",
-                activeSection === "agent-studio-projects" ? "bg-primary/20" : "bg-secondary",
+                activeSection === "legacy-agent-canvas-project-assets" ? "bg-primary/20" : "bg-secondary",
               )}
             >
-              {agentStudioProjectAssets.length}
+              {legacyAgentCanvasProjectAssets.length}
             </span>
           </button>
 
@@ -1447,14 +1359,14 @@ export default function Assets() {
               ) : null}
             </div>
           </>
-        ) : activeSection === "agent-studio-assets" ? (
+        ) : activeSection === "agent-canvas-assets" ? (
           <>
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/30 px-6">
               <h3 className="flex items-center gap-2 text-sm font-medium">
                 <Sparkles className="h-4 w-4 text-primary" />
-                智能体画布资产
+                智能画布资产
                 <span className="text-xs text-muted-foreground">
-                  （新增 Jaaz 素材会同步到当前项目，已同步 {agentStudioAssets.length} 项）
+                  （智能画布同步素材会保留在当前项目，已同步 {agentCanvasSyncedAssets.length} 项）
                 </span>
               </h3>
               <div className="flex items-center gap-3">
@@ -1464,7 +1376,7 @@ export default function Assets() {
                     type="text"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="搜索智能体画布资产"
+                    placeholder="搜索智能画布资产"
                     className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-4 text-sm transition-shadow focus:outline-none focus:ring-2 focus:ring-primary/50"
                   />
                 </div>
@@ -1476,11 +1388,11 @@ export default function Assets() {
                   刷新
                 </button>
                 <button
-                  onClick={() => navigate("/create/agent-studio")}
+                  onClick={() => navigate("/create/agent-canvas")}
                   className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   <Sparkles className="h-4 w-4" />
-                  打开智能体画布
+                  打开智能画布
                 </button>
               </div>
             </div>
@@ -1489,17 +1401,17 @@ export default function Assets() {
               {showInitialAssetsLoading ? (
                 <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground">
                   <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-sm">加载智能体画布资产中...</p>
+                  <p className="text-sm">加载智能画布资产中...</p>
                 </div>
-              ) : agentStudioFilteredAssets.length === 0 ? (
+              ) : filteredAgentCanvasSyncedAssets.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center text-muted-foreground">
                   <Sparkles className="mb-4 h-12 w-12 opacity-20" />
-                  <p>暂无智能体画布资产</p>
-                  <p className="mt-1 text-xs">在智能体画布中上传或生成图片/视频后，会自动同步到这里</p>
+                  <p>暂无智能画布资产</p>
+                  <p className="mt-1 text-xs">在智能画布中上传或生成图片/视频后，会自动同步到这里</p>
                 </div>
               ) : (
                 <div className="space-y-8">
-                  {agentStudioAssetDateGroups.map((group) => (
+                  {agentCanvasSyncedAssetDateGroups.map((group) => (
                     <section key={group.dateKey} className="space-y-3">
                       {renderDateLine(group.dateKey)}
                       <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
@@ -1590,7 +1502,7 @@ export default function Assets() {
                                 <div className="mb-2 flex items-center justify-between gap-2">
                                   <h3 className="truncate text-sm font-medium">{asset.name}</h3>
                                   <span className="rounded bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
-                                    智能体画布
+                                    智能画布
                                   </span>
                                 </div>
                                 <p className="line-clamp-2 flex-1 text-xs text-muted-foreground">
@@ -1607,14 +1519,14 @@ export default function Assets() {
               )}
             </div>
           </>
-        ) : activeSection === "agent-studio-projects" ? (
+        ) : activeSection === "legacy-agent-canvas-project-assets" ? (
           <>
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/30 px-6">
               <h3 className="flex items-center gap-2 text-sm font-medium">
                 <LayoutGrid className="h-4 w-4 text-primary" />
-                Jaaz 智能体画布项目
+                历史智能画布工程
                 <span className="text-xs text-muted-foreground">
-                  （保存 Jaaz 整个可编辑画布工程，已同步 {agentStudioProjectAssets.length} 项）
+                  （旧入口保存的可编辑工程仅保留为历史记录，已归档 {legacyAgentCanvasProjectAssets.length} 项）
                 </span>
               </h3>
               <div className="flex items-center gap-3">
@@ -1624,7 +1536,7 @@ export default function Assets() {
                     type="text"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="搜索 Jaaz 智能体画布项目"
+                    placeholder="搜索历史智能画布工程"
                     className="w-full rounded-lg border border-border bg-input py-2 pl-9 pr-4 text-sm transition-shadow focus:outline-none focus:ring-2 focus:ring-primary/50"
                   />
                 </div>
@@ -1636,11 +1548,11 @@ export default function Assets() {
                   刷新
                 </button>
                 <button
-                  onClick={() => navigate("/create/agent-studio")}
+                  onClick={() => navigate("/create/agent-canvas")}
                   className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   <Sparkles className="h-4 w-4" />
-                  新建 Jaaz 智能体画布
+                  新建智能画布
                 </button>
               </div>
             </div>
@@ -1649,17 +1561,17 @@ export default function Assets() {
               {showInitialAssetsLoading ? (
                 <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground">
                   <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-sm">加载智能体画布项目中...</p>
+                  <p className="text-sm">加载历史智能画布工程中...</p>
                 </div>
-              ) : agentStudioFilteredProjectAssets.length === 0 ? (
+              ) : filteredLegacyAgentCanvasProjectAssets.length === 0 ? (
                 <div className="flex h-64 flex-col items-center justify-center text-muted-foreground">
                   <LayoutGrid className="mb-4 h-12 w-12 opacity-20" />
-                  <p>暂无 Jaaz 智能体画布项目</p>
-                  <p className="mt-1 text-xs">在智能体画布中发起对话后，会保存为可重新编辑的 Jaaz 工程</p>
+                  <p>暂无历史智能画布工程</p>
+                  <p className="mt-1 text-xs">旧入口退役后不再新建此类工程，可在智能画布项目中继续创建新项目</p>
                 </div>
               ) : (
                 <div className="space-y-8">
-                  {agentStudioProjectDateGroups.map((group) => (
+                  {legacyAgentCanvasProjectDateGroups.map((group) => (
                     <section key={group.dateKey} className="space-y-3">
                       {renderDateLine(group.dateKey)}
                       <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
@@ -1671,15 +1583,11 @@ export default function Assets() {
                             typeof metadata.canvasId === "string" ? metadata.canvasId : "";
                           const sessionId =
                             typeof metadata.sessionId === "string" ? metadata.sessionId : "";
-                          const editPath = getAgentCanvasProjectEditPath(asset);
 
                           return (
                             <article
                               key={asset.id}
-                              className="glass-panel group flex cursor-pointer flex-col overflow-hidden rounded-xl"
-                              onMouseEnter={() => prefetchAgentCanvasProject(asset)}
-                              onFocus={() => prefetchAgentCanvasProject(asset)}
-                              onClick={() => navigate(editPath)}
+                              className="glass-panel group flex flex-col overflow-hidden rounded-xl"
                             >
                               <div className="relative aspect-video bg-muted">
                                 {previewUrl ? (
@@ -1694,9 +1602,9 @@ export default function Assets() {
                                 ) : (
                                   <GeneratedMediaPlaceholder
                                     kind="image"
-                                    label="Jaaz 工程"
+                                    label="历史工程"
                                     className="h-full w-full"
-                                    description="点击后恢复整个画布和对话"
+                                    description="旧入口退役，工程仅保留为资产记录"
                                   />
                                 )}
 
@@ -1708,12 +1616,12 @@ export default function Assets() {
                                   <button
                                     onClick={(event) => {
                                       event.stopPropagation();
-                                      navigate(editPath);
+                                      navigate("/create/agent-canvas");
                                     }}
                                     className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                                    title="继续编辑"
+                                    title="新建智能画布"
                                   >
-                                    <Play className="h-4 w-4" />
+                                    <Sparkles className="h-4 w-4" />
                                   </button>
                                   <button
                                     onClick={(event) => {
@@ -1737,11 +1645,11 @@ export default function Assets() {
                                 <div className="mb-2 flex items-center justify-between gap-2">
                                   <h3 className="truncate text-sm font-medium">{asset.name}</h3>
                                   <span className="rounded bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
-                                    Jaaz
+                                    历史工程
                                   </span>
                                 </div>
                                 <p className="line-clamp-2 flex-1 text-xs text-muted-foreground">
-                                  {asset.description || "保存了 Jaaz 画布、对话和可编辑工程入口"}
+                                  {asset.description || "旧入口保存的画布、对话和可编辑工程记录"}
                                 </p>
                                 <div className="mt-2 space-y-1 text-[11px] text-muted-foreground/80">
                                   {canvasId ? <p className="truncate">Canvas: {canvasId}</p> : null}

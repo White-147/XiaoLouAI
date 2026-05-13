@@ -70,7 +70,7 @@ const SOURCE_MODULE_LABEL: Record<AssetSourceModule, string> = {
   video_create: "视频创作",
   canvas: "画布",
   video_replace: "人物替换",
-  agent_studio: "智能体画布",
+  agent_studio: "智能画布",
 };
 
 export function AssetSyncDropzone({

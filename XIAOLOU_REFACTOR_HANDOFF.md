@@ -1,51 +1,71 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-08 17:13 +08
+更新时间：2026-05-13 +08
 工作目录：`D:\code\XiaoLouAI`
 
-本文件只保留下一棒需要立刻接住的上下文。G14 详细历史已归档到：
-
-```text
-deploy\records\xiaolouai-finalization-handoff.md
-deploy\records\xiaolouai-deep-research-structured.md
-deploy\records\xiaolouai-legacy-physical-archive-contract.md
-deploy\records\xiaolouai-refactor-gap-verification.md
-```
+本文件只保留下一棒需要立刻接住的上下文。
+长记录和阶段计划放在 `deploy\records`。
 
 ## 每棒先读
 
 ```powershell
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Get-Content .\XIAOLOU_REFACTOR_HANDOFF.md -Encoding UTF8
-Get-Content .\deploy\records\xiaolouai-finalization-handoff.md -Encoding UTF8
-Get-Content .\deploy\records\xiaolouai-deep-research-structured.md -Encoding UTF8
-Get-Content .\deploy\records\xiaolouai-legacy-physical-archive-contract.md -Encoding UTF8
-Get-Content .\deploy\records\xiaolouai-refactor-gap-verification.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-modular-migration-phase-plan.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-modular-migration-task-record.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-finalization-handoff.md -Encoding UTF8 -Tail 160
+Get-Content .\deploy\records\xiaolouai-refactor-gap-verification.md -Encoding UTF8 -Tail 120
 ```
 
-## PowerShell 友好格式
+## 文档格式约束
 
 ```text
-后续修改 handoff/docs 时保持 UTF-8 Markdown。
-优先使用短行、普通标题、普通列表和 text 代码块。
+所有 handoff/docs 保持 UTF-8 Markdown。
+优先短行、普通标题、普通列表和 text 代码块。
 避免宽表格、超长单行、隐藏折叠格式和依赖特殊渲染的内容。
-关键 owner、决策、验证入口尽量一事一行，便于 Get-Content/Select-String 阅读。
+关键 owner、决策、验证入口尽量一事一行。
+所有文档必须便于 PowerShell Get-Content / Select-String 阅读。
+根 handoff 只写短棒；长规划和修改记录写入 deploy\records。
 ```
 
 ## 固定路线
 
 ```text
-1. 一级目录只保留：XIAOLOU-main、backend、scripts、deploy
-2. 后端主线：backend/dotnet/control-plane
-3. 前端主线：XIAOLOU-main
-4. 非 .NET 服务主线：backend/services
-5. 部署配置、保留材料和记录统一进入 deploy
-6. 前端功能布局优先按 XIAOLOU-main/src/features/<product-area> 收口
-7. legacy 只作为参考、归档或受控验证对象
-8. 不恢复 legacy 为生产入口
-9. 不新增 Node/Express 主服务
-10. 不让前端重新直连 legacy 端口
-11. Python 只允许作为明确签收的本地模型/sidecar adapter；不能作为新控制面
+1. XiaoLouAI 当前模块化仍在进行，H 阶段不是全部模块化完成。
+2. I 阶段目标是在迁移 ChuangJingAI 更新的同时继续模块化。
+3. 不允许把 ChuangJingAI 的大块代码直接搬进当前项目。
+4. 每次只迁移一个 owner 或一个窄 capability。
+5. 迁移时必须先拆 owner、定契约、补验证，再搬实现。
+6. 前端主线：XIAOLOU-main/src/features/<product-area>/<capability>。
+7. 后端主线：backend/dotnet/control-plane。
+8. 非 .NET 服务主线：backend/services/<product-area>/<capability>-sidecar。
+9. 部署配置、保留材料和记录统一进入 deploy。
+10. 不恢复 legacy 为生产入口。
+11. 不新增 Node/Express 主控制面。
+12. 不让前端重新直连 legacy、Jaaz 或临时 Node 端口。
+13. Python 只允许作为明确签收的本地模型或 sidecar adapter。
+14. PostgreSQL / .NET Control API / Windows-native worker 仍是后端架构主线。
+```
+
+## 继承 MiLuStudio 约束
+
+```text
+1. 必须遵守高内聚、低耦合、职责单一、关注点分离和依赖倒置。
+2. UI 不能直接访问数据库、文件系统、模型 SDK、Python 脚本或 FFmpeg。
+3. 前端只通过 Control API 和 DTO 通信。
+4. .NET Control API 负责编排、状态、资产索引和 sidecar 调用。
+5. Python sidecar / skills runtime 只负责具体生产技能执行。
+6. 模型、存储、队列、FFmpeg、Windows 打包等变化点必须隔离在 adapter / service 边界。
+7. 禁止循环依赖、跨层反向依赖和共享隐式全局状态。
+8. 不为了架构感提前堆大型抽象；原则服务功能落地。
+9. 目录优先按路由或功能域聚合，不把同一功能拆散到低信息量目录。
+10. MVP 临时直连必须限制在单一 adapter / gateway 内，并写入任务记录。
+11. 依赖、配置、缓存、运行数据、日志、上传素材和生成结果优先限制在 D 盘项目目录或明确 D 盘工具目录。
+12. Python、Node.js、.NET、Electron、Playwright、模型缓存等不得主动写入 C 盘。
+13. 如果工具无法避免写入 C 盘，先停止并记录原因，等待用户确认。
+14. 每个 owner 或阶段完成后必须自主更新文档：
+    先更新阶段计划，再更新任务记录，最后只把下一棒必须知道的短记录写入本 handoff。
+15. 如阶段涉及外部事实或新工具版本，必须联网搜索自检；如发现方向偏差，先修正文档再继续 runtime。
 ```
 
 ## 禁止恢复
@@ -55,349 +75,285 @@ Get-Content .\deploy\records\xiaolouai-refactor-gap-verification.md -Encoding UT
 禁止让 tasks stream 默认开启。
 禁止恢复旧支付 notify alias 为默认公开入口。
 支付回调以 canonical /api/payments/callbacks/{provider} 为统一目标。
-禁止在 legacy/services-api README 或脚本中重新出现 production API wording。
 禁止恢复 legacy 为生产入口，或重新新增 live legacy source root 作为默认工作目录。
-历史 legacy 对照只能显式恢复到单独本地副本，并使用 retained manifest 或 live-source gate 受控验证。
+禁止把 ChuangJingAI 的 core-api 当作 XiaoLouAI 新控制面。
+禁止恢复 Jaaz iframe/runtime 为主应用默认路径。
+禁止删除或降级现有 CI、Vitest、xUnit、synthetic E2E 和 legacy surface gate。
+禁止把 yolov8n.pt 等大权重二进制直接纳入生产源码迁移。
+允许按 2026-05-13 用户确认新增 canonical .NET payment order/review contract。
+该支付方向只允许进入 .NET Payments/Admin 模块，不能恢复 Node core-api 控制面或 legacy 支付入口。
 ```
 
 ## 当前接棒
 
 ```text
-Phase: H feature-layout-cleanup
-Owner: H17 old-path-reexport-deletion
-Status: done; next owner should continue function-owner inventory and migration
-
-Done:
-- New layout-cleanup work now records as lightweight H-stage entries rather than continuing G14 numbering.
-- Root handoff G14 long history was moved to deploy\records\xiaolouai-finalization-handoff.md.
-- Root handoff now keeps only first-read commands, fixed route, forbidden restore rules, current baton, and verification entrypoints.
-- README.md remains the only project README after prior consolidation.
-- Project README scan excluding .runtime, node_modules, and .venv finds only root README.md.
-- User corrected the layout rule: frontend files are grouped by frontend feature;
-  backend/runtime files are grouped separately by backend feature/service.
-- Top-level directory cleanup is complete:
-  XIAOLOU-main, backend, scripts, deploy, README.md, XIAOLOU_REFACTOR_HANDOFF.md.
-- Former top-level control-plane-dotnet moved to backend\dotnet\control-plane.
-- Former top-level services moved to backend\services.
-- Former docs moved to ignored deploy\records.
-- Former legacy-surface-evidence moved to deploy\retained\legacy-surface-evidence.
-- Python video-replace sidecar was kept and moved out of tools into:
-  backend\services\toolbox\video-replace-sidecar.
-- Python local-model worker sidecar was moved out of the flat services root into:
-  backend\services\model-runtime\local-model-worker-sidecar.
-- The root tools directory was removed after the sidecar move.
-- setup_video_replace.cmd and start_core_api.cmd now use backend\services\toolbox\video-replace-sidecar.
-- start-local-model-worker.ps1, publish/restore runtime scripts, P0 verification,
-  legacy runtime dependency scan, and the .NET supervisor now use
-  backend\services\model-runtime\local-model-worker-sidecar.
-- Playground frontend page moved to XIAOLOU-main\src\features\playground\Playground.tsx.
-- Playground frontend API service moved to XIAOLOU-main\src\features\playground\api\playground.ts.
-- Old Playground page/API wrappers were deleted in H17 after import scans passed.
-- Playground service test moved with the feature; Vitest now includes feature-local tests.
-- Script Plaza moved to XIAOLOU-main\src\features\comic-production\script-plaza\ScriptPlaza.tsx.
-- Old Script Plaza page wrapper was deleted in H17 after import scans passed.
-- API Center moved to XIAOLOU-main\src\features\wallet-payments-api-center\api-center\ApiCenter.tsx.
-- API Center now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\wallet-payments-api-center\api-center\api\api-center.ts.
-- Old API Center page wrapper was deleted in H17 after import scans passed.
-- Credit Usage moved to XIAOLOU-main\src\features\wallet-payments-api-center\credit-usage\CreditUsage.tsx.
-- Credit Usage now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\wallet-payments-api-center\credit-usage\api\credit-usage.ts.
-- Old Credit Usage page wrapper was deleted in H17 after import scans passed.
-- Wallet Recharge moved to XIAOLOU-main\src\features\wallet-payments-api-center\wallet-recharge\WalletRecharge.tsx.
-- Wallet Recharge now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\wallet-payments-api-center\wallet-recharge\api\wallet-recharge.ts.
-- Old Wallet Recharge page wrapper was deleted in H17 after import scans passed.
-- Assets moved to XIAOLOU-main\src\features\assets-media-projects\assets\Assets.tsx.
-- Assets now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\assets-media-projects\assets\api\assets.ts.
-- Old Assets page wrapper was deleted in H17 after import scans passed.
-- Enterprise Console moved to XIAOLOU-main\src\features\account-admin-enterprise\enterprise-console\EnterpriseConsole.tsx.
-- Enterprise Console now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\account-admin-enterprise\enterprise-console\api\enterprise-console.ts.
-- Old Enterprise Console page wrapper was deleted in H17 after import scans passed.
-- Register moved to XIAOLOU-main\src\features\account-admin-enterprise\register\Register.tsx.
-- Register now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\account-admin-enterprise\register\api\register.ts.
-- Admin Orders moved to XIAOLOU-main\src\features\account-admin-enterprise\admin-orders\AdminOrders.tsx.
-- Admin Orders now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\account-admin-enterprise\admin-orders\api\admin-orders.ts.
-- Super Admin Console moved to XIAOLOU-main\src\features\account-admin-enterprise\super-admin-console\SuperAdminConsole.tsx.
-- Super Admin Console now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\account-admin-enterprise\super-admin-console\api\super-admin-console.ts.
-- Old Register, AdminOrders, and SuperAdminConsole page wrappers were deleted in H17 after import scans passed.
-- App route lazy import and Layout route prefetch now load Super Admin Console from the feature path.
-- Google Login Button moved to XIAOLOU-main\src\features\account-admin-enterprise\auth\GoogleLoginButton.tsx.
-- Old components\auth\GoogleLoginButton.tsx wrapper was deleted in H17 after import scans passed.
-- Register and Layout now import GoogleLoginButton from the account-admin-enterprise feature owner directly.
-- H-stage slip audit found and fixed remaining non-wrapper shared component/helper placements:
-  CreateStudioSplitLayout, project-script-store, useCreateCreditQuote, and profile-avatar.
-- CreateStudioSplitLayout moved to XIAOLOU-main\src\features\create-workbench\studio-layout\CreateStudioSplitLayout.tsx.
-- Old components\create\CreateStudioSplitLayout.tsx wrapper was deleted in H17 after import scans passed.
-- create-image, create-video, and toolbox video-replace import CreateStudioSplitLayout from create-workbench directly.
-- Comic project script state moved to XIAOLOU-main\src\features\comic-production\comic\state\project-script-store.ts.
-- Old lib\project-script-store.ts wrapper was deleted in H17 after import scans passed.
-- Canvas credit quote hook moved to XIAOLOU-main\src\features\canvas-agent-canvas\shared\useCreateCreditQuote.ts.
-- Old lib\useCreateCreditQuote.ts wrapper was deleted in H17 after import scans passed.
-- Profile avatar helper moved to XIAOLOU-main\src\features\home\nav-layout\api\profile-avatar.ts.
-- Old lib\api\profile-avatar.ts wrapper was deleted in H17 after import scans passed.
-- Old-path re-export deletion audit completed after import scans found no remaining runtime callers.
-- Deleted the known H-stage page wrappers under XIAOLOU-main\src\pages, src\pages\create, and src\pages\comic.
-- Deleted the known H-stage component wrappers under XIAOLOU-main\src\components.
-- Deleted single-owner lib wrappers:
-  lib\api\playground.ts, lib\api\profile-avatar.ts, lib\api\toolbox.ts,
-  lib\navigation-guards.ts, lib\project-script-store.ts, lib\storyboard-breakdown-prompt.ts,
-  lib\useCreateCreditQuote.ts, and lib\video-replace\presets.ts.
-- Updated the remaining old-path references before deletion:
-  api.ts and api-compatibility wrapper tests now import toolbox from features\toolbox\api;
-  profile-avatar tests import the feature-local helper; comic navigation guard imports use the home/nav-layout owner.
-- Create Image moved to XIAOLOU-main\src\features\create-image\image-create\ImageCreate.tsx.
-- Create Image now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\create-image\image-create\api\create-image.ts.
-- Old pages\create\ImageCreate.tsx wrapper was deleted in H17 after import scans passed.
-- App route lazy import and Layout route prefetch now load Create Image from the feature path.
-- Create Video moved to XIAOLOU-main\src\features\create-video\video-create\VideoCreate.tsx.
-- Create Video now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\create-video\video-create\api\create-video.ts.
-- Old pages\create\VideoCreate.tsx wrapper was deleted in H17 after import scans passed.
-- App route lazy import and Layout route prefetch now load Create Video from the feature path.
-- Comic workflow shell and subpages moved to XIAOLOU-main\src\features\comic-production\comic.
-- Comic workflow now has a feature-local API wrapper at
-  XIAOLOU-main\src\features\comic-production\comic\api\comic-production.ts.
-- Old pages\comic\*.tsx wrappers were deleted in H17 after import scans passed.
-- App route lazy imports and Layout route prefetch now load comic workflow from the feature path.
-- Canvas Create moved to XIAOLOU-main\src\features\canvas-agent-canvas\canvas\CanvasCreate.tsx.
-- Canvas runtime moved from XIAOLOU-main\src\canvas to
-  XIAOLOU-main\src\features\canvas-agent-canvas\canvas\runtime.
-- Agent Canvas Create moved to XIAOLOU-main\src\features\canvas-agent-canvas\agent-canvas\AgentCanvasCreate.tsx.
-- Agent Canvas runtime moved from XIAOLOU-main\src\agent-canvas to
-  XIAOLOU-main\src\features\canvas-agent-canvas\agent-canvas\runtime.
-- Agent Studio and Jaaz embed moved to XIAOLOU-main\src\features\canvas-agent-canvas\agent-studio.
-- Canvas, Agent Canvas, and Agent Studio now have feature-local API wrappers under their capability folders.
-- Old pages\create canvas/agent-canvas/agent-studio/Jaaz embed wrappers were deleted in H17 after import scans passed.
-- Layout lazy imports, route prefetch, Assets warmups, and toolbox model imports now load canvas code from the feature path.
-- Layout moved to XIAOLOU-main\src\features\home\nav-layout\Layout.tsx.
-- Profile modal moved to XIAOLOU-main\src\features\home\nav-layout\ProfileModal.tsx.
-- Navigation guards moved to XIAOLOU-main\src\features\home\nav-layout\navigation-guards.ts.
-- Old components\Layout.tsx, components\modals\ProfileModal.tsx, and lib\navigation-guards.ts wrappers were deleted in H17 after import scans passed.
-- App route root now imports Layout from the feature path.
-- Asset sync controls moved to XIAOLOU-main\src\features\assets-media-projects\asset-sync\AssetSyncControls.tsx.
-- Reference asset picker moved to XIAOLOU-main\src\features\assets-media-projects\reference-assets\ReferenceAssetPicker.tsx.
-- Generated media placeholder moved to XIAOLOU-main\src\features\assets-media-projects\media\GenerationPlaceholder.tsx.
-- Old components\create\AssetSyncControls.tsx, components\create\ReferenceAssetPicker.tsx, and
-  components\media\GenerationPlaceholder.tsx wrappers were deleted in H17 after import scans passed.
-- create-image, create-video, toolbox, comic, and assets imports now reference the assets-media-projects owner directly.
-- download-media, media-url-policy, api\media, and api\projects-canvas-create were audited as cross-product/control API foundations and remain in lib.
-- .gitignore now allows committable deploy configs and retained evidence while ignoring:
-  deploy\local-secrets, deploy\records, deploy temp/output, sidecar .venv/data/weights.
-
-Current layout check:
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\toolbox is frontend TS/TSX code:
-  api wrapper, pages, presets, and prompt module.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\playground is frontend Playground page/API/test code.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\comic-production\script-plaza is the script template plaza route.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\wallet-payments-api-center\api-center is the API Center route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\wallet-payments-api-center\credit-usage is the wallet usage statistics route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\wallet-payments-api-center\wallet-recharge is the wallet recharge route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\assets-media-projects\assets is the assets route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\assets-media-projects\asset-sync is the shared project-asset sync UI.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\assets-media-projects\reference-assets is the shared project reference asset picker UI.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\assets-media-projects\media is the generated media placeholder/resolution UI.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\enterprise-console is the enterprise console route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\register is the registration page and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\admin-orders is the admin recharge review page and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\super-admin-console is the super admin route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\account-admin-enterprise\auth is the account/auth UI helper owner.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\comic-production\comic is the comic workflow shell, subpages, editors, and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\comic-production\comic\state is the comic workflow state/helper owner.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\create-image\image-create is the create image route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\create-video\video-create is the create video route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\create-workbench\studio-layout is the shared create workbench layout owner.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\canvas-agent-canvas\canvas is the native canvas route, runtime, and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\canvas-agent-canvas\agent-canvas is the agent canvas route, runtime, and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\canvas-agent-canvas\agent-studio is the Agent Studio/Jaaz embed route and feature-local API wrapper.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\canvas-agent-canvas\shared is the shared canvas-agent-canvas hook/helper owner.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\home\nav-layout is the app Layout, route prefetch, profile modal, and navigation guard owner.
-- D:\code\XiaoLouAI\XIAOLOU-main\src\features\home\nav-layout\api is the nav/profile helper API owner.
-- D:\code\XiaoLouAI\backend\services\toolbox\video-replace-sidecar is Python sidecar/runtime code:
-  app, scripts, pyproject, local data, weights, sqlite, and venv/runtime artifacts.
-- D:\code\XiaoLouAI\backend\services\model-runtime\local-model-worker-sidecar is Python local model queue-worker sidecar code:
-  app package and canonical queue skeleton worker.
-- The sidecar is service-side now, not retired.
-- Existing first-class frontend feature roots are only:
-  XIAOLOU-main\src\features\home
-  XIAOLOU-main\src\features\account-admin-enterprise
-  XIAOLOU-main\src\features\assets-media-projects
-  XIAOLOU-main\src\features\canvas-agent-canvas
-  XIAOLOU-main\src\features\comic-production
-  XIAOLOU-main\src\features\create-workbench
-  XIAOLOU-main\src\features\create-image
-  XIAOLOU-main\src\features\create-video
-  XIAOLOU-main\src\features\playground
-  XIAOLOU-main\src\features\toolbox
-  XIAOLOU-main\src\features\wallet-payments-api-center
-- Remaining route implementations or wrappers under XIAOLOU-main\src\pages, src\pages\create, and src\pages\comic:
-  none currently present.
-- Remaining component implementations or wrappers under XIAOLOU-main\src\components:
-  none currently present.
-- Deleted old-path wrappers after H17 import scans:
-  pages\*, pages\create\*, pages\comic\*, components\*, lib\api\playground.ts,
-  lib\api\profile-avatar.ts, lib\api\toolbox.ts, lib\navigation-guards.ts,
-  lib\project-script-store.ts, lib\storyboard-breakdown-prompt.ts,
-  lib\useCreateCreditQuote.ts, lib\video-replace\presets.ts.
-- Remaining shared/API review should be owner-by-owner only:
-  XIAOLOU-main\src\lib
-  XIAOLOU-main\src\lib\api
-- Backend .NET route families currently live under:
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Accounts
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Admin
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Auth
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Health
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\InternalJobs
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Media
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Operational
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Payments
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Playground
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Projects
-  backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\Toolbox
-
-Open technical follow-ups:
-- Implement Vertex/Veo video adapter with predictLongRunning polling and video object writeback.
-- Continue feature-layout cleanup for all discovered product areas, not only the four
-  previously named routes.
-- Split backend endpoint modules by capability only when a module becomes too large or
-  mixes unrelated product owners.
+Phase: I modular-migration
+Owner: I3a chatpanel-current-split-closeout
+Status: ready, wait for explicit I3a instruction
+I0: done 2026-05-13 docs/handoff calibration only
+I1a: done 2026-05-13 module-progress-inventory docs only
+I1b: done 2026-05-13 chuangjing-delta-owner-matrix docs only
+I1c: done 2026-05-13 docs-consistency-and-contract-handoff-audit docs only
+I2a: done 2026-05-13 home-nav-jaaz-remnant-inventory docs/decision only
+I2a-1: done 2026-05-13 home-nav-agentstudio-route-retirement runtime slice
+I2b: done 2026-05-13 assets-agent-canvas-copyword-cleanup runtime slice
+I2c: done 2026-05-13 create-workbench-recent-tasks-dialog-map docs/decision only
+I2d: done 2026-05-13 memory-center-route-decision docs/decision only
+I2e: done 2026-05-13 route-preload-helper-decision docs/decision only
+Goal: 在继续 XiaoLouAI 模块化的同时，按 owner 迁移 ChuangJingAI 的可取更新。
 ```
 
-## H-stage owner 状态
+I0 已完成：
+
+- 根 handoff 改为 MiLuStudio 式短棒交接。
+- 新增 I 阶段计划：`deploy\records\xiaolouai-modular-migration-phase-plan.md`。
+- 新增 I 阶段任务记录：`deploy\records\xiaolouai-modular-migration-task-record.md`。
+- 明确 H 阶段不代表全部模块化完成。
+- 明确 I 阶段必须“迁移即模块化”，禁止大块搬运。
+- 明确继承 MiLuStudio 的设计、环境、阶段结束和文档约束。
+
+I1a 已完成：
+
+- 复核当前未提交 ChatPanel 模块化工作。
+- 复核当前 frontend feature roots、空 pages/components、lib/api 残留。
+- 复核 backend .NET Modules 大文件和 agent-canvas 契约缺口。
+- 复核 ChuangJingAI 增量集中在 agent-canvas/canvas、Node core-api、
+  studio_ai 和 video-replace-service。
+- 细化 I 阶段为 I1b/I2a/I2b/I3a 等小 owner，避免大块任务漂移。
+
+I1b/I1c 已完成：
+
+- I1b 已产出 ChuangJingAI 到 XiaoLouAI owner 的迁移矩阵。
+- I1b 已记录账户/管理中心/支付重叠修改区。
+- 用户确认：账户设置和管理中心保留 XiaoLouAI baseline。
+- 用户确认：支付按 ChuangJingAI 产品/交互方向走。
+- 支付实现必须补 `.NET Control API` Payments/Admin contract。
+- 不恢复 Node `core-api`、legacy payment alias、旧 admin route owner 或 Jaaz runtime。
+- I1c 已复核短棒、阶段计划、任务记录、cutover 和历史 docs 路径说明。
+
+当前本地注意事项：
+
+- 本地已有未提交的 ChatPanel 模块化工作。
+- 不要覆盖或回滚这些文件。
+- 下一棒如处理 agent-canvas，必须先读取当前 dirty tree。
+- `deploy\records` 是 checkout-local 记录区，当前按 .gitignore 不进入 GitHub。
+- 当前 `src/pages` 和 `src/components` 没有文件，但这只说明旧入口清理完成。
+- 当前 `src/lib`、`src/lib/api`、agent-canvas runtime、canvas runtime、
+  create-video、Assets、Layout、ProjectEndpoints 等仍是模块化后续重点。
+- `/create/agent-studio` route/nav/home keepalive 已退役。
+- `assets-media-projects` 已清理 `/create/agent-studio` helpers/buttons、
+  Jaaz/AgentStudio 文案、`jaaz-prefetch` key 和 retired sync event listener。
+- 当前 Jaaz env、Vite proxy、Caddy/scripts 和 `agent-studio` 目录残留
+  仍需单独 cleanup owner；不要混进 I3a。
+- 当前 `docs\*.md` 历史引用是旧路径；当前记录根目录是 `deploy\records`。
+- `deploy\records` 里的历史记录可保留旧路径文字，但新工作必须写当前路径。
+- 支付 runtime 不能在 I2 直接开写；先走 I4g/I4h .NET contract owner。
+
+I2a 已完成：
+
+- 已读取本 handoff、phase plan、task record。
+- 已确认 `git status --short --branch`。
+- 当前 dirty tree 仍包含 ChatPanel 模块化现场：
+  `ChatPanel.tsx` tracked 修改，以及大量 `ChatPanel*` / `useChatPanel*`
+  未跟踪拆分文件。
+- I2a 未改 runtime code。
+- XiaoLouAI 当前 home/nav/layout 仍有 `/create/agent-studio` route、
+  `JaazAgentCanvasEmbed` lazy import、route prefetch、导航项、保活挂载、
+  `ensureJaazServices` keepalive、iframe-style postMessage 同步桥。
+- ChuangJingAI 当前 home/nav 主入口只有 `/create/canvas` 和
+  `/create/agent-canvas`，没有 `/create/agent-studio` 和 Jaaz keepalive。
+- `.env*`、Vite `/jaaz*` proxy、Caddy/script、`agent-studio` 目录删除
+  都不属于下一棒第一刀。
+- 已按用户澄清补充检查：
+  ChuangJingAI 自己存在但自己当前主线未使用的内容默认不迁移。
+- ChuangJingAI self-unused / reject：
+  `jaaz/`、`studio_ai/`、`scripts/openwebui*`、
+  `XIAOLOU-main/API MODEL LIST.txt`、`XIAOLOU-main/metadata.json`、
+  未注册路由的 `XIAOLOU-main/src/pages/Register.tsx`。
+- ChuangJingAI 自己确实使用但仍不能直接迁移：
+  `core-api/`、`video-replace-service/`、`caddy/`、
+  `AdminLogin.tsx`、`AdminOrders.tsx`。
+  这些只能作为 owner/contract 参考，不可大块搬运。
+
+I2a-1 已完成：
+
+- 已读取本 handoff、phase plan、task record。
+- 已确认 `git status --short --branch` 和 ChatPanel dirty tree。
+- 已保护 ChatPanel 模块化现场；未编辑任何 ChatPanel 文件。
+- Runtime 只 touch：
+  `XIAOLOU-main/src/App.tsx` 和
+  `XIAOLOU-main/src/features/home/nav-layout/Layout.tsx`。
+- 已移除 `/create/agent-studio` child route placeholder。
+- 已移除 AgentStudio lazy import、route prefetch、route predicate、
+  mount state、hidden mount block 和 home/nav nav item。
+- 已移除 home/nav 中的 `ensureJaazServices` keepalive。
+- 已移除 Layout iframe-style postMessage asset/project sync。
+- 没有新增 .NET Control API contract。
+- 没有新增 Python sidecar 或 adapter。
+- 验证通过：
+  `npm --prefix .\XIAOLOU-main run build`，
+  `npm --prefix .\XIAOLOU-main run test:unit`，
+  scoped `git diff --check`。
+
+I2b 已完成：
+
+- 已读取本 handoff、phase plan、task record。
+- 已确认 `git status --short --branch` 和 ChatPanel dirty tree。
+- 已保护 ChatPanel 模块化现场；未编辑任何 ChatPanel 文件。
+- Runtime 只 touch：
+  `XIAOLOU-main/src/features/assets-media-projects/assets/Assets.tsx` 和
+  `XIAOLOU-main/src/features/assets-media-projects/asset-sync/AssetSyncControls.tsx`。
+- 已移除 Assets 中的 `/create/agent-studio` helper/button。
+- 已移除 `xiaolou:jaaz-prefetch:*` sessionStorage key 使用。
+- 已移除 Assets 中 retired `xiaolou:agent-*` sync event listener。
+- 已把 visible copy 从 Jaaz/AgentStudio/智能体画布收口为：
+  `智能画布` 和 `历史智能画布工程`。
+- 保留 `agent_studio` sourceModule key 作为持久化数据兼容字段。
+- 没有新增 .NET Control API contract。
+- 没有新增 Python sidecar 或 adapter。
+- 验证通过：
+  `npm --prefix .\XIAOLOU-main run build`，
+  `npm --prefix .\XIAOLOU-main run test:unit`，
+  `git diff --check`。
+- `assets-media-projects` 残留扫描已无 Jaaz / AgentStudio / agent-studio /
+  `/create/agent-studio` / `jaaz-prefetch` / `xiaolou:agent-*` 命中。
+- 全 src 相关残留只剩 `agent-studio/JaazAgentCanvasEmbed.tsx` 自身，
+  留给后续显式 cleanup owner。
+
+I2c 已完成：
+
+- 已读取本 handoff、phase plan、task record。
+- 已确认 `git status --short --branch` 和 ChatPanel dirty tree。
+- 已保护 ChatPanel 模块化现场；未编辑任何 ChatPanel 文件。
+- 未改 runtime code。
+- 已对比 ChuangJingAI：
+  `components/create/RecentTaskDetailsDialog.tsx`、
+  `RecentTasksFullscreenDialog.tsx`、`lib/task-status.ts`、
+  `pages/create/ImageCreate.tsx`、`pages/create/VideoCreate.tsx`。
+- 已对照 XiaoLouAI：
+  `create-workbench/studio-layout`、`create-image/image-create`、
+  `create-video/video-create`、`lib/api/jobs-*` 和 `.NET /api/jobs`。
+- Owner map 结论：
+  recent task details/fullscreen dialog 归
+  `features/create-workbench/recent-tasks`，由 `create-image` 和
+  `create-video` 逐页消费。
+- I2c 不做 runtime patch：
+  当前 adopt 会跨 create-workbench/create-image/create-video/shared
+  task-status/.NET jobs contract。
+- 新 I4 gap：
+  `I4i task-history-dotnet-contract`。
+- Contract needs：
+  jobs list 需要 `limit/offset/types` 或等价多类型过滤；
+  job detail 需要结构化 failure/provider 字段或明确 metadata projection。
+- Python sidecar / adapter：
+  不需要。
+- Forbidden kept：
+  不恢复 Jaaz、Node core-api、`/api/tasks/stream` 默认、支付 runtime、
+  大目录复制、测试删除或大二进制。
+
+I2d 已完成：
+
+- 已读取本 handoff、phase plan、task record。
+- 已确认 `git status --short` 和 ChatPanel dirty tree。
+- 已保护 ChatPanel 模块化现场；未编辑任何 ChatPanel 文件。
+- 未改 runtime code。
+- 已对比 ChuangJingAI：
+  `pages/MemoryCenter.tsx`、`pages/Playground.tsx`、
+  `lib/api.ts` playground memory APIs、
+  `core-api/src/routes.js`、`playground-memory-vectors.js` 和
+  `007_playground_memory_vectors.sql`。
+- 已对照 XiaoLouAI：
+  `features/playground/Playground.tsx`、
+  `features/playground/api/playground.ts`、
+  `lib/api/playground-*`、
+  `.NET PlaygroundEndpoints.cs` 和 `PostgresPlaygroundStore.cs`。
+- Route / owner 结论：
+  未来 MemoryCenter 可采用独立 `/memory` 产品路由，但实现必须归
+  `features/playground/memory-center`；`home/nav-layout` 只做 route/nav
+  consumer。
+- I2d 不做 runtime patch：
+  当前独立 MemoryCenter 会暴露 vector-index、recall-test、create
+  semantics、permission 和分页/filtering 缺口。
+- 新 I4 gap：
+  `I4j playground-memory-dotnet-contract`。
+- Contract needs：
+  memory create/upsert 语义、vector schema/index、embedding provider
+  adapter、recall fallback、owner-scope permission、pagination/filtering 和
+  chat memory extraction/recall injection 边界。
+- Python sidecar / adapter：
+  默认不需要；如接受 vector recall，也应先走 .NET-owned embedding/provider
+  adapter。
+- Forbidden kept：
+  不恢复 Jaaz、Node core-api、`/api/tasks/stream` 默认、支付 runtime、
+  不导入 Node memory/vector stores、不改 env/proxy/Caddy/scripts、
+  不删除 `agent-studio`。
+
+I2e 已完成：
+
+- 已读取本 handoff、phase plan、task record。
+- 已确认 `git status --short --branch` 和 ChatPanel dirty tree。
+- 已保护 ChatPanel 模块化现场；未编辑任何 ChatPanel 文件。
+- 未改 runtime code。
+- 已对比 ChuangJingAI：
+  `src/lib/route-preload.ts` 只缓存 `pages/Playground` dynamic import；
+  `components/Layout.tsx` 通过 `lazy(loadPlaygroundPage)` 挂载 hidden
+  Playground shell，并在 home route 预热后延迟 160ms 首次 mount；
+  `pages/Home.tsx` 在 prompt-to-playground transition 前调用
+  `preloadPlaygroundPage()`。
+- 已对照 XiaoLouAI：
+  当前没有 route-preload helper；`src/App.tsx` 直接
+  `lazy(() => import("./features/playground/Playground"))` 并用
+  `DeferredRoute` 渲染 `/playground/*`；`home/nav-layout/Layout.tsx`
+  仅对 canvas/agent-canvas 做当前 route shell 挂载。
+- Owner 结论：
+  route-preload helper 的消费入口归 `features/home/nav-layout`；
+  Playground loader 的真实模块边界归 `features/playground`。
+- I2e 不做 runtime patch：
+  最小复刻也会同时跨 `home/nav-layout`、`playground` 和 App route tree，
+  并触碰当前已 dirty 的 `App.tsx` / `Layout.tsx`；同时 ChuangJingAI
+  行为包含 hidden Playground keepalive，应先签 owner 决策再写。
+- 后续窄 slice 如被明确要求：
+  可在 `features/home/nav-layout` 内新增 route-preload helper，和
+  `features/playground` 共享 Playground loader；不得顺手修改 canvas、
+  agent-canvas keepalive 或恢复 Jaaz/Node/task-stream 行为。
+- Python sidecar / adapter：不需要。
+
+## 下一棒任务
+
 ```text
-Purpose:
-- This list marks only directory/layout cleanup that is exact from current files.
-- "done" means the route or runtime owner has canonical placement; old wrappers are not required
-  unless a fresh import scan finds an active caller that cannot be moved in the same baton.
-- "partial" means a named sub-surface is done, but related owner surfaces still have main code outside feature folders.
-- Do not rework done items unless a later route/API behavior change requires it.
-- H17 deleted known old-path re-exports after import scans and route/build tests proved no old callers remain.
+I3a chatpanel-current-split-closeout
 
-Done:
-- top-level-layout: done.
-  Only XIAOLOU-main, backend, scripts, deploy remain as first-class code/deploy roots.
-- toolbox: done.
-  Frontend toolbox pages/API live under XIAOLOU-main\src\features\toolbox.
-  Python video-replace sidecar lives under backend\services\toolbox\video-replace-sidecar.
-  Old toolbox page/lib wrapper paths were deleted in H17.
-- playground: done.
-  Page, API service, and feature-local test live under XIAOLOU-main\src\features\playground.
-  Old page/API wrapper paths were deleted in H17.
-- account-admin-enterprise route/page/auth surfaces: done.
-  Enterprise Console, Register, AdminOrders, SuperAdminConsole, and GoogleLoginButton live under
-  XIAOLOU-main\src\features\account-admin-enterprise with feature-local API wrappers.
-  Old page/component wrapper paths were deleted in H17.
-- wallet-payments-api-center route surfaces: done.
-  api-center, credit-usage, and wallet-recharge live under
-  XIAOLOU-main\src\features\wallet-payments-api-center.
-  Old page wrapper paths were deleted in H17.
-- create-image frontend route: done.
-  Main page and API facade live under XIAOLOU-main\src\features\create-image\image-create.
-  Old pages\create\ImageCreate.tsx wrapper was deleted in H17.
-- create-video frontend route: done.
-  Main page and API facade live under XIAOLOU-main\src\features\create-video\video-create.
-  Old pages\create\VideoCreate.tsx wrapper was deleted in H17.
-- comic-production workflow: done.
-  Script Plaza lives under XIAOLOU-main\src\features\comic-production\script-plaza.
-  Comic shell, subpages, editors, and API facade live under
-  XIAOLOU-main\src\features\comic-production\comic.
-  Comic project script state lives under XIAOLOU-main\src\features\comic-production\comic\state.
-  Old pages\comic\*.tsx wrappers were deleted in H17.
-- canvas-agent-canvas: done.
-  CanvasCreate, AgentCanvasCreate, AgentStudio, JaazAgentCanvasEmbed, and
-  the native canvas/agent-canvas runtimes live under
-  XIAOLOU-main\src\features\canvas-agent-canvas.
-  Shared canvas hooks/helpers live under XIAOLOU-main\src\features\canvas-agent-canvas\shared.
-  Old pages\create canvas wrappers were deleted in H17.
-- create-workbench shared layout: done.
-  CreateStudioSplitLayout lives under XIAOLOU-main\src\features\create-workbench\studio-layout.
-  Old components\create\CreateStudioSplitLayout.tsx wrapper was deleted in H17.
-- home/nav/layout: done.
-  Home route lives under XIAOLOU-main\src\features\home.
-  Layout, route prefetch, ProfileModal, and navigation guards live under
-  XIAOLOU-main\src\features\home\nav-layout.
-  Profile avatar helper lives under XIAOLOU-main\src\features\home\nav-layout\api.
-  Old component/lib wrapper paths were deleted in H17.
-- assets-media-projects: done.
-  Assets route and API facade live under
-  XIAOLOU-main\src\features\assets-media-projects\assets.
-  Shared asset sync controls, reference asset picker, and generated media placeholder UI live under
-  XIAOLOU-main\src\features\assets-media-projects.
-  Old component wrapper paths were deleted in H17.
-  download-media, media-url-policy, api\media, and api\projects-canvas-create remain in lib because current usage spans create-image, create-video, toolbox, comic, canvas, home, and assets surfaces.
-- model-runtime local-model-worker sidecar placement: done.
-  Python sidecar lives under backend\services\model-runtime\local-model-worker-sidecar.
+只有用户明确要求继续 I3a 时才执行。
+先读本 handoff、phase plan、task record。
+先确认 git status 和当前 ChatPanel dirty tree。
 
-Partial:
-- none recorded in this handoff; continue full inventory each baton and add newly found partial owners here.
-Not yet layout-cleaned:
-- none recorded in this handoff; continue full inventory each baton and add newly found owners here.
-```
+目标：
+- 盘点当前 ChatPanel tracked/untracked 拆分现场。
+- 保护并收口当前 ChatPanel 模块化工作，优先修 import/export/type/build。
+- 跑前端 build 或至少 typecheck；必要时补 focused tests 决策。
+- 记录当前 ChatPanel baseline 是否可作为 ChuangJingAI agent-canvas
+  后续迁移基线。
 
-## 下一棒提示词
-
-```text
-继续按“目录/功能高内聚、低耦合”的目标整理项目目录。
-先做全量盘点，再选择一个 owner 修改，不要只按用户曾点名的四个功能处理。
-
-每一棒先检查这些入口：
-1. 前端路由：XIAOLOU-main\src\App.tsx
-2. 前端主实现散落区：XIAOLOU-main\src\pages、src\pages\create、src\pages\comic
-3. 前端共享/API 散落区：XIAOLOU-main\src\lib、src\lib\api
-4. 已收口前端 feature：XIAOLOU-main\src\features
-5. .NET 后端模块：backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules
-6. 后端 worker/provider/storage：backend\dotnet\control-plane\src
-7. 非 .NET sidecar：backend\services
-
-后续候选 owner 不限于以下列表，发现新功能也按同一规则加入：
-先对照上方 H-stage owner 状态；done 项不再作为下一棒默认候选，
-partial / not-yet 项优先。
-1. home/nav/layout：首页、导航、能力卡片、路由守卫、Layout。
-2. toolbox：剧本拆解、视频反推、25 格分镜、人物替换等工具箱功能。
-3. create-image：图片创作页面、模型配置、上传引用、任务创建、任务列表、Vertex 图片链路。
-4. create-video：视频创作页面、模型配置、上传引用、任务创建、队列和后续 Vertex/Veo adapter。
-5. canvas-agent-canvas：canvas、agent-canvas、节点、项目、媒体上传、Control API wrapper。
-6. playground：页面、transport、模型/会话/消息 API、后端 Playground module 和测试。
-7. assets-media-projects：资产页、媒体 URL 策略、上传、下载、项目资产、Media/Projects modules。
-8. account-admin-enterprise：账号、组织、企业后台、超级管理员、权限矩阵、Accounts/Admin/Auth modules。
-9. wallet-payments-api-center：钱包、用量、充值、API center、Payments module。
-10. comic-production：comic shell、剧本、角色、分镜、视频、配音、预览和相关项目资产工具。
-
-目录收口规则：
-1. 前端主实现放到 XIAOLOU-main\src\features\<product-area>\<capability>。
-2. 旧 pages 文件只在路由未稳定时短期保留薄 re-export/route wrapper；稳定并扫清引用后删除。
-3. src\lib 只保留真正跨两个以上 product-area 共享的工具；单功能工具移入 feature。
-4. src\lib\api 可以逐步拆为 feature-local api wrapper；跨域底座留 control-api-client。
-5. .NET 后端继续按 backend\dotnet\control-plane\src\XiaoLou.ControlApi\Modules\<area> 分区。
-6. 非 .NET 运行体放 backend\services\<product-area>\<capability>-sidecar。
-7. 不把 Python/backend sidecar 放进 XIAOLOU-main。
-8. 不新增顶层功能目录；不要恢复 tools、services、docs、control-plane-dotnet 顶层目录。
-9. 每次只迁移一个 owner，并同步改 imports、tests、README、handoff 和脚本路径。
-10. 移动后可短期保留兼容 re-export，避免一次性打断路由和测试；满足删除条件后及时删除。
-
-验证规则：
-1. 前端 owner 必跑 npm --prefix .\XIAOLOU-main run build。
-2. 前端 API/行为变更补跑对应 vitest。
-3. 后端 owner 必跑相关 dotnet build/xUnit。
-4. 涉及 legacy/deploy 边界时跑 verify-final-legacy-surface。
-5. 最后跑 git diff --check。
-禁止把功能代码重新放回 tools、legacy、零散 pages/lib 主实现目录。
-禁止把 Python/backend sidecar 放进 XIAOLOU-main 前端 feature 目录。
+不得回滚或大块重写 ChatPanel 模块化工作。
+不得恢复 Jaaz iframe/runtime 或 Node core-api。
+不得删除 agent-studio 目录。
+不得编辑 .env、vite proxy、Caddy、scripts。
+不得恢复 /api/tasks/stream 默认开启。
+不得导入 Node memory/vector stores。
+不得做支付 runtime；支付只进入 I4g/I4h .NET contract owner。
+不得修改 I4j memory/vector/recall 后端 contract。
+预计不需要 Python sidecar 或 adapter。
+完成后自主更新 phase plan、task record 和本短棒。
 ```
 
 ## 验证入口
 
 ```powershell
-.\scripts\windows\verify-final-legacy-surface.ps1 -LegacySurfaceManifestPath .\deploy\retained\legacy-surface-evidence\final-legacy-surface-manifest-g11k.json
+git status --short --branch
 npm --prefix .\XIAOLOU-main run build
-npm --prefix .\XIAOLOU-main run test:unit -- toolbox.test.ts api-compatibility-wrappers.test.ts projects-canvas-create.test.ts control-api-client.test.ts
+npm --prefix .\XIAOLOU-main run test:unit
 dotnet build .\backend\dotnet\control-plane\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj --no-restore -v:minimal
-dotnet build .\backend\dotnet\control-plane\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj --no-restore -v:minimal
 dotnet test .\backend\dotnet\control-plane\tests\XiaoLou.ControlApi.Tests\XiaoLou.ControlApi.Tests.csproj --no-build -v:minimal
+.\scripts\windows\verify-final-legacy-surface.ps1 -LegacySurfaceManifestPath .\deploy\retained\legacy-surface-evidence\final-legacy-surface-manifest-g11k.json
+git diff --check
 ```
