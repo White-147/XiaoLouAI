@@ -951,13 +951,37 @@ K1 已完成：
   Playwright smoke 覆盖 `/home` nav、注册用户账号中心、订阅/账单、企业默认组织
   和移动端账号中心 tabs。
 
+K2 已完成：
+
+- 已读取本 handoff、K phase plan、K task record、K1 记录、Playground baseline
+  和 ChuangJingAI Playground reference。
+- 已确认 `git status --short --branch`、3000 端口服务和 `/playground` 浏览器入口。
+- `/playground` 已从旧 LibreChat-like 常驻左右栏重做为 ChuangJingAI 风格创意入口：
+  中央 composer、starter prompts、Skills、模式菜单、模型菜单、思考开关和发送入口。
+- 会话历史已收进 secondary drawer/sidebar，保留搜索、打开、重命名、删除和 active job
+  状态显示。
+- 自动记忆已收进 secondary drawer/sidebar，`/playground?panel=memory` 和 shell
+  `记忆中心` 入口可直接打开；`/playground?panel=history` 可打开历史抽屉。
+- 保留 XiaoLouAI canonical Playground API：conversations、messages、chat jobs、
+  memories、memory preference、`conversationId` restore 和 active-job restore。
+- 未启用 web search 或 attachments，因为当前签名 Playground API contract 未暴露这些输入。
+- 未改 ChatPanel、Agent Canvas runtime、backend runtime、`.env`、Vite proxy、Caddy、
+  scripts、Jaaz/Node core-api、Node memory/vector、Node payment runtime、local-image-edit、
+  3D Director 或 Python sidecar。
+- 验证通过：
+  `npm --prefix .\XIAOLOU-main run lint`；
+  `npm --prefix .\XIAOLOU-main run build`；
+  `git diff --check`（仅 LF/CRLF warning）；
+  Playwright smoke 覆盖 `/playground` desktop、signed-in mobile、Skills、mode、
+  thinking、model、memory/history drawers。
+
 ## 下一棒任务
 
 ```text
-I4j/J 稳定化和 K0/K1 已完成。
-下一棒从 K2 playground-creative-entry 开始。
-开始 K2 前，先读本 handoff、K phase plan、K task record 和 K1 记录；
-先确认 git status、Playground API/UI baseline、ChuangJingAI Playground reference
+I4j/J 稳定化和 K0/K1/K2 已完成。
+下一棒从 K3 agent-canvas-shell-entry 开始。
+开始 K3 前，先读本 handoff、K phase plan、K task record 和 K2 记录；
+先确认 git status、Agent Canvas API/UI baseline、ChuangJingAI Agent Canvas reference
 和当前浏览器状态。
 不得回滚或大块重写 ChatPanel baseline。
 不得恢复 Jaaz iframe/runtime 或 Node core-api。
@@ -968,8 +992,8 @@ I4j/J 稳定化和 K0/K1 已完成。
 不得恢复 Node 支付 runtime；I4g/I4h payment contract 已由 .NET Payments/Admin owner 处理。
 默认不创建 Python sidecar 或 adapter。
 K1 已处理共享菜单壳和账号中心/ProfileModal。
-K2 只处理 Playground 创意入口 composer、Skills、模型/模式菜单和记忆/会话侧栏。
-K3 才处理 Agent Canvas 外观和入口；local-image-edit、overlay、3D Director
+K2 已处理 Playground 创意入口 composer、Skills、模型/模式菜单和记忆/会话侧栏。
+K3 只处理 Agent Canvas 外观和入口；local-image-edit、overlay、3D Director
 继续作为 K 之后的 deferred owners。
 不得扩大到未签 owner 的 chat、payment、jobs、local-image-edit、3D Director、
 env/proxy/Caddy/scripts 或 backend runtime。

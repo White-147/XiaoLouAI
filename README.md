@@ -48,7 +48,7 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；资产引用选择器、同步入库控件和生成媒体占位 UI 也由 `assets-media-projects` owner 承载。 |
 | 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`，用于组织成员、企业钱包和项目权限管理。 |
 | 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
-| Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；K 阶段按 ChuangJingAI 完整重做为创意入口 composer，并保留会话与记忆侧边能力。 |
+| Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；K2 已按 ChuangJingAI 重做为创意入口 composer，并保留会话与记忆抽屉能力。 |
 | 积分统计 | `/wallet/usage` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/credit-usage/`，用于个人或平台视角的积分消耗统计。 |
 | API 中心 | `/api-center` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/api-center/`，用于供应商模型、默认链路和 API Key 配置。 |
 | 钱包充值 | `/wallet/recharge` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/wallet-recharge/`，用于钱包充值订单、支付方式、凭证上传和最近流水。 |
@@ -222,10 +222,18 @@ Confirmed scope:
   selection inside the account center.
 
 K1 shared shell/account center is complete: the primary nav now uses the
-ChuangJingAI-style shell entries, `记忆中心` points at the current Playground
-memory surface until K2, wallet usage/recharge stay reachable from the account
-center, and `ProfileModal` now presents `个人主页` / `订阅` / `账单` while keeping
-XiaoLouAI profile editing, password change and default organization selection.
+ChuangJingAI-style shell entries, `记忆中心` points at the Playground memory
+drawer, wallet usage/recharge stay reachable from the account center, and
+`ProfileModal` now presents `个人主页` / `订阅` / `账单` while keeping XiaoLouAI
+profile editing, password change and default organization selection.
+
+K2 Playground creative entry is complete: `/playground` now opens on the
+ChuangJingAI-style central composer with starter prompts, Skills, mode menu,
+model menu and thinking toggle. XiaoLouAI canonical conversations, messages,
+chat jobs, memory preference and memories remain on the existing Control API,
+with history and memory moved into secondary drawers via Playground controls and
+`/playground?panel=history|memory`. Web search and attachments remain deferred
+until the signed Playground API contract exposes those inputs.
 
 ### Toolbox Frontend Layout
 
