@@ -88,8 +88,8 @@ Get-Content .\deploy\records\xiaolouai-refactor-gap-verification.md -Encoding UT
 
 ```text
 Phase: I modular-migration
-Owner: I3a chatpanel-current-split-closeout
-Status: ready, wait for explicit I3a instruction
+Owner: I3c agent-canvas-chat-contract-preflight
+Status: ready, wait for explicit I3c instruction
 I0: done 2026-05-13 docs/handoff calibration only
 I1a: done 2026-05-13 module-progress-inventory docs only
 I1b: done 2026-05-13 chuangjing-delta-owner-matrix docs only
@@ -100,6 +100,8 @@ I2b: done 2026-05-13 assets-agent-canvas-copyword-cleanup runtime slice
 I2c: done 2026-05-13 create-workbench-recent-tasks-dialog-map docs/decision only
 I2d: done 2026-05-13 memory-center-route-decision docs/decision only
 I2e: done 2026-05-13 route-preload-helper-decision docs/decision only
+I3a: done 2026-05-13 chatpanel-current-split-closeout validation/docs only
+I3b: done 2026-05-13 agent-canvas-app-orchestration helper split
 Goal: 在继续 XiaoLouAI 模块化的同时，按 owner 迁移 ChuangJingAI 的可取更新。
 ```
 
@@ -133,9 +135,13 @@ I1b/I1c 已完成：
 
 当前本地注意事项：
 
-- 本地已有未提交的 ChatPanel 模块化工作。
-- 不要覆盖或回滚这些文件。
-- 下一棒如处理 agent-canvas，必须先读取当前 dirty tree。
+- 当前 `git status --short --branch` 显示 `main...origin/main [ahead 1]`。
+- 当前 tracked runtime diff 只包含
+  `XIAOLOU-main/src/features/canvas-agent-canvas/agent-canvas/runtime/App.tsx`；
+  新增 runtime helper：
+  `XIAOLOU-main/src/features/canvas-agent-canvas/agent-canvas/runtime/appOrchestration.ts`。
+- ChatPanel 模块化拆分已经进入 tracked clean baseline；不是未提交脏树。
+- 下一棒处理 agent-canvas 时仍必须保护现有 ChatPanel 拆分，不要回滚或大块重写。
 - `deploy\records` 是 checkout-local 记录区，当前按 .gitignore 不进入 GitHub。
 - 当前 `src/pages` 和 `src/components` 没有文件，但这只说明旧入口清理完成。
 - 当前 `src/lib`、`src/lib/api`、agent-canvas runtime、canvas runtime、
@@ -144,7 +150,7 @@ I1b/I1c 已完成：
 - `assets-media-projects` 已清理 `/create/agent-studio` helpers/buttons、
   Jaaz/AgentStudio 文案、`jaaz-prefetch` key 和 retired sync event listener。
 - 当前 Jaaz env、Vite proxy、Caddy/scripts 和 `agent-studio` 目录残留
-  仍需单独 cleanup owner；不要混进 I3a。
+  仍需单独 cleanup owner；不要混进 I3c。
 - 当前 `docs\*.md` 历史引用是旧路径；当前记录根目录是 `deploy\records`。
 - `deploy\records` 里的历史记录可保留旧路径文字，但新工作必须写当前路径。
 - 支付 runtime 不能在 I2 直接开写；先走 I4g/I4h .NET contract owner。
@@ -318,23 +324,76 @@ I2e 已完成：
   agent-canvas keepalive 或恢复 Jaaz/Node/task-stream 行为。
 - Python sidecar / adapter：不需要。
 
+I3a 已完成：
+
+- 已读取本 handoff、phase plan、task record。
+- 已确认 `git status --short --branch`：
+  `main...origin/main [ahead 1]`，无 dirty 输出。
+- 已确认 ChatPanel 路径下没有 tracked/untracked dirty 输出。
+- 当前 ChatPanel split 文件已经全部 tracked；盘点到 52 个
+  `ChatPanel*` / `chatPanel*` / `useChatPanel*` 文件。
+- `ChatPanel.tsx` 当前是 1001 行的编排 shell，使用拆出的 composer、
+  header、message list、menus、media attachments、model/video hooks 等。
+- 未发现 import/export/type/build 断点；未改 runtime code。
+- 验证通过：
+  `npm --prefix .\XIAOLOU-main run build`，
+  `npm --prefix .\XIAOLOU-main run test:unit`
+  （19 files / 122 tests）。
+- Focused tests 决策：
+  I3a 未改 runtime，且全量 unit suite 通过，本轮不新增 ChatPanel tests。
+- Baseline 结论：
+  当前 ChatPanel 可作为后续 ChuangJingAI agent-canvas 迁移基线；后续迁移
+  应继续小 slice，不要把 ChatPanel 重新合并成大文件。
+- Python sidecar / adapter：不需要。
+
+I3b 已完成：
+
+- 已读取本 handoff、phase plan、task record。
+- 已确认 git status 和 ChatPanel baseline：ChatPanel components 路径无 dirty。
+- 已对照 ChuangJingAI `src/agent-canvas/App.tsx`：
+  源文件约 8794 行，混有 AgentProjectHub、local image edit、ImageAnnotation、
+  vector trace、shape drawing、mockup rotation、3D Director gating 和 native pan。
+- 已盘点 XiaoLouAI `agent-canvas/runtime/App.tsx`：
+  原 4002 行，仍集中承担 runtime config、host/draft hydration、generation
+  access、project asset sync、media drop/paste、viewport safety、agent actions
+  和 render composition。
+- Split 决策：
+  本轮只做 app orchestration helper split，不采纳 ChuangJingAI 的越界能力。
+- Runtime 只 touch：
+  `agent-canvas/runtime/App.tsx` 和新增
+  `agent-canvas/runtime/appOrchestration.ts`。
+- 已搬出纯 helper：
+  URL/base64、drag/drop media import、editable target 判断、draft/title
+  helpers、viewport safe-bounds、generation permission/credit 文案、project
+  asset sync draft builder。
+- 未触碰：
+  ChatPanel baseline、agent action parsing/chat contract、3D Director、local
+  image edit、node overlay tools、native agent catalog、canvas runtime、
+  backend contracts、Jaaz/Node/env/proxy/Caddy/scripts/payment/I4j。
+- 验证通过：
+  `npm --prefix .\XIAOLOU-main run build`，
+  `npm --prefix .\XIAOLOU-main run test:unit`
+  （19 files / 122 tests），`git diff --check`。
+- Python sidecar / adapter：不需要。
+
 ## 下一棒任务
 
 ```text
-I3a chatpanel-current-split-closeout
+I3c agent-canvas-chat-contract-preflight
 
-只有用户明确要求继续 I3a 时才执行。
+只有用户明确要求继续 I3c 时才执行。
 先读本 handoff、phase plan、task record。
-先确认 git status 和当前 ChatPanel dirty tree。
+先确认 git status 和当前 ChatPanel baseline。
 
 目标：
-- 盘点当前 ChatPanel tracked/untracked 拆分现场。
-- 保护并收口当前 ChatPanel 模块化工作，优先修 import/export/type/build。
-- 跑前端 build 或至少 typecheck；必要时补 focused tests 决策。
-- 记录当前 ChatPanel baseline 是否可作为 ChuangJingAI agent-canvas
-  后续迁移基线。
+- 对照 ChuangJingAI agent-canvas chat / stream / AgentProjectHub 相关变化。
+- 对照 XiaoLouAI 当前 ChatPanel baseline、useChatAgent、runtime App 调用点
+  和 .NET Control API 现有契约。
+- 先产出 chat contract preflight / owner 决策和 I4 gap。
+- 如发现需要 chat/stream 后端、AgentProjectHub、memory/recall、权限或
+  persistence contract，先写 I4 gap，不在 I3c 直接补后端。
 
-不得回滚或大块重写 ChatPanel 模块化工作。
+不得回滚或大块重写 ChatPanel baseline。
 不得恢复 Jaaz iframe/runtime 或 Node core-api。
 不得删除 agent-studio 目录。
 不得编辑 .env、vite proxy、Caddy、scripts。
