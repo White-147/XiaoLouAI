@@ -26,6 +26,9 @@ internal static class ClientRoutePolicy
             || path.StartsWithSegments("/api/projects")
             || path.StartsWithSegments("/api/canvas-projects")
             || path.StartsWithSegments("/api/agent-canvas/projects")
+            || string.Equals(path.Value, "/api/agent-canvas/chat", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path.Value, "/api/agent-canvas/chat/stream", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWithSegments("/api/canvas/local-image-edit")
             || path.StartsWithSegments("/api/create")
             || string.Equals(path.Value, "/api/wallet", StringComparison.OrdinalIgnoreCase)
             || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
@@ -143,6 +146,17 @@ internal static class ClientRoutePolicy
 
         if (path.StartsWithSegments("/api/canvas-projects")
             || path.StartsWithSegments("/api/agent-canvas/projects"))
+        {
+            return HttpMethods.IsGet(method) ? "canvas:read" : "canvas:write";
+        }
+
+        if (string.Equals(path.Value, "/api/agent-canvas/chat", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path.Value, "/api/agent-canvas/chat/stream", StringComparison.OrdinalIgnoreCase))
+        {
+            return "canvas:write";
+        }
+
+        if (path.StartsWithSegments("/api/canvas/local-image-edit"))
         {
             return HttpMethods.IsGet(method) ? "canvas:read" : "canvas:write";
         }

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using XiaoLou.ControlApi.Modules.Accounts;
+using XiaoLou.ControlApi.Modules.AgentCanvas;
 using XiaoLou.ControlApi.Modules.Auth;
 using XiaoLou.ControlApi.Modules.InternalJobs;
 using XiaoLou.ControlApi.Modules.Media;
@@ -21,6 +23,224 @@ namespace XiaoLou.ControlApi.Tests.Modules.BackendAdvisory;
 
 public sealed class BackendAdvisoryEndpointResponseShapeTests
 {
+    [Fact]
+    public async Task AgentCanvasChat_Stub_ReturnsSuccessEnvelopeWithoutActions()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/agent-canvas/chat",
+            """
+            {
+              "sessionId": "agent-canvas-session-1",
+              "message": "Create a simple storyboard",
+              "model": "auto",
+              "mode": "agent",
+              "tools": {
+                "webSearch": false,
+                "canvasFiles": true
+              },
+              "canvas": {
+                "title": "Synthetic canvas",
+                "nodes": [],
+                "groups": [],
+                "viewport": {},
+                "selectedNodeIds": []
+              },
+              "attachments": []
+            }
+            """);
+
+        Assert.Equal(StatusCodes.Status200OK, response.StatusCode);
+        using var payload = JsonDocument.Parse(response.Body);
+        var root = payload.RootElement;
+        Assert.True(root.GetProperty("success").GetBoolean());
+        var data = root.GetProperty("data");
+        Assert.Equal("agent-canvas-session-1", data.GetProperty("sessionId").GetString());
+        Assert.Equal("contract-stub", data.GetProperty("provider").GetString());
+        Assert.Equal("auto", data.GetProperty("model").GetString());
+        Assert.Empty(data.GetProperty("actions").EnumerateArray());
+        var warning = Assert.Single(data.GetProperty("warnings").EnumerateArray());
+        Assert.Contains("AGENT_CANVAS_CHAT_STUB", warning.GetString() ?? "");
+    }
+
+    [Fact]
+    public async Task AgentCanvasChat_BlankMessage_ReturnsFrontendReadableErrorEnvelope()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/agent-canvas/chat",
+            """{"sessionId":"agent-canvas-session-1","message":"   "}""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        using var payload = JsonDocument.Parse(response.Body);
+        var root = payload.RootElement;
+        Assert.False(root.GetProperty("success").GetBoolean());
+        var error = root.GetProperty("error");
+        Assert.Equal("AGENT_CANVAS_CHAT_INVALID_REQUEST", error.GetProperty("code").GetString());
+        Assert.Equal("message is required", error.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task AgentCanvasChatStream_Stub_ReturnsSseResultWithoutActions()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/agent-canvas/chat/stream",
+            """
+            {
+              "sessionId": "agent-canvas-session-1",
+              "message": "Create a simple storyboard",
+              "model": "auto",
+              "mode": "agent",
+              "canvas": {
+                "title": "Synthetic canvas",
+                "nodes": [],
+                "groups": [],
+                "viewport": {},
+                "selectedNodeIds": []
+              }
+            }
+            """);
+
+        Assert.Equal(StatusCodes.Status200OK, response.StatusCode);
+        Assert.True(
+            response.ContentType?.StartsWith("text/event-stream", StringComparison.OrdinalIgnoreCase) == true,
+            $"Expected text/event-stream content type, got {response.ContentType ?? "<null>"}");
+        Assert.Contains("event: ready", response.Body);
+        Assert.Contains("event: status", response.Body);
+        Assert.Contains("event: result", response.Body);
+        Assert.Contains("event: done", response.Body);
+        Assert.Contains("\"provider\":\"contract-stub\"", response.Body);
+        Assert.Contains("\"model\":\"auto\"", response.Body);
+        Assert.Contains("\"actions\":[]", response.Body);
+        Assert.Contains("AGENT_CANVAS_CHAT_STUB", response.Body);
+        Assert.DoesNotContain("event: actions", response.Body);
+        Assert.DoesNotContain("event: delta", response.Body);
+    }
+
+    [Fact]
+    public async Task AgentCanvasChatStream_BlankMessage_ReturnsErrorBeforeAnySseEvent()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/agent-canvas/chat/stream",
+            """{"sessionId":"agent-canvas-session-1","message":"   "}""");
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.DoesNotContain("event:", response.Body);
+        using var payload = JsonDocument.Parse(response.Body);
+        var root = payload.RootElement;
+        Assert.False(root.GetProperty("success").GetBoolean());
+        var error = root.GetProperty("error");
+        Assert.Equal("AGENT_CANVAS_CHAT_INVALID_REQUEST", error.GetProperty("code").GetString());
+        Assert.Equal("message is required", error.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task LocalImageEditHealth_ContractStub_ReportsUnavailableOperations()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Get,
+            "/api/canvas/local-image-edit/health",
+            "{}");
+
+        Assert.Equal(StatusCodes.Status200OK, response.StatusCode);
+        using var payload = JsonDocument.Parse(response.Body);
+        var root = payload.RootElement;
+        Assert.True(root.GetProperty("success").GetBoolean());
+        var data = root.GetProperty("data");
+        Assert.False(data.GetProperty("available").GetBoolean());
+        Assert.Equal("contract-stub", data.GetProperty("mode").GetString());
+        Assert.Equal("none", data.GetProperty("mediaOutput").GetString());
+        Assert.Contains(
+            data.GetProperty("operations").EnumerateArray(),
+            item => item.GetString() == "remove-background");
+        Assert.Contains(
+            data.GetProperty("operations").EnumerateArray(),
+            item => item.GetString() == "inpaint");
+    }
+
+    [Fact]
+    public async Task LocalImageEditRemoveBackground_Stub_ReturnsUnavailableEnvelopeWithoutMedia()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/canvas/local-image-edit/remove-background",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "allowed-owner",
+              "projectId": "canvas-project-1",
+              "nodeId": "image-node-1",
+              "imageUrl": "https://cdn.example.test/source.png"
+            }
+            """);
+
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, response.StatusCode);
+        using var payload = JsonDocument.Parse(response.Body);
+        var root = payload.RootElement;
+        Assert.False(root.GetProperty("success").GetBoolean());
+        var error = root.GetProperty("error");
+        Assert.Equal("LOCAL_IMAGE_EDIT_UNAVAILABLE", error.GetProperty("code").GetString());
+        Assert.Equal("remove-background", error.GetProperty("operation").GetString());
+        Assert.Equal("canvas-project-1", error.GetProperty("projectId").GetString());
+        Assert.Equal("image-node-1", error.GetProperty("nodeId").GetString());
+        Assert.DoesNotContain("resultUrl", response.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("jobId", response.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LocalImageEditInpaint_MissingMask_ReturnsFrontendReadableErrorEnvelope()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/canvas/local-image-edit/inpaint",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "allowed-owner",
+              "imageUrl": "https://cdn.example.test/source.png"
+            }
+            """);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        using var payload = JsonDocument.Parse(response.Body);
+        var root = payload.RootElement;
+        Assert.False(root.GetProperty("success").GetBoolean());
+        var error = root.GetProperty("error");
+        Assert.Equal("LOCAL_IMAGE_EDIT_INVALID_REQUEST", error.GetProperty("code").GetString());
+        Assert.Equal("inpaint", error.GetProperty("operation").GetString());
+        Assert.Equal("maskDataUrl is required for this local image edit operation", error.GetProperty("message").GetString());
+    }
+
     [Theory]
     [MemberData(nameof(AccountScopeDeniedPostRoutes))]
     public async Task AccountScopedPostHandlers_ReturnStableForbiddenEnvelopeBeforeSyntheticStores(
@@ -277,6 +497,15 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
               "model": "qwen-plus"
             }
             """);
+        yield return RouteBody(
+            "/api/canvas/local-image-edit/remove-background",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "imageUrl": "https://cdn.example.test/source.png"
+            }
+            """);
     }
 
     private static WebApplication BuildSyntheticApp(PaymentCallbackOptions? paymentCallbackOptions = null)
@@ -313,6 +542,8 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
         app.MapPaymentEndpoints();
         app.MapMediaEndpoints();
         app.MapInternalJobsEndpoints();
+        app.MapAgentCanvasChatEndpoints();
+        app.MapAgentCanvasLocalImageEditEndpoints();
         app.MapToolboxEndpoints();
         app.MapPlaygroundEndpoints();
         return app;

@@ -277,6 +277,25 @@ export interface ImageNodeFloatingToolbarProps {
 
 type ItemDef = { id: ImageNodeToolbarActionId; label: string; node: React.ReactNode };
 
+const CONTRACT_GATED_ACTION_REASONS: Partial<Record<ImageNodeToolbarActionId, string>> = {
+  upscale: '等待本地图像编辑 Control API 契约',
+  removeBackground: '等待本地图像编辑 Control API 契约',
+  eraser: '等待 image-node overlay 与本地图像编辑执行契约',
+  editElements: '等待元素分解与本地图像编辑执行契约',
+  editText: '等待 OCR 与文字编辑执行契约',
+  moveObject: '等待移动对象 overlay 与本地图像编辑执行契约',
+  'more:mockup': '等待 Mockup 节点字段与执行 owner',
+  'more:expand': '等待扩图 overlay 与本地图像编辑执行契约',
+  'more:adjust': '等待图像调整 overlay owner',
+  'more:vector': '等待矢量化 owner',
+  'more:flipRotate': '等待翻转旋转节点字段 owner',
+  'more:customizeToolbar': '等待工具栏配置 owner',
+};
+
+function getContractGatedReason(id: ImageNodeToolbarActionId) {
+  return CONTRACT_GATED_ACTION_REASONS[id];
+}
+
 function runWithOptionalParent(
   onToolbarAction: ImageNodeFloatingToolbarProps['onToolbarAction'],
   nodeId: string,
@@ -458,30 +477,42 @@ export const ImageNodeFloatingToolbar: React.FC<ImageNodeFloatingToolbarProps> =
 
         <div className="flex min-w-0 items-center gap-0 pr-0.5">
           {mainItems.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (it.id === 'multiAngle') {
-                  onUpdateAngleMode(!angleMode);
-                  onToolbarAction?.(nodeId, 'multiAngle');
-                } else {
-                  runWithOptionalParent(onToolbarAction, nodeId, it.id, () => {});
-                }
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              className={`flex ${hRow} shrink-0 items-center gap-0.5 rounded-md ${padBtn} ${tMain} ${
-                it.id === 'multiAngle' && angleMode
-                  ? isDark
-                    ? 'bg-white/10 text-white'
-                    : 'bg-[#0f0f0e] text-white'
-                  : btn
-              } transition-colors`}
-            >
-              {it.node}
-              <span className="whitespace-nowrap">{it.label}</span>
-            </button>
+            (() => {
+              const disabledReason = getContractGatedReason(it.id);
+              return (
+                <button
+                  key={it.id}
+                  type="button"
+                  disabled={!!disabledReason}
+                  title={disabledReason || it.label}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (disabledReason) return;
+                    if (it.id === 'multiAngle') {
+                      onUpdateAngleMode(!angleMode);
+                      onToolbarAction?.(nodeId, 'multiAngle');
+                    } else {
+                      runWithOptionalParent(onToolbarAction, nodeId, it.id, () => {});
+                    }
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className={`flex ${hRow} shrink-0 items-center gap-0.5 rounded-md ${padBtn} ${tMain} ${
+                    disabledReason
+                      ? isDark
+                        ? 'cursor-not-allowed text-white/28'
+                        : 'cursor-not-allowed text-neutral-300'
+                      : it.id === 'multiAngle' && angleMode
+                        ? isDark
+                          ? 'bg-white/10 text-white'
+                          : 'bg-[#0f0f0e] text-white'
+                        : btn
+                  } transition-colors`}
+                >
+                  {it.node}
+                  <span className="whitespace-nowrap">{it.label}</span>
+                </button>
+              );
+            })()
           ))}
 
           <div className="relative flex shrink-0" ref={moreRootRef}>
@@ -524,39 +555,54 @@ export const ImageNodeFloatingToolbar: React.FC<ImageNodeFloatingToolbarProps> =
                 ) : null}
 
                 {MORE_rows.map((row) => (
-                  <div key={row.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onToolbarAction?.(nodeId, row.id);
-                        if (row.id === 'more:expand') onExpand?.(resultUrl);
-                        setMoreOpen(false);
-                      }}
-                      className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left ${
-                        isDark ? 'hover:bg-white/6' : 'hover:bg-black/[0.04]'
-                      }`}
-                    >
-                      <span className="inline-flex w-[20px] shrink-0 items-center justify-center text-current">
-                        {row.icon}
-                      </span>
-                      <span className="min-w-0 flex-1">{row.label}</span>
-                      {row.badgeText ? (
-                        <span
-                          className={`rounded border px-1.5 text-[10px] font-medium leading-tight ${
-                            isDark ? 'border-amber-400/35 text-amber-100' : 'border-amber-400/50 text-amber-800'
+                  (() => {
+                    const disabledReason = getContractGatedReason(row.id);
+                    return (
+                      <div key={row.id}>
+                        <button
+                          type="button"
+                          disabled={!!disabledReason}
+                          title={disabledReason || row.label}
+                          onClick={() => {
+                            if (disabledReason) return;
+                            onToolbarAction?.(nodeId, row.id);
+                            if (row.id === 'more:expand') onExpand?.(resultUrl);
+                            if (row.id === 'more:crop') onOpenEditor?.(nodeId);
+                            setMoreOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left ${
+                            disabledReason
+                              ? isDark
+                                ? 'cursor-not-allowed text-white/28'
+                                : 'cursor-not-allowed text-neutral-300'
+                              : isDark
+                                ? 'hover:bg-white/6'
+                                : 'hover:bg-black/[0.04]'
                           }`}
                         >
-                          {row.badgeText}
-                        </span>
-                      ) : null}
-                      {row.badgeDot && !row.badgeText ? (
-                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
-                      ) : null}
-                    </button>
-                    {row.dividerAfter ? (
-                      <div className={`my-0.5 h-px w-full ${isDark ? 'bg-white/8' : 'bg-neutral-200'}`} />
-                    ) : null}
-                  </div>
+                          <span className="inline-flex w-[20px] shrink-0 items-center justify-center text-current">
+                            {row.icon}
+                          </span>
+                          <span className="min-w-0 flex-1">{row.label}</span>
+                          {row.badgeText && !disabledReason ? (
+                            <span
+                              className={`rounded border px-1.5 text-[10px] font-medium leading-tight ${
+                                isDark ? 'border-amber-400/35 text-amber-100' : 'border-amber-400/50 text-amber-800'
+                              }`}
+                            >
+                              {row.badgeText}
+                            </span>
+                          ) : null}
+                          {row.badgeDot && !row.badgeText && !disabledReason ? (
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
+                          ) : null}
+                        </button>
+                        {row.dividerAfter ? (
+                          <div className={`my-0.5 h-px w-full ${isDark ? 'bg-white/8' : 'bg-neutral-200'}`} />
+                        ) : null}
+                      </div>
+                    );
+                  })()
                 ))}
 
                 <button

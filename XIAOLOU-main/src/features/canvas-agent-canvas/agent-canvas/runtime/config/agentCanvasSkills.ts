@@ -203,6 +203,22 @@ const STORYBOARD_BREAKDOWN_CANVAS_INSTRUCTION = [
   ].join('\n'),
 ].join('\n\n');
 
+const SCRIPT_GRID_IMAGE_MAX_PANELS = 25;
+
+const SCRIPT_GRID_IMAGE_CANVAS_INSTRUCTION = [
+  '当前启用 Skill：剧本拆解生成多宫格。',
+  [
+    '目标：参考“剧本拆解提示词”Skill 的拆解思路阅读剧本、提炼关键镜头，但不要生成剧本拆解表、Storyboard Manager 表格或多个分镜占位节点。',
+    '必须先确认用户指定了宫格数量。若用户没有明确写出 N宫格、N格、NxM 或 panels 数量，直接回复“请告诉我要生成多少宫格，并粘贴剧本正文”，actions 必须为空。',
+    `宫格数量上限 ${SCRIPT_GRID_IMAGE_MAX_PANELS}。若用户要求更多，先请用户降低数量或拆成多次生成。`,
+    '当用户提供剧本正文和宫格数量后，只返回一个 generate_image action，用于生成一张完整的多宫格分镜图。',
+    '不要生成剧本拆解表，不要创建 Storyboard Manager 节点，不要创建多个 Image 节点，不要把每格拆成独立图片。',
+    'generate_image action 必须设置 imageModel/model 为 agentOptions.preferredImageToolId 或当前画布默认图片模型；aspectRatio 为 1:1；resolution 为 2K；count/batchCount 为 1。',
+    'prompt 必须把剧本按指定宫格数量拆成同等数量的关键分镜，每格一句清晰可生图提示词，包含人物、景别、动作、情绪、场景、光影、镜头角度和连续性。',
+    '最终图像必须是一张完整拼贴图/多宫格图，画面有清晰分隔线、均匀留白、同一角色/场景风格连续，并严格包含用户指定数量的宫格。',
+  ].join('\n'),
+].join('\n\n');
+
 export const SKILL_CATEGORIES: AgentCanvasSkillCategory[] = [
   { id: 'script', label: 'Script/剧本' },
   { id: 'video', label: 'Video' },
@@ -220,6 +236,15 @@ export const SKILLS: AgentCanvasSkill[] = [
     prompt: '请使用“剧本拆解提示词”Skill，把我提供的剧本拆解为文字分镜，并放到画布文本节点中。',
     hiddenInstruction: STORYBOARD_BREAKDOWN_CANVAS_INSTRUCTION,
     maxTokens: 16000,
+  },
+  {
+    id: 'script-grid-image',
+    category: 'script',
+    title: '剧本拆解生成多宫格',
+    description: '把剧本直接拆成指定宫格数量的分镜生图提示词，并生成一张多宫格图。',
+    prompt: '请使用“剧本拆解生成多宫格”Skill。请告诉我想要生成多少宫格，并粘贴剧本正文；我会直接生成一张多宫格分镜图。',
+    hiddenInstruction: SCRIPT_GRID_IMAGE_CANVAS_INSTRUCTION,
+    maxTokens: 12000,
   },
   {
     id: 'seedance-video',

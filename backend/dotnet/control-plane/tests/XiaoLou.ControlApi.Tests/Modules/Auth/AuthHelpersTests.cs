@@ -419,6 +419,15 @@ public sealed class AuthHelpersTests
     [InlineData("GET", "/api/playground", true)]
     [InlineData("POST", "/api/media/upload-begin", true)]
     [InlineData("GET", "/api/media/object-content/xiaolou-staging/media/frontend/sample.png", false)]
+    [InlineData("GET", "/api/agent-canvas/projects", true)]
+    [InlineData("DELETE", "/api/agent-canvas/projects/synthetic-project", true)]
+    [InlineData("POST", "/api/agent-canvas/chat", true)]
+    [InlineData("POST", "/api/agent-canvas/chat/stream", true)]
+    [InlineData("GET", "/api/canvas/local-image-edit/health", true)]
+    [InlineData("POST", "/api/canvas/local-image-edit/remove-background", true)]
+    [InlineData("POST", "/api/local-image-edit/remove-background", false)]
+    [InlineData("GET", "/api/wallet", true)]
+    [InlineData("GET", "/api/wallets/11111111-1111-1111-1111-111111111111/ledger", true)]
     [InlineData("GET", "/api/windows-native/status", false)]
     [InlineData("POST", "/api/internal/jobs/lease", false)]
     public void IsPublicClientApiRequest_ClassifiesAllowedFrontendSurface(
@@ -435,7 +444,16 @@ public sealed class AuthHelpersTests
     [InlineData("/api/playground", true)]
     [InlineData("/api/media/upload-begin", true)]
     [InlineData("/api/media/object-content/xiaolou-staging/media/frontend/sample.png", false)]
+    [InlineData("/api/agent-canvas/projects", true)]
+    [InlineData("/api/agent-canvas/projects/synthetic-project", true)]
+    [InlineData("/api/agent-canvas/chat", true)]
+    [InlineData("/api/agent-canvas/chat/stream", true)]
+    [InlineData("/api/canvas/local-image-edit/health", true)]
+    [InlineData("/api/canvas/local-image-edit/remove-background", true)]
+    [InlineData("/api/local-image-edit/remove-background", false)]
+    [InlineData("/api/wallet", true)]
     [InlineData("/api/wallets", true)]
+    [InlineData("/api/wallets/11111111-1111-1111-1111-111111111111/ledger", true)]
     [InlineData("/api/windows-native/status", false)]
     [InlineData("/api/internal/jobs/lease", false)]
     public void ClientRoutePolicy_ClassifiesPublicClientApiPathsDirectly(string path, bool expected)
@@ -825,12 +843,25 @@ public sealed class AuthHelpersTests
     [InlineData("POST", "/api/jobs", "jobs:create")]
     [InlineData("POST", "/api/jobs/synthetic-job/cancel", "jobs:cancel")]
     [InlineData("GET", "/api/wallet/usage-stats", "wallet:read")]
+    [InlineData("GET", "/api/wallet", "wallet:read")]
+    [InlineData("GET", "/api/wallets", "wallet:read")]
+    [InlineData("GET", "/api/wallets/11111111-1111-1111-1111-111111111111/ledger", "wallet:read")]
+    [InlineData("POST", "/api/wallets", null)]
     [InlineData("POST", "/api/media/signed-read-url", "media:read")]
     [InlineData("POST", "/api/media/upload-begin", "media:write")]
     [InlineData("GET", "/api/projects", "projects:read")]
     [InlineData("PUT", "/api/projects/synthetic-project", "projects:write")]
     [InlineData("GET", "/api/canvas-projects", "canvas:read")]
+    [InlineData("GET", "/api/agent-canvas/projects", "canvas:read")]
+    [InlineData("GET", "/api/agent-canvas/projects/synthetic-project", "canvas:read")]
     [InlineData("POST", "/api/agent-canvas/projects", "canvas:write")]
+    [InlineData("PUT", "/api/agent-canvas/projects/synthetic-project", "canvas:write")]
+    [InlineData("DELETE", "/api/agent-canvas/projects/synthetic-project", "canvas:write")]
+    [InlineData("POST", "/api/agent-canvas/chat", "canvas:write")]
+    [InlineData("POST", "/api/agent-canvas/chat/stream", "canvas:write")]
+    [InlineData("GET", "/api/canvas/local-image-edit/health", "canvas:read")]
+    [InlineData("POST", "/api/canvas/local-image-edit/remove-background", "canvas:write")]
+    [InlineData("POST", "/api/local-image-edit/remove-background", null)]
     [InlineData("GET", "/api/create/images", "create:read")]
     [InlineData("POST", "/api/create/videos", "create:write")]
     [InlineData("GET", "/metrics", null)]
@@ -848,6 +879,15 @@ public sealed class AuthHelpersTests
     [InlineData("GET", "/api/playground/models", "playground:read")]
     [InlineData("POST", "/api/media/signed-read-url", "media:read")]
     [InlineData("POST", "/api/jobs/synthetic-job/cancel", "jobs:cancel")]
+    [InlineData("GET", "/api/agent-canvas/projects/synthetic-project", "canvas:read")]
+    [InlineData("DELETE", "/api/agent-canvas/projects/synthetic-project", "canvas:write")]
+    [InlineData("POST", "/api/agent-canvas/chat", "canvas:write")]
+    [InlineData("POST", "/api/agent-canvas/chat/stream", "canvas:write")]
+    [InlineData("GET", "/api/canvas/local-image-edit/health", "canvas:read")]
+    [InlineData("POST", "/api/canvas/local-image-edit/remove-background", "canvas:write")]
+    [InlineData("POST", "/api/local-image-edit/remove-background", null)]
+    [InlineData("GET", "/api/wallets/11111111-1111-1111-1111-111111111111/ledger", "wallet:read")]
+    [InlineData("POST", "/api/wallets", null)]
     [InlineData("GET", "/metrics", null)]
     public void ClientRoutePolicy_MapsPermissionsDirectly(
         string method,
@@ -855,6 +895,35 @@ public sealed class AuthHelpersTests
         string? expected)
     {
         Assert.Equal(expected, ClientRoutePolicy.GetRequiredClientPermission(method, new PathString(path)));
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/agent-canvas/projects", "canvas:read", true)]
+    [InlineData("POST", "/api/agent-canvas/projects", "canvas:read", false)]
+    [InlineData("POST", "/api/agent-canvas/projects", "canvas:write", true)]
+    [InlineData("DELETE", "/api/agent-canvas/projects/synthetic-project", "canvas:write", true)]
+    [InlineData("POST", "/api/agent-canvas/chat", "canvas:write", true)]
+    [InlineData("POST", "/api/agent-canvas/chat/stream", "canvas:write", true)]
+    [InlineData("GET", "/api/canvas/local-image-edit/health", "canvas:read", true)]
+    [InlineData("POST", "/api/canvas/local-image-edit/remove-background", "canvas:write", true)]
+    [InlineData("POST", "/api/local-image-edit/remove-background", "canvas:write", false)]
+    [InlineData("GET", "/api/wallets/11111111-1111-1111-1111-111111111111/ledger", "wallet:read", true)]
+    [InlineData("POST", "/api/wallets", "wallet:read", false)]
+    public void IsClientPermissionAllowed_CoversI4fSignedRouteMatrix(
+        string method,
+        string path,
+        string allowedPermissions,
+        bool expected)
+    {
+        using var env = ClearClientAuthEnvironment();
+        var options = new ClientApiOptions
+        {
+            Token = "synthetic-client-token",
+            AllowedPermissions = allowedPermissions,
+        };
+        var context = NewHttpContext(method, path);
+
+        Assert.Equal(expected, AuthHelpers.IsClientPermissionAllowed(context, options));
     }
 
     [Fact]

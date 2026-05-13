@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using XiaoLou.ControlApi.Modules.AgentCanvas;
 using XiaoLou.ControlApi.Modules.Auth;
 using XiaoLou.ControlApi.Modules.InternalJobs;
 using XiaoLou.ControlApi.Modules.Media;
@@ -28,6 +29,8 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         app.MapMediaEndpoints();
         app.MapInternalJobsEndpoints();
         app.MapProjectEndpoints();
+        app.MapAgentCanvasChatEndpoints();
+        app.MapAgentCanvasLocalImageEditEndpoints();
         app.MapToolboxEndpoints();
         app.MapPlaygroundEndpoints();
     }
@@ -49,6 +52,12 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
     public void OldPaymentNotifyAlias_IsNotMapped(string path)
     {
         Assert.Empty(FindRoutes(HttpMethods.Post, path));
+    }
+
+    [Fact]
+    public void AgentCanvasChatStream_IsMappedInStreamSlice()
+    {
+        Assert.NotNull(FindRoute(HttpMethods.Post, "/api/agent-canvas/chat/stream"));
     }
 
     public async ValueTask DisposeAsync()
@@ -142,6 +151,16 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         yield return Route(HttpMethods.Post, "/api/agent-canvas/projects");
         yield return Route(HttpMethods.Put, "/api/agent-canvas/projects/{projectId}");
         yield return Route(HttpMethods.Delete, "/api/agent-canvas/projects/{projectId}");
+        yield return Route(HttpMethods.Post, "/api/agent-canvas/chat");
+        yield return Route(HttpMethods.Post, "/api/agent-canvas/chat/stream");
+        yield return Route(HttpMethods.Get, "/api/canvas/local-image-edit/health");
+        yield return Route(HttpMethods.Post, "/api/canvas/local-image-edit/remove-background");
+        yield return Route(HttpMethods.Post, "/api/canvas/local-image-edit/upscale");
+        yield return Route(HttpMethods.Post, "/api/canvas/local-image-edit/segment-mask");
+        yield return Route(HttpMethods.Post, "/api/canvas/local-image-edit/inpaint");
+        yield return Route(HttpMethods.Post, "/api/canvas/local-image-edit/move-object");
+        yield return Route(HttpMethods.Post, "/api/canvas/local-image-edit/ocr");
+        yield return Route(HttpMethods.Post, "/api/canvas/local-image-edit/multi-angle");
         yield return Route(HttpMethods.Get, "/api/create/images");
         yield return Route(HttpMethods.Get, "/api/create/videos");
         yield return Route(HttpMethods.Delete, "/api/create/images/{imageId}");

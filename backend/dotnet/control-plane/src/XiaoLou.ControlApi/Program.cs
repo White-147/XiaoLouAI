@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
 using XiaoLou.ControlApi.Modules.Accounts;
+using XiaoLou.ControlApi.Modules.AgentCanvas;
 using XiaoLou.ControlApi.Modules.Admin;
 using XiaoLou.ControlApi.Modules.Auth;
 using XiaoLou.ControlApi.Modules.Health;
@@ -113,6 +114,10 @@ app.MapPaymentEndpoints();
 app.MapMediaEndpoints();
 
 app.MapProjectEndpoints();
+
+app.MapAgentCanvasChatEndpoints();
+
+app.MapAgentCanvasLocalImageEditEndpoints();
 
 app.MapOperationalEndpoints();
 

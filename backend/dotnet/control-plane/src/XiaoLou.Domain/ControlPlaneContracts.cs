@@ -200,6 +200,109 @@ public sealed record CanvasProjectRequest : AccountScope
     public JsonElement AgentContext { get; init; }
 }
 
+public sealed record AgentCanvasChatRequest
+{
+    public string? SessionId { get; init; }
+    public string? ProjectId { get; init; }
+    public string? Message { get; init; }
+    public string? Mode { get; init; }
+    public string? Model { get; init; }
+    public string? ModelLabel { get; init; }
+    public string? ToolId { get; init; }
+    public string? ToolType { get; init; }
+    public string? PreferredImageToolId { get; init; }
+    public string? PreferredVideoToolId { get; init; }
+    public IReadOnlyList<string>? AllowedImageToolIds { get; init; }
+    public IReadOnlyList<string>? AllowedVideoToolIds { get; init; }
+    public bool? AutoModelPreference { get; init; }
+    public string? Instruction { get; init; }
+    public string? SkillId { get; init; }
+    public string? SkillTitle { get; init; }
+    public string? SkillInstruction { get; init; }
+    public int? MaxTokens { get; init; }
+    public AgentCanvasChatToolsRequest? Tools { get; init; }
+    public JsonElement Canvas { get; init; }
+    public IReadOnlyList<AgentCanvasChatAttachment>? Attachments { get; init; }
+}
+
+public sealed record AgentCanvasChatToolsRequest
+{
+    public bool? WebSearch { get; init; }
+    public bool? CanvasFiles { get; init; }
+}
+
+public sealed record AgentCanvasChatAttachment
+{
+    public string? Type { get; init; }
+    public string? Url { get; init; }
+    public string? NodeId { get; init; }
+    public string? Base64 { get; init; }
+}
+
+public sealed record AgentCanvasChatResponse
+{
+    public string? Response { get; init; }
+    public IReadOnlyList<JsonElement> Actions { get; init; } = Array.Empty<JsonElement>();
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+    public string? Topic { get; init; }
+    public string? SessionId { get; init; }
+    public string? Provider { get; init; }
+    public string? Model { get; init; }
+    public string? FallbackFrom { get; init; }
+}
+
+public sealed record LocalImageEditRequest : AccountScope
+{
+    public string? ProjectId { get; init; }
+    public string? NodeId { get; init; }
+    public string? Operation { get; init; }
+    public string? ImageUrl { get; init; }
+    public string? DataUrl { get; init; }
+    public string? MaskDataUrl { get; init; }
+    public int? LongEdge { get; init; }
+    public string? FaceEnhance { get; init; }
+    public bool? RefineMask { get; init; }
+    public string? Sam2Size { get; init; }
+    public string? InpaintEngine { get; init; }
+    public int? InpaintSteps { get; init; }
+    public double? InpaintGuidance { get; init; }
+    public double? InpaintStrength { get; init; }
+    public int? InpaintSize { get; init; }
+    public int? MaskGrow { get; init; }
+    public int? MaskDilate { get; init; }
+    public int? MaskFeather { get; init; }
+    public int? MaskClose { get; init; }
+    public int? CropPadding { get; init; }
+    public bool? FallbackToLama { get; init; }
+    public string? InpaintPrompt { get; init; }
+    public string? InpaintNegativePrompt { get; init; }
+    public LocalImageEditOffset? Offset { get; init; }
+    public double? Rotation { get; init; }
+    public double? DisplayWidth { get; init; }
+    public double? DisplayHeight { get; init; }
+    public string? RefineBackend { get; init; }
+    public int? BackgroundDilate { get; init; }
+    public int? BackgroundFeather { get; init; }
+    public int? BackgroundClose { get; init; }
+    public int? EdgeGrow { get; init; }
+    public int? EdgeFeather { get; init; }
+    public string? Device { get; init; }
+    public int? Seed { get; init; }
+    public double? IpAdapterScale { get; init; }
+    public double? RotationDegrees { get; init; }
+    public double? Tilt { get; init; }
+    public double? Zoom { get; init; }
+    public string? Mode { get; init; }
+    public string? Repair { get; init; }
+    public JsonElement Options { get; init; }
+}
+
+public sealed record LocalImageEditOffset
+{
+    public double X { get; init; }
+    public double Y { get; init; }
+}
+
 public sealed record PlaygroundConversationRequest : AccountScope
 {
     public string? Id { get; init; }
