@@ -4,19 +4,19 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   BookOpen,
+  Brain,
   Building2,
   ChevronLeft,
   ChevronRight,
-  CreditCard,
   Eye,
   EyeOff,
   Film,
   FlaskConical,
   FolderOpen,
   HelpCircle,
+  House,
   Image as ImageIcon,
   KeyRound,
-  LayoutDashboard,
   LayoutTemplate,
   LoaderCircle,
   LogIn,
@@ -35,6 +35,7 @@ import {
   Users,
   Video,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -164,17 +165,18 @@ function prefetchRouteModule(path: string) {
 type NavItem = {
   name: string;
   path?: string;
-  icon: typeof LayoutDashboard;
+  icon: LucideIcon;
   children?: Array<{
     name: string;
     path: string;
-    icon: typeof LayoutDashboard;
+    icon: LucideIcon;
   }>;
 };
 
 const navItems: NavItem[] = [
-  { name: "首页", path: "/home", icon: LayoutDashboard },
+  { name: "首页", path: "/home", icon: House },
   { name: "创意入口", path: "/playground", icon: FlaskConical },
+  { name: "记忆中心", path: "/playground?panel=memory", icon: Brain },
   { name: "创境天幕", path: "/create/canvas", icon: LayoutTemplate },
   {
     name: "通用创作",
@@ -198,7 +200,6 @@ const navItems: NavItem[] = [
     ],
   },
   { name: "项目管理", path: "/assets", icon: FolderOpen },
-  { name: "积分统计", path: "/wallet/usage", icon: CreditCard },
 ];
 
 const demoActors = [
@@ -455,8 +456,6 @@ export default function Layout() {
   const canOpenManagementPanel =
     permissionContext?.currentOrganizationRole === "enterprise_admin" ||
     permissionContext?.platformRole === "super_admin";
-  const showCreditUsageNav =
-    permissionContext?.platformRole === "customer" && !permissionContext.currentOrganizationRole;
 
   const visibleNavItems = useMemo(() => {
     const agentCanvasNavItem: NavItem = { name: "智能画布", path: "/create/agent-canvas", icon: Sparkles };
@@ -466,19 +465,12 @@ export default function Layout() {
           (item) =>
             !item.children?.some((child) => child.path === "/create/image" || child.path === "/create/video"),
         );
-    const walletScopedItems = showCreditUsageNav
-      ? baseItems
-      : baseItems.filter((item) => item.path !== "/wallet/usage");
     const betaItems = canAccessAgentCanvas
-      ? walletScopedItems.flatMap((item) => (item.path === "/create/canvas" ? [item, agentCanvasNavItem] : [item]))
-      : walletScopedItems;
+      ? baseItems.flatMap((item) => (item.path === "/create/canvas" ? [item, agentCanvasNavItem] : [item]))
+      : baseItems;
 
     return betaItems;
-  }, [
-    canAccessAgentCanvas,
-    showCreditUsageNav,
-    showCreateImageVideoNav,
-  ]);
+  }, [canAccessAgentCanvas, showCreateImageVideoNav]);
 
   useEffect(() => {
     if (!isCollapsed) {

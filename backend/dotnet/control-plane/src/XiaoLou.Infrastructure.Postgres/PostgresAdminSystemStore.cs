@@ -286,8 +286,15 @@ public sealed class PostgresAdminSystemStore(NpgsqlDataSource dataSource)
     {
         var data = ReadJsonObject(row, "data");
         var provider = ReadString(row, "provider") ?? ReadValueString(data, "provider") ?? "unknown";
-        var status = ReadValueString(data, "status") ?? ReadString(row, "status") ?? "created";
         var paymentMethod = ReadValueString(data, "paymentMethod") ?? ProviderToPaymentMethod(provider);
+        var rowStatus = ReadString(row, "status") ?? "created";
+        var reviewStatus = ReadValueString(data, "reviewStatus");
+        var status = ReadValueString(data, "status") ?? rowStatus;
+        if (paymentMethod == "bank_transfer" && rowStatus == "pending" && reviewStatus == "submitted")
+        {
+            status = "pending_review";
+        }
+
         var accountId = ReadString(row, "account_id") ?? "";
         var ownerType = ReadString(row, "account_owner_type") ?? "user";
         var ownerId = ReadString(row, "account_owner_id") ?? accountId;
@@ -319,7 +326,7 @@ public sealed class PostgresAdminSystemStore(NpgsqlDataSource dataSource)
             ["expiresAt"] = ReadDateIso(row, "expires_at"),
             ["failureReason"] = ReadValueString(data, "failureReason"),
             ["voucherFiles"] = ReadValueStringArray(data, "voucherFiles"),
-            ["reviewStatus"] = ReadValueString(data, "reviewStatus"),
+            ["reviewStatus"] = reviewStatus,
             ["reviewedAt"] = ReadValueString(data, "reviewedAt"),
             ["reviewedBy"] = ReadValueString(data, "reviewedBy"),
             ["reviewNote"] = ReadValueString(data, "reviewNote"),

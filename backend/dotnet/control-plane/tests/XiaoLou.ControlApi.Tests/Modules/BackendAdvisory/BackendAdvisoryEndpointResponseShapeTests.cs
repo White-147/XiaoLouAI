@@ -261,6 +261,42 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
     }
 
     [Fact]
+    public async Task JobsList_WithTaskHistoryFilters_ReturnsForbiddenBeforeSyntheticStores()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Get,
+            "/api/jobs?accountOwnerType=user&accountOwnerId=denied-owner&projectId=synthetic-project&types=image.render,video.render&limit=25&offset=10",
+            "{}");
+
+        Assert.Equal(StatusCodes.Status403Forbidden, response.StatusCode);
+        Assert.Equal(
+            """{"error":"account scope is not authorized for this client token"}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task PlaygroundMemoryVectorIndex_WithDeniedOwner_ReturnsForbiddenBeforeSyntheticStores()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Get,
+            "/api/playground/memories/vector-index?accountOwnerType=user&accountOwnerId=denied-owner",
+            "{}");
+
+        Assert.Equal(StatusCodes.Status403Forbidden, response.StatusCode);
+        Assert.Equal(
+            """{"error":"account scope is not authorized for this client token"}""",
+            response.Body);
+    }
+
+    [Fact]
     public async Task PaymentCallback_InvalidJson_ReturnsStableBadRequestBeforeLedger()
     {
         using var env = ClearSyntheticEnvironment();
@@ -319,6 +355,62 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
         Assert.Equal(StatusCodes.Status403Forbidden, response.StatusCode);
         Assert.Equal(
             """{"error":"payment callback provider is not enabled","provider":"wechat"}""",
+            response.Body);
+    }
+
+    [Fact]
+    public async Task WalletRechargeCapabilities_ReturnsContractShapeWithoutStores()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Get,
+            "/api/wallet/recharge-capabilities",
+            "{}");
+
+        Assert.Equal(StatusCodes.Status200OK, response.StatusCode);
+        using var payload = JsonDocument.Parse(response.Body);
+        var root = payload.RootElement;
+        Assert.False(root.GetProperty("demoMockEnabled").GetBoolean());
+        Assert.Equal(3, root.GetProperty("methods").GetArrayLength());
+        Assert.Contains(
+            root.GetProperty("methods").EnumerateArray(),
+            item => item.GetProperty("paymentMethod").GetString() == "wechat_pay");
+        Assert.Contains(
+            root.GetProperty("methods").EnumerateArray(),
+            item => item.GetProperty("paymentMethod").GetString() == "bank_transfer");
+    }
+
+    [Fact]
+    public async Task WalletRechargeCreate_InvalidAmount_ReturnsStableBadRequestBeforeLedger()
+    {
+        using var env = ClearSyntheticEnvironment();
+        await using var app = BuildSyntheticApp();
+
+        var response = await InvokeJsonAsync(
+            app,
+            HttpMethods.Post,
+            "/api/wallet/recharge-orders",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "allowed-owner",
+              "planId": "synthetic-plan",
+              "planName": "Synthetic plan",
+              "billingCycle": "one_time",
+              "paymentMethod": "wechat_pay",
+              "mode": "demo_mock",
+              "scene": "desktop_qr",
+              "amount": 0,
+              "credits": 100
+            }
+            """);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        Assert.Equal(
+            """{"error":{"code":"WALLET_RECHARGE_INVALID_REQUEST","message":"amount must be greater than 0"}}""",
             response.Body);
     }
 
@@ -477,6 +569,22 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
             }
             """);
         yield return RouteBody(
+            "/api/wallet/recharge-orders",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "planId": "synthetic-plan",
+              "planName": "Synthetic plan",
+              "billingCycle": "one_time",
+              "paymentMethod": "wechat_pay",
+              "mode": "demo_mock",
+              "scene": "desktop_qr",
+              "amount": 9.9,
+              "credits": 100
+            }
+            """);
+        yield return RouteBody(
             "/api/toolbox/translate-text",
             """
             {
@@ -495,6 +603,35 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
               "accountOwnerId": "denied-owner",
               "message": "synthetic prompt",
               "model": "qwen-plus"
+            }
+            """);
+        yield return RouteBody(
+            "/api/playground/memories",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "key": "synthetic.memory",
+              "value": "Synthetic memory"
+            }
+            """);
+        yield return RouteBody(
+            "/api/playground/memories/vector-index/rebuild",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "force": true
+            }
+            """);
+        yield return RouteBody(
+            "/api/playground/memories/recall-test",
+            """
+            {
+              "accountOwnerType": "user",
+              "accountOwnerId": "denied-owner",
+              "query": "synthetic memory",
+              "limit": 3
             }
             """);
         yield return RouteBody(
@@ -556,14 +693,17 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
         string body,
         IReadOnlyDictionary<string, string>? headers = null)
     {
-        var route = FindRoute(app, method, path);
+        var requestTarget = SplitPathAndQuery(path);
+        var requestPath = requestTarget.Path.Value ?? "";
+        var route = FindRoute(app, method, requestPath);
         var context = new DefaultHttpContext
         {
             RequestServices = app.Services,
         };
         context.Features.Set<IHttpRequestBodyDetectionFeature>(new SyntheticRequestBodyDetectionFeature());
         context.Request.Method = method;
-        context.Request.Path = path;
+        context.Request.Path = requestTarget.Path;
+        context.Request.QueryString = requestTarget.QueryString;
         context.Request.ContentType = "application/json";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Request.ContentLength = context.Request.Body.Length;
@@ -575,7 +715,7 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
             }
         }
 
-        ApplyRouteValues(context, route, path);
+        ApplyRouteValues(context, route, requestPath);
         await using var responseBody = new MemoryStream();
         context.Response.Body = responseBody;
 
@@ -587,6 +727,19 @@ public sealed class BackendAdvisoryEndpointResponseShapeTests
             context.Response.StatusCode,
             context.Response.ContentType,
             await reader.ReadToEndAsync());
+    }
+
+    private static (PathString Path, QueryString QueryString) SplitPathAndQuery(string path)
+    {
+        var queryStart = path.IndexOf('?', StringComparison.Ordinal);
+        if (queryStart < 0)
+        {
+            return (new PathString(path), QueryString.Empty);
+        }
+
+        return (
+            new PathString(path[..queryStart]),
+            new QueryString(path[queryStart..]));
     }
 
     private static RouteEndpoint FindRoute(WebApplication app, string method, string path)

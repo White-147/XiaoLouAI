@@ -411,6 +411,7 @@ public sealed class AuthHelpersTests
 
         Assert.Contains("accounts:ensure", permissions);
         Assert.Contains("jobs:create", permissions);
+        Assert.Contains("wallet:write", permissions);
         Assert.Contains("playground:write", permissions);
         Assert.Contains("toolbox:write", permissions);
     }
@@ -427,6 +428,9 @@ public sealed class AuthHelpersTests
     [InlineData("POST", "/api/canvas/local-image-edit/remove-background", true)]
     [InlineData("POST", "/api/local-image-edit/remove-background", false)]
     [InlineData("GET", "/api/wallet", true)]
+    [InlineData("GET", "/api/wallet/recharge-capabilities", true)]
+    [InlineData("POST", "/api/wallet/recharge-orders", true)]
+    [InlineData("POST", "/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111/confirm", true)]
     [InlineData("GET", "/api/wallets/11111111-1111-1111-1111-111111111111/ledger", true)]
     [InlineData("GET", "/api/windows-native/status", false)]
     [InlineData("POST", "/api/internal/jobs/lease", false)]
@@ -452,6 +456,9 @@ public sealed class AuthHelpersTests
     [InlineData("/api/canvas/local-image-edit/remove-background", true)]
     [InlineData("/api/local-image-edit/remove-background", false)]
     [InlineData("/api/wallet", true)]
+    [InlineData("/api/wallet/recharge-capabilities", true)]
+    [InlineData("/api/wallet/recharge-orders", true)]
+    [InlineData("/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111/confirm", true)]
     [InlineData("/api/wallets", true)]
     [InlineData("/api/wallets/11111111-1111-1111-1111-111111111111/ledger", true)]
     [InlineData("/api/windows-native/status", false)]
@@ -836,7 +843,11 @@ public sealed class AuthHelpersTests
     [InlineData("GET", "/api/enterprise-applications", "enterprise-applications:read")]
     [InlineData("POST", "/api/enterprise-applications", "enterprise-applications:write")]
     [InlineData("GET", "/api/playground/models", "playground:read")]
+    [InlineData("GET", "/api/playground/memories/vector-index", "playground:read")]
     [InlineData("POST", "/api/playground/chat", "playground:write")]
+    [InlineData("POST", "/api/playground/memories", "playground:write")]
+    [InlineData("POST", "/api/playground/memories/vector-index/rebuild", "playground:write")]
+    [InlineData("POST", "/api/playground/memories/recall-test", "playground:write")]
     [InlineData("GET", "/api/capabilities", "toolbox:read")]
     [InlineData("POST", "/api/toolbox/translate-text", "toolbox:write")]
     [InlineData("GET", "/api/jobs", "jobs:read")]
@@ -844,6 +855,12 @@ public sealed class AuthHelpersTests
     [InlineData("POST", "/api/jobs/synthetic-job/cancel", "jobs:cancel")]
     [InlineData("GET", "/api/wallet/usage-stats", "wallet:read")]
     [InlineData("GET", "/api/wallet", "wallet:read")]
+    [InlineData("GET", "/api/wallet/recharge-capabilities", "wallet:read")]
+    [InlineData("GET", "/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111", "wallet:read")]
+    [InlineData("POST", "/api/wallet/recharge-orders", "wallet:write")]
+    [InlineData("POST", "/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111/refresh-status", "wallet:write")]
+    [InlineData("POST", "/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111/bank-transfer-proof", "wallet:write")]
+    [InlineData("POST", "/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111/confirm", "wallet:write")]
     [InlineData("GET", "/api/wallets", "wallet:read")]
     [InlineData("GET", "/api/wallets/11111111-1111-1111-1111-111111111111/ledger", "wallet:read")]
     [InlineData("POST", "/api/wallets", null)]
@@ -877,6 +894,8 @@ public sealed class AuthHelpersTests
 
     [Theory]
     [InlineData("GET", "/api/playground/models", "playground:read")]
+    [InlineData("GET", "/api/playground/memories/vector-index", "playground:read")]
+    [InlineData("POST", "/api/playground/memories/recall-test", "playground:write")]
     [InlineData("POST", "/api/media/signed-read-url", "media:read")]
     [InlineData("POST", "/api/jobs/synthetic-job/cancel", "jobs:cancel")]
     [InlineData("GET", "/api/agent-canvas/projects/synthetic-project", "canvas:read")]
@@ -886,6 +905,9 @@ public sealed class AuthHelpersTests
     [InlineData("GET", "/api/canvas/local-image-edit/health", "canvas:read")]
     [InlineData("POST", "/api/canvas/local-image-edit/remove-background", "canvas:write")]
     [InlineData("POST", "/api/local-image-edit/remove-background", null)]
+    [InlineData("GET", "/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111", "wallet:read")]
+    [InlineData("POST", "/api/wallet/recharge-orders", "wallet:write")]
+    [InlineData("POST", "/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111/confirm", "wallet:write")]
     [InlineData("GET", "/api/wallets/11111111-1111-1111-1111-111111111111/ledger", "wallet:read")]
     [InlineData("POST", "/api/wallets", null)]
     [InlineData("GET", "/metrics", null)]
@@ -907,6 +929,9 @@ public sealed class AuthHelpersTests
     [InlineData("GET", "/api/canvas/local-image-edit/health", "canvas:read", true)]
     [InlineData("POST", "/api/canvas/local-image-edit/remove-background", "canvas:write", true)]
     [InlineData("POST", "/api/local-image-edit/remove-background", "canvas:write", false)]
+    [InlineData("GET", "/api/wallet/recharge-orders/11111111-1111-1111-1111-111111111111", "wallet:read", true)]
+    [InlineData("POST", "/api/wallet/recharge-orders", "wallet:read", false)]
+    [InlineData("POST", "/api/wallet/recharge-orders", "wallet:write", true)]
     [InlineData("GET", "/api/wallets/11111111-1111-1111-1111-111111111111/ledger", "wallet:read", true)]
     [InlineData("POST", "/api/wallets", "wallet:read", false)]
     public void IsClientPermissionAllowed_CoversI4fSignedRouteMatrix(
@@ -1213,8 +1238,29 @@ public sealed class AuthHelpersTests
     }
 
     [Theory]
-    [InlineData("GET", "/api/admin/retired-review", true)]
-    [InlineData("POST", "/api/admin/retired-review", false)]
+    [InlineData("GET", "/api/admin/orders", "admin:read", true)]
+    [InlineData("POST", "/api/admin/orders/11111111-1111-1111-1111-111111111111/review", "admin:write", true)]
+    [InlineData("POST", "/api/admin/orders/11111111-1111-1111-1111-111111111111/review", "admin:read", false)]
+    public void IsClientPermissionAllowed_MapsAdminOrderReviewToAdminWrite(
+        string method,
+        string path,
+        string allowedPermissions,
+        bool expected)
+    {
+        using var env = ClearClientAuthEnvironment();
+        var options = new ClientApiOptions
+        {
+            Token = "synthetic-client-token",
+            AllowedPermissions = allowedPermissions,
+        };
+        var context = NewHttpContext(method, path);
+
+        Assert.Equal(expected, AuthHelpers.IsClientPermissionAllowed(context, options));
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/admin/orders", true)]
+    [InlineData("POST", "/api/admin/orders/11111111-1111-1111-1111-111111111111/review", false)]
     public void IsClientPermissionAllowed_UsesAuthenticatedStaticTokenPrincipalGrants(
         string method,
         string path,

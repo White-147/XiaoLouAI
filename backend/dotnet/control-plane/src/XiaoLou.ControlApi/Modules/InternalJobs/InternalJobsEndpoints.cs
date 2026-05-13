@@ -36,7 +36,11 @@ internal static class InternalJobsEndpoints
             string? accountOwnerId,
             string? lane,
             string? status,
+            string? projectId,
+            string? type,
+            string? types,
             int? limit,
+            int? offset,
             HttpContext httpContext,
             IOptions<ClientApiOptions> clientApi,
             PostgresJobQueue jobs,
@@ -66,6 +70,9 @@ internal static class InternalJobsEndpoints
                 lane,
                 status,
                 limit ?? 50,
+                offset ?? 0,
+                NormalizeJobTypes(type, types),
+                NormalizeBlank(projectId),
                 ct));
         });
 
@@ -239,6 +246,18 @@ internal static class InternalJobsEndpoints
         return element.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
             ? "{}"
             : element.GetRawText();
+    }
+
+    private static string[] NormalizeJobTypes(params string?[] values)
+    {
+        return values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .SelectMany(value => value!.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .Select(value => value.Trim())
+            .Where(value => value.Length is > 0 and <= 128)
+            .Distinct(StringComparer.Ordinal)
+            .Take(20)
+            .ToArray();
     }
 
     private static async Task<IResult> HandleRecoverExpiredJobsAsync(

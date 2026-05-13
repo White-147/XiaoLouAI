@@ -5,7 +5,14 @@ import type {
   PlaygroundChatJobStartResult,
   PlaygroundConversation,
   PlaygroundMemory,
+  PlaygroundMemoryListOptions,
+  PlaygroundMemoryListResponse,
   PlaygroundMemoryPreference,
+  PlaygroundMemoryRecallTestInput,
+  PlaygroundMemoryRecallTestResult,
+  PlaygroundMemoryVectorIndex,
+  PlaygroundMemoryVectorRebuildResult,
+  PlaygroundMemoryWriteInput,
   PlaygroundMessage,
   PlaygroundModel,
 } from "../../../lib/api/playground-types";
@@ -76,6 +83,19 @@ function buildControlScopeQuery(actorId: string, ownerScope: ControlOwnerScope) 
   return params.toString();
 }
 
+function buildPlaygroundMemoryListQuery(
+  actorId: string,
+  ownerScope: ControlOwnerScope,
+  options: PlaygroundMemoryListOptions,
+) {
+  const params = new URLSearchParams(buildControlScopeQuery(actorId, ownerScope));
+  if (options.search?.trim()) params.set("search", options.search.trim());
+  if (typeof options.enabled === "boolean") params.set("enabled", String(options.enabled));
+  if (typeof options.limit === "number") params.set("limit", String(options.limit));
+  if (typeof options.offset === "number") params.set("offset", String(options.offset));
+  return params.toString();
+}
+
 export function createPlaygroundService({
   controlApiJsonRequest,
   controlApiStreamRequest,
@@ -110,13 +130,13 @@ export function createPlaygroundService({
     }
   };
 
-  const listPlaygroundMemories = () => {
+  const listPlaygroundMemories = (options: PlaygroundMemoryListOptions = {}) => {
     const actorId = getCurrentActorId();
     const ownerScope = resolveCurrentOwnerScope();
     return readWithSignedOutFallback(
       () =>
-        controlApiJsonRequest<{ preference: PlaygroundMemoryPreference; items: PlaygroundMemory[] }>(
-          `/api/playground/memories?${buildControlScopeQuery(actorId, ownerScope)}`,
+        controlApiJsonRequest<PlaygroundMemoryListResponse>(
+          `/api/playground/memories?${buildPlaygroundMemoryListQuery(actorId, ownerScope, options)}`,
         ),
       () => ({ preference: { enabled: true, updatedAt: null }, items: [] }),
     );
@@ -519,6 +539,89 @@ export function createPlaygroundService({
 
     listPlaygroundMemories,
 
+    createPlaygroundMemory(input: PlaygroundMemoryWriteInput) {
+      if (!hasSessionCredentials()) {
+        throw authRequiredError();
+      }
+
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
+      return controlApiJsonRequest<PlaygroundMemory>("/api/playground/memories", {
+        method: "POST",
+        body: JSON.stringify({
+          ...buildControlMediaScope(actorId, ownerScope),
+          ...input,
+        }),
+      });
+    },
+
+    getPlaygroundMemoryVectorIndex() {
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
+      return readWithSignedOutFallback(
+        () =>
+          controlApiJsonRequest<PlaygroundMemoryVectorIndex>(
+            `/api/playground/memories/vector-index?${buildControlScopeQuery(actorId, ownerScope)}`,
+          ),
+        () =>
+          ({
+            available: false,
+            status: "not_configured",
+            mode: "keyword_fallback",
+            embeddingProvider: "none",
+            dimensions: null,
+            memoryCount: 0,
+            enabledMemoryCount: 0,
+            indexedCount: 0,
+            staleCount: 0,
+            lastMemoryUpdatedAt: null,
+            lastIndexedAt: null,
+            diagnostics: {
+              code: "PLAYGROUND_MEMORY_VECTOR_INDEX_NOT_CONFIGURED",
+              fallback: "keyword",
+            },
+          }) satisfies PlaygroundMemoryVectorIndex,
+      );
+    },
+
+    rebuildPlaygroundMemoryVectorIndex(input: { force?: boolean } = {}) {
+      if (!hasSessionCredentials()) {
+        throw authRequiredError();
+      }
+
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
+      return controlApiJsonRequest<PlaygroundMemoryVectorRebuildResult>(
+        "/api/playground/memories/vector-index/rebuild",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ...buildControlMediaScope(actorId, ownerScope),
+            ...input,
+          }),
+        },
+      );
+    },
+
+    runPlaygroundMemoryRecallTest(input: PlaygroundMemoryRecallTestInput) {
+      if (!hasSessionCredentials()) {
+        throw authRequiredError();
+      }
+
+      const actorId = getCurrentActorId();
+      const ownerScope = resolveCurrentOwnerScope();
+      return controlApiJsonRequest<PlaygroundMemoryRecallTestResult>(
+        "/api/playground/memories/recall-test",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ...buildControlMediaScope(actorId, ownerScope),
+            ...input,
+          }),
+        },
+      );
+    },
+
     updatePlaygroundMemoryPreference(input: Partial<PlaygroundMemoryPreference>) {
       if (!hasSessionCredentials()) {
         throw authRequiredError();
@@ -537,7 +640,7 @@ export function createPlaygroundService({
 
     updatePlaygroundMemory(
       key: string,
-      input: Partial<Pick<PlaygroundMemory, "key" | "value" | "enabled">>,
+      input: PlaygroundMemoryWriteInput,
     ) {
       if (!hasSessionCredentials()) {
         throw authRequiredError();

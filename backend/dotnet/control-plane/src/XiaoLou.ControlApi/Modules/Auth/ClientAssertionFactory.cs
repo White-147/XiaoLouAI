@@ -121,7 +121,7 @@ internal static class ClientAssertionFactory
 
     private static string DefaultClientApiPermissions()
     {
-        return "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write,identity:read,identity:write,organization:read,organization:write,api-center:read,api-center:write,admin:read,admin:write,enterprise-applications:read,enterprise-applications:write,playground:read,playground:write,toolbox:read,toolbox:write";
+        return "accounts:ensure,jobs:create,jobs:read,jobs:cancel,wallet:read,wallet:write,media:read,media:write,projects:read,projects:write,canvas:read,canvas:write,create:read,create:write,identity:read,identity:write,organization:read,organization:write,api-center:read,api-center:write,admin:read,admin:write,enterprise-applications:read,enterprise-applications:write,playground:read,playground:write,toolbox:read,toolbox:write";
     }
 
     private static string[] NormalizeGrantArray(string value)

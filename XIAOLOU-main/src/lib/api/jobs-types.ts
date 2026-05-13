@@ -13,6 +13,16 @@ export type Task = {
   etaSeconds: number;
   inputSummary: string | null;
   outputSummary: string | null;
+  failureReason?: string | null;
+  error?: string | null;
+  errorStack?: string | null;
+  errorCause?: string | null;
+  errorDetails?: string | null;
+  providerStatusCode?: string | null;
+  provider?: string | null;
+  providerCode?: string | null;
+  providerSupportCode?: string | null;
+  providerMessage?: string | null;
   quotedCredits?: number;
   frozenCredits?: number;
   settledCredits?: number;
@@ -20,4 +30,10 @@ export type Task = {
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ListTasksOptions = {
+  limit?: number;
+  offset?: number;
+  types?: string[];
 };

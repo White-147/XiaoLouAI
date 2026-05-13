@@ -88,6 +88,7 @@ import { isLocalLoopbackAccess } from '../../../../lib/local-loopback';
 import { parseGenerationError } from '../../../../lib/generation-error';
 import {
   DEFAULT_CANVAS_TITLE,
+  CANVAS_MEDIA_IMPORT_MAX_BYTES,
   buildGenerationDeniedMessage,
   buildInsufficientCreditsMessage,
   buildProjectAssetSyncDraft,
@@ -105,6 +106,7 @@ import {
   rectIntersectsBounds,
   unionScreenRects,
   urlToBase64,
+  type CanvasMediaImportKind,
   type CanvasDraftData,
   type CanvasGenerationAccess,
 } from './appOrchestration';

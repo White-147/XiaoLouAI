@@ -18,6 +18,8 @@ export function createAdminEnterpriseService({
   controlApiJsonRequest,
   retiredRechargeError,
 }: AdminEnterpriseServiceDeps) {
+  void retiredRechargeError;
+
   return {
     listPricingRules() {
       return controlApiJsonRequest<{ items: PricingRule[] }>("/api/admin/pricing-rules");
@@ -54,9 +56,13 @@ export function createAdminEnterpriseService({
       orderId: string,
       input: AdminOrderReviewInput,
     ): Promise<WalletRechargeOrder> {
-      void orderId;
-      void input;
-      return retiredRechargeError("Manual recharge review");
+      return controlApiJsonRequest<WalletRechargeOrder>(
+        `/api/admin/orders/${encodeURIComponent(orderId)}/review`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
     },
   };
 }

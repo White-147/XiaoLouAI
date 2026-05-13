@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using XiaoLou.ControlApi.Modules.Admin;
 using XiaoLou.ControlApi.Modules.AgentCanvas;
 using XiaoLou.ControlApi.Modules.Auth;
 using XiaoLou.ControlApi.Modules.InternalJobs;
@@ -25,6 +26,7 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         var builder = WebApplication.CreateBuilder();
         RegisterSyntheticEndpointServices(builder.Services);
         app = builder.Build();
+        app.MapAdminEndpoints();
         app.MapPaymentEndpoints();
         app.MapMediaEndpoints();
         app.MapInternalJobsEndpoints();
@@ -68,6 +70,8 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
     private static void RegisterSyntheticEndpointServices(IServiceCollection services)
     {
         services.AddSingleton<IOptions<ClientApiOptions>>(Options.Create(new ClientApiOptions()));
+        services.AddSingleton(_ => ThrowIfEndpointDelegateRuns<PostgresIdentityConfigStore>());
+        services.AddSingleton(_ => ThrowIfEndpointDelegateRuns<PostgresAdminSystemStore>());
         services.AddSingleton(_ => ThrowIfEndpointDelegateRuns<PostgresWalletStore>());
         services.AddSingleton(_ => ThrowIfEndpointDelegateRuns<PostgresPaymentLedger>());
         services.AddSingleton(_ => ThrowIfEndpointDelegateRuns<PostgresMediaStore>());
@@ -90,7 +94,15 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         yield return Route(HttpMethods.Get, "/api/wallets");
         yield return Route(HttpMethods.Get, "/api/wallets/{walletId:guid}/ledger");
         yield return Route(HttpMethods.Get, "/api/wallet/usage-stats");
+        yield return Route(HttpMethods.Get, "/api/wallet/recharge-capabilities");
+        yield return Route(HttpMethods.Post, "/api/wallet/recharge-orders");
+        yield return Route(HttpMethods.Get, "/api/wallet/recharge-orders/{orderId:guid}");
+        yield return Route(HttpMethods.Post, "/api/wallet/recharge-orders/{orderId:guid}/refresh-status");
+        yield return Route(HttpMethods.Post, "/api/wallet/recharge-orders/{orderId:guid}/bank-transfer-proof");
+        yield return Route(HttpMethods.Post, "/api/wallet/recharge-orders/{orderId:guid}/confirm");
         yield return Route(HttpMethods.Post, "/api/payments/callbacks/{provider}");
+        yield return Route(HttpMethods.Get, "/api/admin/orders");
+        yield return Route(HttpMethods.Post, "/api/admin/orders/{orderId}/review");
 
         yield return Route(HttpMethods.Post, "/api/media/upload-begin");
         yield return Route(HttpMethods.Post, "/api/media/upload-complete");
@@ -189,6 +201,10 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         yield return Route(HttpMethods.Post, "/api/playground/chat");
         yield return Route(HttpMethods.Get, "/api/playground/chat-jobs/{jobId:guid}");
         yield return Route(HttpMethods.Get, "/api/playground/memories");
+        yield return Route(HttpMethods.Post, "/api/playground/memories");
+        yield return Route(HttpMethods.Get, "/api/playground/memories/vector-index");
+        yield return Route(HttpMethods.Post, "/api/playground/memories/vector-index/rebuild");
+        yield return Route(HttpMethods.Post, "/api/playground/memories/recall-test");
         yield return Route(HttpMethods.Put, "/api/playground/memories/preference");
         yield return Route(HttpMethods.Put, "/api/playground/memories/{key}");
         yield return Route(HttpMethods.Delete, "/api/playground/memories/{key}");

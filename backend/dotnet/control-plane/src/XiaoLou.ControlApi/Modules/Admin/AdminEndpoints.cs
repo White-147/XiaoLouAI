@@ -64,11 +64,39 @@ internal static class AdminEndpoints
             return Results.Ok(new { items = await adminSystem.ListAdminOrdersAsync(limit ?? 100, ct) });
         });
 
-        endpoints.MapPost("/api/admin/orders/{orderId}/review", () => Results.Json(new
+        endpoints.MapPost("/api/admin/orders/{orderId}/review", async (
+            Guid orderId,
+            AdminOrderReviewRequest request,
+            HttpContext httpContext,
+            PostgresIdentityConfigStore identity,
+            PostgresPaymentLedger paymentLedger,
+            CancellationToken ct) =>
         {
-            error = "manual recharge review is retired; canonical payment callbacks and wallet ledger are the only write path",
-            code = "RECHARGE_FLOW_RETIRED",
-        }, statusCode: StatusCodes.Status410Gone));
+            if (await AuthorizePlatformAdminAsync(httpContext, identity, ct) is { } denied)
+            {
+                return denied;
+            }
+
+            var decision = NormalizeAdminOrderReviewDecision(request.Decision);
+            if (decision is null)
+            {
+                return BadRequestError(new ArgumentException("decision must be approve or reject"));
+            }
+
+            var reviewed = await paymentLedger.ReviewBankTransferRechargeOrderAsync(
+                orderId,
+                request with { Decision = decision },
+                ResolveActorId(httpContext),
+                ct);
+            if (reviewed is null)
+            {
+                return Results.NotFound(new { error = "wallet recharge order not found" });
+            }
+
+            return reviewed.TryGetValue("error", out var error) && error is not null
+                ? Results.Conflict(reviewed)
+                : Results.Ok(reviewed);
+        });
 
         endpoints.MapGet("/api/admin/accounts", async (
             string? query,
@@ -224,6 +252,17 @@ internal static class AdminEndpoints
         Decision = request.Decision,
         Note = request.Note,
     };
+
+    private static string? NormalizeAdminOrderReviewDecision(string? value)
+    {
+        var decision = NormalizeBlank(value)?.ToLowerInvariant();
+        return decision switch
+        {
+            "approve" or "approved" => "approve",
+            "reject" or "rejected" => "reject",
+            _ => null,
+        };
+    }
 
     private static async Task<IResult?> AuthorizeSuperAdminAsync(
         HttpContext context,

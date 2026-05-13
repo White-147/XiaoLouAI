@@ -1,4 +1,4 @@
-import type { Task } from "./jobs-types";
+import type { ListTasksOptions, Task } from "./jobs-types";
 import type { ControlOwnerScope } from "../control-owner-scope";
 
 type ControlApiJsonRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -11,6 +11,19 @@ type ControlMediaRequestScope = {
 };
 
 type ControlJobRecord = Record<string, unknown>;
+
+type JobDiagnostics = {
+  failureReason: string | null;
+  error: string | null;
+  errorStack: string | null;
+  errorCause: string | null;
+  errorDetails: string | null;
+  providerStatusCode: string | null;
+  provider: string | null;
+  providerCode: string | null;
+  providerSupportCode: string | null;
+  providerMessage: string | null;
+};
 
 export type CanonicalJobInput = {
   jobType: string;
@@ -89,6 +102,29 @@ function readRecord(record: Record<string, unknown>, ...keys: string[]) {
   return isRecord(value) ? value : null;
 }
 
+function readStringFromRecords(records: Record<string, unknown>[], ...keys: string[]) {
+  for (const record of records) {
+    const value = readString(record, ...keys);
+    if (value) return value;
+  }
+  return null;
+}
+
+function normalizeTaskTypes(values: Array<string | null | undefined>) {
+  const types = values
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .flatMap((value) => value.split(",").map((item) => item.trim()).filter(Boolean));
+  return Array.from(new Set(types)).slice(0, 20);
+}
+
+function clampListLimit(limit: number | undefined) {
+  return Math.max(1, Math.min(200, Math.trunc(Number.isFinite(limit) ? limit! : 200)));
+}
+
+function normalizeListOffset(offset: number | undefined) {
+  return Math.max(0, Math.min(10000, Math.trunc(Number.isFinite(offset) ? offset! : 0)));
+}
+
 function progressForJobStatus(status: string) {
   switch (status) {
     case "succeeded":
@@ -115,10 +151,48 @@ function isCancellableJobTask(task: Pick<Task, "status">) {
   );
 }
 
+function readJobDiagnostics(
+  job: ControlJobRecord,
+  payload: Record<string, unknown>,
+  result: Record<string, unknown>,
+): JobDiagnostics {
+  const payloadMetadata = readRecord(payload, "metadata") ?? {};
+  const resultMetadata = readRecord(result, "metadata") ?? {};
+  const sources = [job, result, resultMetadata, payload, payloadMetadata];
+  const lastError = readString(job, "last_error", "lastError");
+  const failureReason =
+    readStringFromRecords(sources, "failure_reason", "failureReason") ?? lastError;
+  const error = readStringFromRecords(sources, "error") ?? lastError;
+
+  return {
+    failureReason,
+    error,
+    errorStack: readStringFromRecords(sources, "error_stack", "errorStack"),
+    errorCause: readStringFromRecords(sources, "error_cause", "errorCause"),
+    errorDetails: readStringFromRecords(sources, "error_details", "errorDetails"),
+    providerStatusCode: readStringFromRecords(
+      sources,
+      "provider_status_code",
+      "providerStatusCode",
+    ),
+    provider:
+      readStringFromRecords(sources, "provider") ??
+      readString(job, "provider_route", "providerRoute"),
+    providerCode: readStringFromRecords(sources, "provider_code", "providerCode"),
+    providerSupportCode: readStringFromRecords(
+      sources,
+      "provider_support_code",
+      "providerSupportCode",
+    ),
+    providerMessage: readStringFromRecords(sources, "provider_message", "providerMessage"),
+  };
+}
+
 function mergeControlJobMetadata(
   job: ControlJobRecord,
   payload: Record<string, unknown>,
   result: Record<string, unknown>,
+  diagnostics: JobDiagnostics,
 ) {
   const payloadMetadata = readRecord(payload, "metadata") ?? {};
   const resultMetadata = readRecord(result, "metadata") ?? {};
@@ -138,6 +212,16 @@ function mergeControlJobMetadata(
       runAfter: readString(job, "run_after", "runAfter"),
       completedAt: readString(job, "completed_at", "completedAt"),
       cancelledAt: readString(job, "cancelled_at", "cancelledAt"),
+      failureReason: diagnostics.failureReason,
+      error: diagnostics.error,
+      errorStack: diagnostics.errorStack,
+      errorCause: diagnostics.errorCause,
+      errorDetails: diagnostics.errorDetails,
+      providerStatusCode: diagnostics.providerStatusCode,
+      provider: diagnostics.provider,
+      providerCode: diagnostics.providerCode,
+      providerSupportCode: diagnostics.providerSupportCode,
+      providerMessage: diagnostics.providerMessage,
       result,
     },
   };
@@ -146,7 +230,8 @@ function mergeControlJobMetadata(
 function mapControlJobToTask(job: ControlJobRecord): Task {
   const payload = readRecord(job, "payload") ?? {};
   const result = readRecord(job, "result") ?? {};
-  const metadata = mergeControlJobMetadata(job, payload, result);
+  const diagnostics = readJobDiagnostics(job, payload, result);
+  const metadata = mergeControlJobMetadata(job, payload, result, diagnostics);
   const status = (readString(job, "status") ?? "queued").toLowerCase();
   const taskType =
     readString(job, "job_type", "jobType") ??
@@ -161,7 +246,9 @@ function mapControlJobToTask(job: ControlJobRecord): Task {
   const lastError = readString(job, "last_error", "lastError");
   const outputSummary =
     readString(result, "outputSummary", "output_summary", "summary", "message") ??
-    (status === "failed" || status === "cancelled" ? lastError : null);
+    (status === "failed" || status === "cancelled"
+      ? diagnostics.failureReason ?? diagnostics.error ?? lastError
+      : null);
 
   return {
     id: readString(job, "id") ?? "",
@@ -174,12 +261,18 @@ function mapControlJobToTask(job: ControlJobRecord): Task {
     walletId: readString(payload, "walletId", "wallet_id"),
     status,
     progressPercent: readNumber(payload, "progressPercent", "progress_percent") ?? progressForJobStatus(status),
-    currentStage: readString(payload, "currentStage", "current_stage") ?? lastError ?? status,
+    currentStage:
+      readString(payload, "currentStage", "current_stage") ??
+      diagnostics.failureReason ??
+      diagnostics.error ??
+      lastError ??
+      status,
     etaSeconds: readNumber(payload, "etaSeconds", "eta_seconds") ?? 0,
     inputSummary:
       readString(payload, "inputSummary", "input_summary", "prompt", "text") ??
       readString(job, "idempotency_key", "idempotencyKey"),
     outputSummary,
+    ...diagnostics,
     quotedCredits: readNumber(payload, "quotedCredits", "quoted_credits") ?? undefined,
     frozenCredits: readNumber(payload, "frozenCredits", "frozen_credits") ?? undefined,
     settledCredits: readNumber(payload, "settledCredits", "settled_credits") ?? undefined,
@@ -190,11 +283,25 @@ function mapControlJobToTask(job: ControlJobRecord): Task {
   };
 }
 
-function matchesTaskFilters(task: Task, projectId?: string, type?: string) {
-  if (projectId && task.projectId !== projectId && task.metadata?.projectId !== projectId) {
+function matchesTaskFilters(task: Task, projectId?: string, types: string[] = []) {
+  if (
+    projectId &&
+    task.projectId !== projectId &&
+    task.metadata?.projectId !== projectId &&
+    task.metadata?.project_id !== projectId
+  ) {
     return false;
   }
-  if (type && task.type !== type && task.metadata?.type !== type && task.metadata?.jobType !== type) {
+  if (
+    types.length > 0 &&
+    !types.some(
+      (type) =>
+        task.type === type ||
+        task.metadata?.type === type ||
+        task.metadata?.jobType === type ||
+        task.metadata?.job_type === type,
+    )
+  ) {
     return false;
   }
   return true;
@@ -244,16 +351,28 @@ export function createJobsService({
     return { taskId: task.id, status: task.status, task };
   };
 
-  const listTasks = async (projectId?: string, type?: string) => {
+  const listTasks = async (projectId?: string, type?: string, options: ListTasksOptions = {}) => {
     const params = new URLSearchParams();
     const actorId = getCurrentActorId();
     const scope = buildControlMediaScope(actorId, resolveCurrentOwnerScope());
+    const requestedTypes = normalizeTaskTypes([type, ...(options.types ?? [])]);
+    const limit = clampListLimit(options.limit);
+    const offset = normalizeListOffset(options.offset);
     params.set("accountOwnerType", scope.accountOwnerType);
     params.set("accountOwnerId", scope.accountOwnerId);
-    params.set("limit", "200");
+    if (projectId) {
+      params.set("projectId", projectId);
+    }
+    if (requestedTypes.length > 0) {
+      params.set("types", requestedTypes.join(","));
+    }
+    params.set("limit", String(limit));
+    if (offset > 0) {
+      params.set("offset", String(offset));
+    }
     const jobs = await controlApiJsonRequest<ControlJobRecord[]>(`/api/jobs?${params.toString()}`);
     return {
-      items: jobs.map(mapControlJobToTask).filter((task) => matchesTaskFilters(task, projectId, type)),
+      items: jobs.map(mapControlJobToTask).filter((task) => matchesTaskFilters(task, projectId, requestedTypes)),
     };
   };
 

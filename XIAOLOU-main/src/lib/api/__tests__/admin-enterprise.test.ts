@@ -73,14 +73,16 @@ describe("createAdminEnterpriseService", () => {
     ]);
   });
 
-  it("keeps retired manual recharge review on the compatibility wrapper path", async () => {
-    const calls: RequestCall[] = [];
+  it("reviews admin recharge orders through the reopened admin route", async () => {
+    const response = {
+      id: "synthetic-admin-order",
+      status: "paid",
+      reviewStatus: "approved",
+    };
+    const { calls, controlApiJsonRequest } = createRequestRecorder(response);
     const { flows, retiredRechargeError } = createRetiredRecorder();
     const service = createAdminEnterpriseService({
-      controlApiJsonRequest: async <T>(path: string, init?: RequestInit): Promise<T> => {
-        calls.push({ path, init });
-        throw new Error("unexpected network call");
-      },
+      controlApiJsonRequest,
       retiredRechargeError,
     });
 
@@ -89,8 +91,19 @@ describe("createAdminEnterpriseService", () => {
         decision: "approve",
         note: "synthetic approval note",
       }),
-    ).rejects.toThrow("retired:Manual recharge review");
-    expect(flows).toEqual(["Manual recharge review"]);
-    expect(calls).toEqual([]);
+    ).resolves.toBe(response);
+    expect(flows).toEqual([]);
+    expect(calls).toEqual([
+      {
+        path: "/api/admin/orders/synthetic-admin-order/review",
+        init: {
+          method: "POST",
+          body: JSON.stringify({
+            decision: "approve",
+            note: "synthetic approval note",
+          }),
+        },
+      },
+    ]);
   });
 });

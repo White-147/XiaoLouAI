@@ -327,6 +327,22 @@ public sealed record PlaygroundMemoryRequest : AccountScope
     public string? Key { get; init; }
     public string? Value { get; init; }
     public bool? Enabled { get; init; }
+    public decimal? Confidence { get; init; }
+    public string? SourceConversationId { get; init; }
+    public string? SourceMessageId { get; init; }
+    public JsonElement Data { get; init; }
+}
+
+public sealed record PlaygroundMemoryVectorRebuildRequest : AccountScope
+{
+    public bool? Force { get; init; }
+}
+
+public sealed record PlaygroundMemoryRecallRequest : AccountScope
+{
+    public string? Query { get; init; }
+    public int? Limit { get; init; }
+    public bool? IncludeDisabled { get; init; }
 }
 
 public sealed record ToolboxRunRequest : AccountScope
@@ -458,6 +474,12 @@ public sealed record AdminPricingRuleUpsertRequest
     public JsonElement Data { get; init; }
 }
 
+public sealed record AdminOrderReviewRequest
+{
+    public string? Decision { get; init; }
+    public string? Note { get; init; }
+}
+
 public sealed record UpdateMeRequest
 {
     public string? DisplayName { get; init; }
@@ -516,6 +538,28 @@ public sealed record PaymentCallbackRequest : AccountScope
     public DateTimeOffset? PaidAt { get; init; }
     public JsonElement Data { get; init; }
     public string RawBody { get; init; } = "";
+}
+
+public sealed record CreateWalletRechargeOrderRequest : AccountScope
+{
+    public string? IdempotencyKey { get; init; }
+    public string? PlanId { get; init; }
+    public string? PlanName { get; init; }
+    public string? BillingCycle { get; init; }
+    public string? PaymentMethod { get; init; }
+    public string? Provider { get; init; }
+    public string? Mode { get; init; }
+    public string? Scene { get; init; }
+    public decimal Amount { get; init; }
+    public decimal Credits { get; init; }
+    public string? WalletId { get; init; }
+}
+
+public sealed record WalletRechargeTransferProofRequest
+{
+    public IReadOnlyList<string>? VoucherFiles { get; init; }
+    public string? Note { get; init; }
+    public string? TransferReference { get; init; }
 }
 
 public sealed record UploadBeginRequest : AccountScope

@@ -94,6 +94,12 @@ describe("createJobsService", () => {
         attempt_count: "2",
         max_attempts: 3,
         lease_owner: "synthetic-worker",
+        last_error: "Synthetic last error",
+        failure_reason: "Synthetic projected failure",
+        error: "Synthetic provider error",
+        error_stack: "Synthetic stack",
+        provider_status_code: 429,
+        provider: "synthetic-provider-name",
         created_by_user_id: "synthetic-actor-1",
         payload: {
           domain: "media",
@@ -111,12 +117,17 @@ describe("createJobsService", () => {
           billing_status: "reserved",
           metadata: {
             payloadMarker: "payload",
+            errorDetails: "Synthetic payload details",
+            providerSupportCode: "support-1",
           },
         },
         result: {
           output_summary: "Synthetic output",
           metadata: {
             resultMarker: "result",
+            errorCause: "Synthetic result cause",
+            providerCode: "RESULT_CODE",
+            providerMessage: "Synthetic provider message",
           },
         },
       }),
@@ -137,6 +148,16 @@ describe("createJobsService", () => {
       etaSeconds: 12,
       inputSummary: "Synthetic prompt",
       outputSummary: "Synthetic output",
+      failureReason: "Synthetic projected failure",
+      error: "Synthetic provider error",
+      errorStack: "Synthetic stack",
+      errorCause: "Synthetic result cause",
+      errorDetails: "Synthetic payload details",
+      providerStatusCode: "429",
+      provider: "synthetic-provider-name",
+      providerCode: "RESULT_CODE",
+      providerSupportCode: "support-1",
+      providerMessage: "Synthetic provider message",
       quotedCredits: 5,
       frozenCredits: 2,
       settledCredits: 1,
@@ -155,6 +176,13 @@ describe("createJobsService", () => {
         attemptCount: 2,
         maxAttempts: 3,
         leaseOwner: "synthetic-worker",
+        failureReason: "Synthetic projected failure",
+        error: "Synthetic provider error",
+        providerStatusCode: "429",
+        provider: "synthetic-provider-name",
+        providerCode: "RESULT_CODE",
+        providerSupportCode: "support-1",
+        providerMessage: "Synthetic provider message",
       },
     });
   });
@@ -275,7 +303,7 @@ describe("createJobsService", () => {
       createdByUserId: SYNTHETIC_ACTOR_ID,
     });
     expect(calls[1]).toEqual({
-      path: "/api/jobs?accountOwnerType=organization&accountOwnerId=synthetic-organization&limit=200",
+      path: "/api/jobs?accountOwnerType=organization&accountOwnerId=synthetic-organization&projectId=synthetic-project&types=image.render&limit=200",
       init: undefined,
     });
   });
@@ -321,7 +349,29 @@ describe("createJobsService", () => {
     });
     expect(calls).toEqual([
       {
-        path: "/api/jobs?accountOwnerType=user&accountOwnerId=synthetic-actor&limit=200",
+        path: "/api/jobs?accountOwnerType=user&accountOwnerId=synthetic-actor&projectId=synthetic-project-a&types=image.render&limit=200",
+        init: undefined,
+      },
+    ]);
+  });
+
+  it("passes list paging and multi-type filters to the public jobs route", async () => {
+    const { calls, service } = createServiceHarness({
+      handler: () => [],
+    });
+
+    await expect(
+      service.listTasks(undefined, undefined, {
+        limit: 25,
+        offset: 50,
+        types: ["image.render", "video.render", "image.render"],
+      }),
+    ).resolves.toEqual({
+      items: [],
+    });
+    expect(calls).toEqual([
+      {
+        path: "/api/jobs?accountOwnerType=user&accountOwnerId=synthetic-actor&types=image.render%2Cvideo.render&limit=25&offset=50",
         init: undefined,
       },
     ]);
@@ -474,7 +524,7 @@ describe("createJobsService", () => {
       removedCount: 2,
     });
     expect(calls[0]).toEqual({
-      path: "/api/jobs?accountOwnerType=user&accountOwnerId=synthetic-actor&limit=200",
+      path: "/api/jobs?accountOwnerType=user&accountOwnerId=synthetic-actor&projectId=synthetic-project&types=image.render&limit=200",
       init: undefined,
     });
     expect(calls).toHaveLength(2);

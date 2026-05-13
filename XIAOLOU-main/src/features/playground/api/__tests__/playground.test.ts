@@ -990,6 +990,158 @@ describe("createPlaygroundService", () => {
     expect(ownerScopeCalls).toHaveLength(4);
   });
 
+  it("uses scoped .NET memory contract routes for filters, create, vector index, rebuild, and recall", async () => {
+    const memory = {
+      key: "food.preference",
+      value: "Likes sushi",
+      enabled: true,
+      confidence: 0.72,
+      sourceConversationId: "conversation/1",
+      sourceMessageId: "message/1",
+      data: { tags: ["food"] },
+      createdAt: "2026-05-05T00:03:00.000Z",
+      updatedAt: "2026-05-05T00:05:00.000Z",
+    };
+    const vectorIndex = {
+      available: false,
+      status: "not_configured",
+      mode: "keyword_fallback",
+      embeddingProvider: "none",
+      dimensions: null,
+      memoryCount: 1,
+      enabledMemoryCount: 1,
+      indexedCount: 0,
+      staleCount: 1,
+      lastMemoryUpdatedAt: "2026-05-05T00:05:00.000Z",
+      lastIndexedAt: null,
+      diagnostics: {
+        code: "PLAYGROUND_MEMORY_VECTOR_INDEX_NOT_CONFIGURED",
+        fallback: "keyword",
+      },
+    };
+    const { calls, service } = createServiceHarness({
+      handler: (path) => {
+        if (path.startsWith("/api/playground/memories/vector-index?")) {
+          return vectorIndex;
+        }
+        if (path === "/api/playground/memories/vector-index/rebuild") {
+          return {
+            accepted: false,
+            status: "not_configured",
+            mode: "keyword_fallback",
+            force: true,
+            rebuiltAt: null,
+            indexedCount: 0,
+            skippedCount: 1,
+            diagnostics: vectorIndex.diagnostics,
+            vectorIndex,
+          };
+        }
+        if (path === "/api/playground/memories/recall-test") {
+          return {
+            query: "sushi",
+            mode: "keyword_fallback",
+            vectorIndexStatus: "not_configured",
+            embeddingProvider: "none",
+            limit: 3,
+            includeDisabled: true,
+            items: [{ memory, score: 0.85, reason: "keyword_match" }],
+            diagnostics: vectorIndex.diagnostics,
+          };
+        }
+        if (path === "/api/playground/memories") {
+          return memory;
+        }
+
+        return {
+          preference: { enabled: true, updatedAt: null },
+          items: [memory],
+          limit: 25,
+          offset: 10,
+          hasMore: false,
+          filter: { search: "sushi", enabled: true },
+        };
+      },
+    });
+
+    await expect(
+      service.listPlaygroundMemories({ search: "  sushi  ", enabled: true, limit: 25, offset: 10 }),
+    ).resolves.toEqual({
+      preference: { enabled: true, updatedAt: null },
+      items: [memory],
+      limit: 25,
+      offset: 10,
+      hasMore: false,
+      filter: { search: "sushi", enabled: true },
+    });
+    await expect(
+      service.createPlaygroundMemory({
+        key: "food.preference",
+        value: "Likes sushi",
+        confidence: 0.72,
+        sourceConversationId: "conversation/1",
+        sourceMessageId: "message/1",
+        data: { tags: ["food"] },
+      }),
+    ).resolves.toEqual(memory);
+    await expect(service.getPlaygroundMemoryVectorIndex()).resolves.toEqual(vectorIndex);
+    await expect(service.rebuildPlaygroundMemoryVectorIndex({ force: true })).resolves.toMatchObject({
+      accepted: false,
+      status: "not_configured",
+      vectorIndex,
+    });
+    await expect(
+      service.runPlaygroundMemoryRecallTest({ query: "sushi", limit: 3, includeDisabled: true }),
+    ).resolves.toMatchObject({
+      query: "sushi",
+      mode: "keyword_fallback",
+      items: [{ memory, score: 0.85, reason: "keyword_match" }],
+    });
+
+    expect(calls[0]).toEqual({
+      path: "/api/playground/memories?accountOwnerType=user&accountOwnerId=synthetic-actor&search=sushi&enabled=true&limit=25&offset=10",
+      init: undefined,
+    });
+    expect(calls[1].path).toBe("/api/playground/memories");
+    expect(calls[1].init?.method).toBe("POST");
+    expect(parseJsonBody(calls[1])).toEqual({
+      accountOwnerType: "user",
+      accountOwnerId: "synthetic-actor",
+      regionCode: "CN",
+      currency: "CNY",
+      key: "food.preference",
+      value: "Likes sushi",
+      confidence: 0.72,
+      sourceConversationId: "conversation/1",
+      sourceMessageId: "message/1",
+      data: { tags: ["food"] },
+    });
+    expect(calls[2]).toEqual({
+      path: "/api/playground/memories/vector-index?accountOwnerType=user&accountOwnerId=synthetic-actor",
+      init: undefined,
+    });
+    expect(calls[3].path).toBe("/api/playground/memories/vector-index/rebuild");
+    expect(calls[3].init?.method).toBe("POST");
+    expect(parseJsonBody(calls[3])).toEqual({
+      accountOwnerType: "user",
+      accountOwnerId: "synthetic-actor",
+      regionCode: "CN",
+      currency: "CNY",
+      force: true,
+    });
+    expect(calls[4].path).toBe("/api/playground/memories/recall-test");
+    expect(calls[4].init?.method).toBe("POST");
+    expect(parseJsonBody(calls[4])).toEqual({
+      accountOwnerType: "user",
+      accountOwnerId: "synthetic-actor",
+      regionCode: "CN",
+      currency: "CNY",
+      query: "sushi",
+      limit: 3,
+      includeDisabled: true,
+    });
+  });
+
   it("mirrors organization owner scope into memory read, delete, and write requests", async () => {
     const organizationScope = createSyntheticOrganizationOwnerScope();
     const { calls, service } = createServiceHarness({

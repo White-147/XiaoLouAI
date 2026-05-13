@@ -5,7 +5,14 @@ import type {
   PlaygroundChatJobStartResult,
   PlaygroundConversation,
   PlaygroundMemory,
+  PlaygroundMemoryListOptions,
+  PlaygroundMemoryListResponse,
   PlaygroundMemoryPreference,
+  PlaygroundMemoryRecallTestInput,
+  PlaygroundMemoryRecallTestResult,
+  PlaygroundMemoryVectorIndex,
+  PlaygroundMemoryVectorRebuildResult,
+  PlaygroundMemoryWriteInput,
   PlaygroundMessage,
   PlaygroundModel,
 } from "./playground-types";
@@ -36,16 +43,21 @@ export type PlaygroundServiceContract = {
   listPlaygroundChatJobs: (options?: PlaygroundChatJobsQuery) => Promise<{ items: PlaygroundChatJob[] }>;
   getPlaygroundChatJob: (jobId: string) => Promise<{ job: PlaygroundChatJob }>;
   startPlaygroundChatJob: (input: PlaygroundChatInput) => Promise<PlaygroundChatJobStartResult>;
-  listPlaygroundMemories: () => Promise<{
-    preference: PlaygroundMemoryPreference;
-    items: PlaygroundMemory[];
-  }>;
+  listPlaygroundMemories: (options?: PlaygroundMemoryListOptions) => Promise<PlaygroundMemoryListResponse>;
+  createPlaygroundMemory: (input: PlaygroundMemoryWriteInput) => Promise<PlaygroundMemory>;
+  getPlaygroundMemoryVectorIndex: () => Promise<PlaygroundMemoryVectorIndex>;
+  rebuildPlaygroundMemoryVectorIndex: (
+    input?: { force?: boolean },
+  ) => Promise<PlaygroundMemoryVectorRebuildResult>;
+  runPlaygroundMemoryRecallTest: (
+    input: PlaygroundMemoryRecallTestInput,
+  ) => Promise<PlaygroundMemoryRecallTestResult>;
   updatePlaygroundMemoryPreference: (
     input: Partial<PlaygroundMemoryPreference>,
   ) => Promise<PlaygroundMemoryPreference>;
   updatePlaygroundMemory: (
     key: string,
-    input: Partial<Pick<PlaygroundMemory, "key" | "value" | "enabled">>,
+    input: PlaygroundMemoryWriteInput,
   ) => Promise<PlaygroundMemory>;
   deletePlaygroundMemory: (key: string) => Promise<{ deleted: boolean; key: string }>;
   runPlaygroundChatFacade: (
@@ -98,15 +110,27 @@ export function createPlaygroundFacade(playgroundService: PlaygroundServiceContr
     startPlaygroundChatJob(input: PlaygroundChatInput) {
       return playgroundService.startPlaygroundChatJob(input);
     },
-    listPlaygroundMemories() {
-      return playgroundService.listPlaygroundMemories();
+    listPlaygroundMemories(options: PlaygroundMemoryListOptions = {}) {
+      return playgroundService.listPlaygroundMemories(options);
+    },
+    createPlaygroundMemory(input: PlaygroundMemoryWriteInput) {
+      return playgroundService.createPlaygroundMemory(input);
+    },
+    getPlaygroundMemoryVectorIndex() {
+      return playgroundService.getPlaygroundMemoryVectorIndex();
+    },
+    rebuildPlaygroundMemoryVectorIndex(input: { force?: boolean } = {}) {
+      return playgroundService.rebuildPlaygroundMemoryVectorIndex(input);
+    },
+    runPlaygroundMemoryRecallTest(input: PlaygroundMemoryRecallTestInput) {
+      return playgroundService.runPlaygroundMemoryRecallTest(input);
     },
     updatePlaygroundMemoryPreference(input: Partial<PlaygroundMemoryPreference>) {
       return playgroundService.updatePlaygroundMemoryPreference(input);
     },
     updatePlaygroundMemory(
       key: string,
-      input: Partial<Pick<PlaygroundMemory, "key" | "value" | "enabled">>,
+      input: PlaygroundMemoryWriteInput,
     ) {
       return playgroundService.updatePlaygroundMemory(key, input);
     },

@@ -456,25 +456,67 @@ public sealed class PostgresPlaygroundStore(
         return row is null ? null : MapPlaygroundJob(row);
     }
 
-    public async Task<Dictionary<string, object?>> ListMemoriesAsync(AccountScope scope, CancellationToken cancellationToken)
+    public Task<Dictionary<string, object?>> ListMemoriesAsync(AccountScope scope, CancellationToken cancellationToken)
+    {
+        return ListMemoriesAsync(scope, search: null, enabled: null, limit: 200, offset: 0, cancellationToken);
+    }
+
+    public async Task<Dictionary<string, object?>> ListMemoriesAsync(
+        AccountScope scope,
+        string? search,
+        bool? enabled,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken)
     {
         var accountId = await EnsureAccountIdAsync(scope, cancellationToken);
+        var normalizedSearch = NormalizeBlank(search);
+        var normalizedLimit = NormalizeLimit(limit, 1, 200);
+        var normalizedOffset = NormalizeOffset(offset);
+
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(
-            """
+        await using var command = new NpgsqlCommand { Connection = connection };
+        command.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId);
+        command.Parameters.AddWithValue("limit", NpgsqlDbType.Integer, normalizedLimit + 1);
+        command.Parameters.AddWithValue("offset", NpgsqlDbType.Integer, normalizedOffset);
+        var filters = new List<string> { "account_id = @accountId" };
+
+        if (normalizedSearch is not null)
+        {
+            filters.Add("(key ILIKE '%' || @search || '%' OR value ILIKE '%' || @search || '%' OR memory_key ILIKE '%' || @search || '%' OR memory_value ILIKE '%' || @search || '%')");
+            command.Parameters.AddWithValue("search", NpgsqlDbType.Text, normalizedSearch);
+        }
+
+        if (enabled.HasValue)
+        {
+            filters.Add("enabled = @enabled");
+            command.Parameters.AddWithValue("enabled", NpgsqlDbType.Boolean, enabled.Value);
+        }
+
+        command.CommandText =
+            $"""
             SELECT *, data::text AS data_json
             FROM playground_memories
-            WHERE account_id = @accountId
+            WHERE {string.Join(" AND ", filters)}
             ORDER BY updated_at DESC, key ASC
-            LIMIT 200
-            """,
-            connection);
-        command.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId);
+            LIMIT @limit OFFSET @offset
+            """;
+
+        var rows = await PostgresRows.ReadManyAsync(command, cancellationToken);
+        var items = rows.Take(normalizedLimit).Select(MapMemory).ToArray();
 
         return new Dictionary<string, object?>
         {
             ["preference"] = await GetMemoryPreferenceAsync(scope, cancellationToken),
-            ["items"] = (await PostgresRows.ReadManyAsync(command, cancellationToken)).Select(MapMemory).ToArray(),
+            ["items"] = items,
+            ["limit"] = normalizedLimit,
+            ["offset"] = normalizedOffset,
+            ["hasMore"] = rows.Count > normalizedLimit,
+            ["filter"] = new Dictionary<string, object?>
+            {
+                ["search"] = normalizedSearch,
+                ["enabled"] = enabled,
+            },
         };
     }
 
@@ -525,19 +567,20 @@ public sealed class PostgresPlaygroundStore(
             throw new ArgumentException("Playground memory key is required.", nameof(key));
         }
 
-        var data = JsonSerializer.Serialize(new Dictionary<string, object?>
-        {
-            ["source"] = "control_api_canonical",
-        }, JsonOptions);
+        var data = BuildMemoryDataJson(request);
         var actorId = NormalizeActorId(scope.AccountOwnerId);
         var legacyId = $"{actorId}:{normalizedKey}";
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand(
             """
             INSERT INTO playground_memories (
-              account_id, id, actor_id, key, value, memory_key, memory_value, enabled, data, created_at, updated_at
+              account_id, id, actor_id, key, value, memory_key, memory_value, enabled,
+              confidence, source_conversation_id, source_message_id, data, created_at, updated_at
             )
-            VALUES (@accountId, @id, @actorId, @key, @value, @key, @value, @enabled, @data::jsonb, now(), now())
+            VALUES (
+              @accountId, @id, @actorId, @key, @value, @key, @value, @enabled,
+              @confidence, @sourceConversationId, @sourceMessageId, @data::jsonb, now(), now()
+            )
             ON CONFLICT (account_id, key) DO UPDATE SET
               id = EXCLUDED.id,
               actor_id = EXCLUDED.actor_id,
@@ -545,6 +588,9 @@ public sealed class PostgresPlaygroundStore(
               memory_key = EXCLUDED.memory_key,
               memory_value = EXCLUDED.memory_value,
               enabled = EXCLUDED.enabled,
+              confidence = COALESCE(EXCLUDED.confidence, playground_memories.confidence),
+              source_conversation_id = COALESCE(EXCLUDED.source_conversation_id, playground_memories.source_conversation_id),
+              source_message_id = COALESCE(EXCLUDED.source_message_id, playground_memories.source_message_id),
               data = playground_memories.data || EXCLUDED.data,
               updated_at = now()
             RETURNING *, data::text AS data_json
@@ -556,9 +602,110 @@ public sealed class PostgresPlaygroundStore(
         command.Parameters.AddWithValue("key", NpgsqlDbType.Text, normalizedKey);
         command.Parameters.AddWithValue("value", NpgsqlDbType.Text, request.Value ?? "");
         command.Parameters.AddWithValue("enabled", NpgsqlDbType.Boolean, request.Enabled ?? true);
+        command.Parameters.Add("confidence", NpgsqlDbType.Numeric).Value = (object?)NormalizeConfidence(request.Confidence) ?? DBNull.Value;
+        command.Parameters.AddWithValue("sourceConversationId", NpgsqlDbType.Text, (object?)NormalizeBlank(request.SourceConversationId) ?? DBNull.Value);
+        command.Parameters.AddWithValue("sourceMessageId", NpgsqlDbType.Text, (object?)NormalizeBlank(request.SourceMessageId) ?? DBNull.Value);
         command.Parameters.AddWithValue("data", NpgsqlDbType.Jsonb, data);
 
         return MapMemory((await PostgresRows.ReadSingleAsync(command, cancellationToken))!);
+    }
+
+    public async Task<Dictionary<string, object?>> GetMemoryVectorIndexAsync(
+        AccountScope scope,
+        CancellationToken cancellationToken)
+    {
+        var accountId = await EnsureAccountIdAsync(scope, cancellationToken);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT
+              COUNT(*) AS memory_count,
+              COUNT(*) FILTER (WHERE enabled = true) AS enabled_memory_count,
+              MAX(updated_at) AS last_memory_updated_at
+            FROM playground_memories
+            WHERE account_id = @accountId
+            """,
+            connection);
+        command.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId);
+
+        var row = await PostgresRows.ReadSingleAsync(command, cancellationToken) ?? new Dictionary<string, object?>();
+        return BuildMemoryVectorIndex(row);
+    }
+
+    public async Task<Dictionary<string, object?>> RebuildMemoryVectorIndexAsync(
+        AccountScope scope,
+        PlaygroundMemoryVectorRebuildRequest request,
+        CancellationToken cancellationToken)
+    {
+        var vectorIndex = await GetMemoryVectorIndexAsync(scope, cancellationToken);
+        return new Dictionary<string, object?>
+        {
+            ["accepted"] = false,
+            ["status"] = "not_configured",
+            ["mode"] = "keyword_fallback",
+            ["force"] = request.Force == true,
+            ["rebuiltAt"] = null,
+            ["indexedCount"] = 0,
+            ["skippedCount"] = Convert.ToInt64(vectorIndex["enabledMemoryCount"] ?? 0),
+            ["diagnostics"] = MemoryVectorDiagnostics(),
+            ["vectorIndex"] = vectorIndex,
+        };
+    }
+
+    public async Task<Dictionary<string, object?>> RecallMemoriesAsync(
+        AccountScope scope,
+        PlaygroundMemoryRecallRequest request,
+        CancellationToken cancellationToken)
+    {
+        var query = NormalizeBlank(request.Query);
+        if (query is null)
+        {
+            throw new ArgumentException("Playground memory recall query is required.", nameof(request));
+        }
+
+        var accountId = await EnsureAccountIdAsync(scope, cancellationToken);
+        var normalizedLimit = NormalizeLimit(request.Limit ?? 10, 1, 50);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT *, data::text AS data_json
+            FROM playground_memories
+            WHERE account_id = @accountId
+              AND (@includeDisabled = true OR enabled = true)
+              AND (
+                key ILIKE '%' || @query || '%'
+                OR value ILIKE '%' || @query || '%'
+                OR memory_key ILIKE '%' || @query || '%'
+                OR memory_value ILIKE '%' || @query || '%'
+              )
+            ORDER BY updated_at DESC, key ASC
+            LIMIT @limit
+            """,
+            connection);
+        command.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId);
+        command.Parameters.AddWithValue("includeDisabled", NpgsqlDbType.Boolean, request.IncludeDisabled == true);
+        command.Parameters.AddWithValue("query", NpgsqlDbType.Text, query);
+        command.Parameters.AddWithValue("limit", NpgsqlDbType.Integer, normalizedLimit);
+
+        var rows = await PostgresRows.ReadManyAsync(command, cancellationToken);
+        var items = rows.Select(row => new Dictionary<string, object?>
+        {
+            ["memory"] = MapMemory(row),
+            ["score"] = KeywordScore(row, query),
+            ["reason"] = "keyword_match",
+        }).ToArray();
+
+        return new Dictionary<string, object?>
+        {
+            ["query"] = query,
+            ["mode"] = "keyword_fallback",
+            ["vectorIndexStatus"] = "not_configured",
+            ["embeddingProvider"] = "none",
+            ["limit"] = normalizedLimit,
+            ["includeDisabled"] = request.IncludeDisabled == true,
+            ["items"] = items,
+            ["diagnostics"] = MemoryVectorDiagnostics(),
+        };
     }
 
     public async Task<bool> DeleteMemoryAsync(
@@ -937,6 +1084,89 @@ public sealed class PostgresPlaygroundStore(
         };
     }
 
+    private static string BuildMemoryDataJson(PlaygroundMemoryRequest request)
+    {
+        var data = new JsonObject();
+        if (request.Data.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in request.Data.EnumerateObject())
+            {
+                data[property.Name] = JsonNode.Parse(property.Value.GetRawText());
+            }
+        }
+        else if (request.Data.ValueKind != JsonValueKind.Undefined && request.Data.ValueKind != JsonValueKind.Null)
+        {
+            data["payload"] = JsonNode.Parse(request.Data.GetRawText());
+        }
+
+        data["source"] = "control_api_canonical";
+        data["contractOwner"] = "dotnet-playground-memory";
+        return data.ToJsonString(JsonOptions);
+    }
+
+    private static Dictionary<string, object?> BuildMemoryVectorIndex(Dictionary<string, object?> row)
+    {
+        var memoryCount = AsLong(row, "memory_count");
+        var enabledMemoryCount = AsLong(row, "enabled_memory_count");
+        return new Dictionary<string, object?>
+        {
+            ["available"] = false,
+            ["status"] = "not_configured",
+            ["mode"] = "keyword_fallback",
+            ["embeddingProvider"] = "none",
+            ["dimensions"] = null,
+            ["memoryCount"] = memoryCount,
+            ["enabledMemoryCount"] = enabledMemoryCount,
+            ["indexedCount"] = 0,
+            ["staleCount"] = enabledMemoryCount,
+            ["lastMemoryUpdatedAt"] = ToIso(row.TryGetValue("last_memory_updated_at", out var updatedAt) ? updatedAt : null),
+            ["lastIndexedAt"] = null,
+            ["diagnostics"] = MemoryVectorDiagnostics(),
+        };
+    }
+
+    private static Dictionary<string, object?> MemoryVectorDiagnostics()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["code"] = "PLAYGROUND_MEMORY_VECTOR_INDEX_NOT_CONFIGURED",
+            ["message"] = "Playground memory vector routes are owned by the .NET contract; no embedding provider or vector index is configured yet.",
+            ["fallback"] = "keyword",
+        };
+    }
+
+    private static decimal KeywordScore(Dictionary<string, object?> row, string query)
+    {
+        var key = AsString(row, "key") ?? AsString(row, "memory_key") ?? "";
+        var value = AsString(row, "value") ?? AsString(row, "memory_value") ?? "";
+        if (string.Equals(key, query, StringComparison.OrdinalIgnoreCase))
+        {
+            return 1m;
+        }
+
+        if (key.Contains(query, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.85m;
+        }
+
+        return value.Contains(query, StringComparison.OrdinalIgnoreCase) ? 0.65m : 0.25m;
+    }
+
+    private static int NormalizeLimit(int limit, int min, int max)
+    {
+        return Math.Clamp(limit, min, max);
+    }
+
+    private static int NormalizeOffset(int offset)
+    {
+        return Math.Max(0, offset);
+    }
+
+    private static decimal? NormalizeConfidence(decimal? confidence)
+    {
+        return confidence.HasValue ? Math.Clamp(confidence.Value, 0m, 1m) : null;
+    }
+
     private static string? AsString(Dictionary<string, object?> row, string key)
     {
         return row.TryGetValue(key, out var value) && value is not null
@@ -955,6 +1185,13 @@ public sealed class PostgresPlaygroundStore(
         return row.TryGetValue(key, out var value) && value is not null
             ? Convert.ToInt32(value)
             : 0;
+    }
+
+    private static long AsLong(Dictionary<string, object?> row, string key)
+    {
+        return row.TryGetValue(key, out var value) && value is not null
+            ? Convert.ToInt64(value)
+            : 0L;
     }
 
     private static bool AsBool(Dictionary<string, object?> row, string key, bool fallback = false)

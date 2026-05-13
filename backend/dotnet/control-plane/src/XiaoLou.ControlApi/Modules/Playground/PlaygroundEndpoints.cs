@@ -346,6 +346,10 @@ internal static class PlaygroundEndpoints
         endpoints.MapGet("/api/playground/memories", async (
             string? accountOwnerType,
             string? accountOwnerId,
+            string? search,
+            bool? enabled,
+            int? limit,
+            int? offset,
             HttpContext httpContext,
             IOptions<ClientApiOptions> clientApi,
             PostgresPlaygroundStore playground,
@@ -357,7 +361,119 @@ internal static class PlaygroundEndpoints
                 return denied;
             }
 
-            return Results.Ok(await playground.ListMemoriesAsync(scope, ct));
+            return Results.Ok(await playground.ListMemoriesAsync(scope, search, enabled, limit ?? 100, offset ?? 0, ct));
+        });
+
+        endpoints.MapPost("/api/playground/memories", async (
+            PlaygroundMemoryRequest request,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresPlaygroundStore playground,
+            CancellationToken ct) =>
+        {
+            var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+            var scopedRequest = request with
+            {
+                AccountOwnerType = scope.AccountOwnerType,
+                AccountOwnerId = scope.AccountOwnerId,
+                RegionCode = scope.RegionCode,
+                Currency = scope.Currency,
+            };
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
+            {
+                return denied;
+            }
+
+            if (NormalizeBlank(scopedRequest.Key) is null)
+            {
+                return BadRequestError(new ArgumentException("Playground memory key is required.", nameof(request)));
+            }
+
+            try
+            {
+                return Results.Json(
+                    await playground.UpsertMemoryAsync(scopedRequest, scopedRequest.Key ?? "", scopedRequest, ct),
+                    statusCode: StatusCodes.Status201Created);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequestError(ex);
+            }
+        });
+
+        endpoints.MapGet("/api/playground/memories/vector-index", async (
+            string? accountOwnerType,
+            string? accountOwnerId,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresPlaygroundStore playground,
+            CancellationToken ct) =>
+        {
+            var scope = ResolvePublicOwnerScope(httpContext, accountOwnerType, accountOwnerId);
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scope, requireConfiguredAccountGrant: false) is { } denied)
+            {
+                return denied;
+            }
+
+            return Results.Ok(await playground.GetMemoryVectorIndexAsync(scope, ct));
+        });
+
+        endpoints.MapPost("/api/playground/memories/vector-index/rebuild", async (
+            PlaygroundMemoryVectorRebuildRequest request,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresPlaygroundStore playground,
+            CancellationToken ct) =>
+        {
+            var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+            var scopedRequest = request with
+            {
+                AccountOwnerType = scope.AccountOwnerType,
+                AccountOwnerId = scope.AccountOwnerId,
+                RegionCode = scope.RegionCode,
+                Currency = scope.Currency,
+            };
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
+            {
+                return denied;
+            }
+
+            return Results.Ok(await playground.RebuildMemoryVectorIndexAsync(scopedRequest, scopedRequest, ct));
+        });
+
+        endpoints.MapPost("/api/playground/memories/recall-test", async (
+            PlaygroundMemoryRecallRequest request,
+            HttpContext httpContext,
+            IOptions<ClientApiOptions> clientApi,
+            PostgresPlaygroundStore playground,
+            CancellationToken ct) =>
+        {
+            var scope = ResolvePublicOwnerScope(httpContext, request.AccountOwnerType, request.AccountOwnerId);
+            var scopedRequest = request with
+            {
+                AccountOwnerType = scope.AccountOwnerType,
+                AccountOwnerId = scope.AccountOwnerId,
+                RegionCode = scope.RegionCode,
+                Currency = scope.Currency,
+            };
+            if (AuthorizeAccountScope(httpContext, clientApi.Value, scopedRequest, requireConfiguredAccountGrant: false) is { } denied)
+            {
+                return denied;
+            }
+
+            if (NormalizeBlank(scopedRequest.Query) is null)
+            {
+                return BadRequestError(new ArgumentException("Playground memory recall query is required.", nameof(request)));
+            }
+
+            try
+            {
+                return Results.Ok(await playground.RecallMemoriesAsync(scopedRequest, scopedRequest, ct));
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequestError(ex);
+            }
         });
 
         endpoints.MapPut("/api/playground/memories/preference", async (

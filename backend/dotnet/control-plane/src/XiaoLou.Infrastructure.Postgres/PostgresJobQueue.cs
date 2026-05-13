@@ -6,6 +6,108 @@ namespace XiaoLou.Infrastructure.Postgres;
 
 public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccountStore accounts)
 {
+    private const string JobReadProjection =
+        """
+              j.*,
+              a.legacy_owner_type AS account_owner_type,
+              a.legacy_owner_id AS account_owner_id,
+              COALESCE(
+                NULLIF(j.last_error, ''),
+                NULLIF(j.result->>'failureReason', ''),
+                NULLIF(j.result->>'failure_reason', ''),
+                NULLIF(j.result->'metadata'->>'failureReason', ''),
+                NULLIF(j.result->'metadata'->>'failure_reason', ''),
+                NULLIF(j.payload->>'failureReason', ''),
+                NULLIF(j.payload->>'failure_reason', ''),
+                NULLIF(j.payload->'metadata'->>'failureReason', ''),
+                NULLIF(j.payload->'metadata'->>'failure_reason', '')
+              ) AS failure_reason,
+              COALESCE(
+                NULLIF(j.result->>'error', ''),
+                NULLIF(j.result->'metadata'->>'error', ''),
+                NULLIF(j.payload->>'error', ''),
+                NULLIF(j.payload->'metadata'->>'error', ''),
+                NULLIF(j.last_error, '')
+              ) AS error,
+              COALESCE(
+                NULLIF(j.result->>'errorStack', ''),
+                NULLIF(j.result->>'error_stack', ''),
+                NULLIF(j.result->'metadata'->>'errorStack', ''),
+                NULLIF(j.result->'metadata'->>'error_stack', ''),
+                NULLIF(j.payload->>'errorStack', ''),
+                NULLIF(j.payload->>'error_stack', ''),
+                NULLIF(j.payload->'metadata'->>'errorStack', ''),
+                NULLIF(j.payload->'metadata'->>'error_stack', '')
+              ) AS error_stack,
+              COALESCE(
+                NULLIF(j.result->>'errorCause', ''),
+                NULLIF(j.result->>'error_cause', ''),
+                NULLIF(j.result->'metadata'->>'errorCause', ''),
+                NULLIF(j.result->'metadata'->>'error_cause', ''),
+                NULLIF(j.payload->>'errorCause', ''),
+                NULLIF(j.payload->>'error_cause', ''),
+                NULLIF(j.payload->'metadata'->>'errorCause', ''),
+                NULLIF(j.payload->'metadata'->>'error_cause', '')
+              ) AS error_cause,
+              COALESCE(
+                NULLIF(j.result->>'errorDetails', ''),
+                NULLIF(j.result->>'error_details', ''),
+                NULLIF(j.result->'metadata'->>'errorDetails', ''),
+                NULLIF(j.result->'metadata'->>'error_details', ''),
+                NULLIF(j.payload->>'errorDetails', ''),
+                NULLIF(j.payload->>'error_details', ''),
+                NULLIF(j.payload->'metadata'->>'errorDetails', ''),
+                NULLIF(j.payload->'metadata'->>'error_details', '')
+              ) AS error_details,
+              COALESCE(
+                NULLIF(j.result->>'providerStatusCode', ''),
+                NULLIF(j.result->>'provider_status_code', ''),
+                NULLIF(j.result->'metadata'->>'providerStatusCode', ''),
+                NULLIF(j.result->'metadata'->>'provider_status_code', ''),
+                NULLIF(j.payload->>'providerStatusCode', ''),
+                NULLIF(j.payload->>'provider_status_code', ''),
+                NULLIF(j.payload->'metadata'->>'providerStatusCode', ''),
+                NULLIF(j.payload->'metadata'->>'provider_status_code', '')
+              ) AS provider_status_code,
+              COALESCE(
+                NULLIF(j.result->>'provider', ''),
+                NULLIF(j.result->'metadata'->>'provider', ''),
+                NULLIF(j.payload->>'provider', ''),
+                NULLIF(j.payload->'metadata'->>'provider', ''),
+                NULLIF(j.provider_route, '')
+              ) AS provider,
+              COALESCE(
+                NULLIF(j.result->>'providerCode', ''),
+                NULLIF(j.result->>'provider_code', ''),
+                NULLIF(j.result->'metadata'->>'providerCode', ''),
+                NULLIF(j.result->'metadata'->>'provider_code', ''),
+                NULLIF(j.payload->>'providerCode', ''),
+                NULLIF(j.payload->>'provider_code', ''),
+                NULLIF(j.payload->'metadata'->>'providerCode', ''),
+                NULLIF(j.payload->'metadata'->>'provider_code', '')
+              ) AS provider_code,
+              COALESCE(
+                NULLIF(j.result->>'providerSupportCode', ''),
+                NULLIF(j.result->>'provider_support_code', ''),
+                NULLIF(j.result->'metadata'->>'providerSupportCode', ''),
+                NULLIF(j.result->'metadata'->>'provider_support_code', ''),
+                NULLIF(j.payload->>'providerSupportCode', ''),
+                NULLIF(j.payload->>'provider_support_code', ''),
+                NULLIF(j.payload->'metadata'->>'providerSupportCode', ''),
+                NULLIF(j.payload->'metadata'->>'provider_support_code', '')
+              ) AS provider_support_code,
+              COALESCE(
+                NULLIF(j.result->>'providerMessage', ''),
+                NULLIF(j.result->>'provider_message', ''),
+                NULLIF(j.result->'metadata'->>'providerMessage', ''),
+                NULLIF(j.result->'metadata'->>'provider_message', ''),
+                NULLIF(j.payload->>'providerMessage', ''),
+                NULLIF(j.payload->>'provider_message', ''),
+                NULLIF(j.payload->'metadata'->>'providerMessage', ''),
+                NULLIF(j.payload->'metadata'->>'provider_message', '')
+              ) AS provider_message
+        """;
+
     public async Task<Dictionary<string, object?>?> CreateJobAsync(
         CreateJobRequest request,
         CancellationToken cancellationToken)
@@ -67,11 +169,9 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand(
-            """
+            $"""
             SELECT
-              j.*,
-              a.legacy_owner_type AS account_owner_type,
-              a.legacy_owner_id AS account_owner_id
+            {JobReadProjection}
             FROM jobs j
             JOIN accounts a ON a.id = j.account_id
             WHERE j.id = @id
@@ -88,6 +188,9 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
         string? lane,
         string? status,
         int limit,
+        int offset,
+        IReadOnlyList<string> jobTypes,
+        string? projectId,
         CancellationToken cancellationToken)
     {
         var filters = new List<string>();
@@ -122,19 +225,43 @@ public sealed class PostgresJobQueue(NpgsqlDataSource dataSource, PostgresAccoun
             command.Parameters.AddWithValue("status", NpgsqlDbType.Text, status.Trim());
         }
 
+        if (jobTypes.Count > 0)
+        {
+            filters.Add("j.job_type = ANY(@jobTypes)");
+            command.Parameters.AddWithValue("jobTypes", NpgsqlDbType.Array | NpgsqlDbType.Text, jobTypes.ToArray());
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            filters.Add(
+                """
+                (
+                  j.payload->>'projectId' = @projectId
+                  OR j.payload->>'project_id' = @projectId
+                  OR j.payload->'metadata'->>'projectId' = @projectId
+                  OR j.payload->'metadata'->>'project_id' = @projectId
+                  OR j.result->>'projectId' = @projectId
+                  OR j.result->>'project_id' = @projectId
+                  OR j.result->'metadata'->>'projectId' = @projectId
+                  OR j.result->'metadata'->>'project_id' = @projectId
+                )
+                """);
+            command.Parameters.AddWithValue("projectId", NpgsqlDbType.Text, projectId.Trim());
+        }
+
         command.Parameters.AddWithValue("limit", NpgsqlDbType.Integer, Math.Clamp(limit, 1, 200));
+        command.Parameters.AddWithValue("offset", NpgsqlDbType.Integer, Math.Clamp(offset, 0, 10000));
         var where = filters.Count == 0 ? "" : $"WHERE {string.Join(" AND ", filters)}";
         command.CommandText =
             $"""
             SELECT
-              j.*,
-              a.legacy_owner_type AS account_owner_type,
-              a.legacy_owner_id AS account_owner_id
+            {JobReadProjection}
             FROM jobs j
             JOIN accounts a ON a.id = j.account_id
             {where}
-            ORDER BY j.created_at DESC
+            ORDER BY j.created_at DESC, j.id DESC
             LIMIT @limit
+            OFFSET @offset
             """;
         return await PostgresRows.ReadManyAsync(command, cancellationToken);
     }

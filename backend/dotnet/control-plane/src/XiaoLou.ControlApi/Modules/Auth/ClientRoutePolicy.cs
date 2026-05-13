@@ -31,6 +31,8 @@ internal static class ClientRoutePolicy
             || path.StartsWithSegments("/api/canvas/local-image-edit")
             || path.StartsWithSegments("/api/create")
             || string.Equals(path.Value, "/api/wallet", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path.Value, "/api/wallet/recharge-capabilities", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWithSegments("/api/wallet/recharge-orders")
             || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
             || string.Equals(path.Value, "/api/wallet/usage-stats", StringComparison.OrdinalIgnoreCase)
             || path.StartsWithSegments("/api/wallets");
@@ -118,11 +120,17 @@ internal static class ClientRoutePolicy
 
         if (HttpMethods.IsGet(method)
             && (string.Equals(path.Value, "/api/wallet", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(path.Value, "/api/wallet/recharge-capabilities", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(path.Value, "/api/wallets", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(path.Value, "/api/wallet/usage-stats", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWithSegments("/api/wallets")))
         {
             return "wallet:read";
+        }
+
+        if (path.StartsWithSegments("/api/wallet/recharge-orders"))
+        {
+            return HttpMethods.IsGet(method) ? "wallet:read" : "wallet:write";
         }
 
         if (path.StartsWithSegments("/api/media"))

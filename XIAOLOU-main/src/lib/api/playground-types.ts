@@ -38,6 +38,7 @@ export type PlaygroundMemory = {
   confidence: number | null;
   sourceConversationId: string | null;
   sourceMessageId: string | null;
+  data?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 };
@@ -45,6 +46,88 @@ export type PlaygroundMemory = {
 export type PlaygroundMemoryPreference = {
   enabled: boolean;
   updatedAt: string | null;
+};
+
+export type PlaygroundMemoryListOptions = {
+  search?: string;
+  enabled?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type PlaygroundMemoryListResponse = {
+  preference: PlaygroundMemoryPreference;
+  items: PlaygroundMemory[];
+  limit?: number;
+  offset?: number;
+  hasMore?: boolean;
+  filter?: {
+    search?: string | null;
+    enabled?: boolean | null;
+  };
+};
+
+export type PlaygroundMemoryWriteInput = Partial<
+  Pick<
+    PlaygroundMemory,
+    | "key"
+    | "value"
+    | "enabled"
+    | "confidence"
+    | "sourceConversationId"
+    | "sourceMessageId"
+    | "data"
+  >
+>;
+
+export type PlaygroundMemoryVectorIndex = {
+  available: boolean;
+  status: "not_configured" | "ready" | "building" | "stale";
+  mode: "keyword_fallback" | "vector";
+  embeddingProvider: string;
+  dimensions: number | null;
+  memoryCount: number;
+  enabledMemoryCount: number;
+  indexedCount: number;
+  staleCount: number;
+  lastMemoryUpdatedAt: string | null;
+  lastIndexedAt: string | null;
+  diagnostics?: Record<string, unknown>;
+};
+
+export type PlaygroundMemoryVectorRebuildResult = {
+  accepted: boolean;
+  status: string;
+  mode: "keyword_fallback" | "vector";
+  force?: boolean;
+  rebuiltAt: string | null;
+  indexedCount: number;
+  skippedCount: number;
+  diagnostics?: Record<string, unknown>;
+  vectorIndex: PlaygroundMemoryVectorIndex;
+};
+
+export type PlaygroundMemoryRecallTestInput = {
+  query: string;
+  limit?: number;
+  includeDisabled?: boolean;
+};
+
+export type PlaygroundMemoryRecallItem = {
+  memory: PlaygroundMemory;
+  score: number;
+  reason: string;
+};
+
+export type PlaygroundMemoryRecallTestResult = {
+  query: string;
+  mode: "keyword_fallback" | "vector";
+  vectorIndexStatus: string;
+  embeddingProvider: string;
+  limit: number;
+  includeDisabled: boolean;
+  items: PlaygroundMemoryRecallItem[];
+  diagnostics?: Record<string, unknown>;
 };
 
 export type PlaygroundChatInput = {

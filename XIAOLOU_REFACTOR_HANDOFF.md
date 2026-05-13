@@ -11,6 +11,10 @@
 ```powershell
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Get-Content .\XIAOLOU_REFACTOR_HANDOFF.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-project-stabilization-phase-plan.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-project-stabilization-task-record.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-chuangjing-frontend-alignment-phase-plan.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-chuangjing-frontend-alignment-task-record.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-modular-migration-phase-plan.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-modular-migration-task-record.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-finalization-handoff.md -Encoding UTF8 -Tail 160
@@ -87,9 +91,9 @@ Get-Content .\deploy\records\xiaolouai-refactor-gap-verification.md -Encoding UT
 ## 当前接棒
 
 ```text
-Phase: I modular-migration
-Owner: I4g wallet-recharge-dotnet-contract-reopen
-Status: ready, wait for explicit I4g instruction
+Phase: K chuangjing-frontend-alignment
+Owner: K1 shared-shell-account-center completed
+Status: ready for K2 playground-creative-entry
 I0: done 2026-05-13 docs/handoff calibration only
 I1a: done 2026-05-13 module-progress-inventory docs only
 I1b: done 2026-05-13 chuangjing-delta-owner-matrix docs only
@@ -113,7 +117,17 @@ I4c: done 2026-05-13 agent-canvas-chat-stream-dotnet-sse backend stub SSE
 I4d: done 2026-05-13 local-image-edit-dotnet-route-contract backend unavailable stub
 I4e: done 2026-05-13 projects-endpoints-canvas-agent-split-plan docs/decision only
 I4f: done 2026-05-13 permission-matrix-and-route-policy-update tests/matrix only
-Goal: 在继续 XiaoLouAI 模块化的同时，按 owner 迁移 ChuangJingAI 的可取更新。
+I4g: done 2026-05-13 wallet-recharge-dotnet-contract-reopen backend contract
+I4h: done 2026-05-13 admin-payment-review-dotnet-contract backend contract
+I4i: done 2026-05-13 task-history-dotnet-contract backend/frontend contract
+I4j: done 2026-05-13 playground-memory-dotnet-contract backend/frontend contract
+J0: done 2026-05-13 project-self-check-and-phase-reset docs only
+J1: done 2026-05-13 agent-canvas-ts-lint-baseline narrow TypeScript baseline
+J2: done 2026-05-13 full-verification-and-handoff-refresh validation/docs
+K0: done 2026-05-13 chuangjing-frontend-alignment docs/scope reset
+K1: done 2026-05-13 shared-shell-account-center frontend shell/account center
+Goal: align XiaoLouAI frontend with ChuangJingAI while preserving XiaoLouAI
+canonical APIs, modular boundaries and production constraints.
 ```
 
 I0 已完成：
@@ -729,36 +743,236 @@ I4f 已完成：
   `dotnet test ...XiaoLou.ControlApi.Tests.csproj --no-restore -v:minimal`
   （351 tests）。
 
+I4g 已完成：
+
+- 已读取本 handoff、phase plan、task record、I4f matrix、I1b/I1c
+  payment/account-billing 记录和当前 Payments module。
+- 已确认 git status、retired wallet recharge frontend facade 和当前
+  wallet/payment route tests baseline。
+- `.NET Payments` 已签最小 wallet recharge contract：
+  `/api/wallet/recharge-capabilities`、
+  `/api/wallet/recharge-orders`、
+  `/api/wallet/recharge-orders/{orderId}`、
+  `/api/wallet/recharge-orders/{orderId}/refresh-status`、
+  `/api/wallet/recharge-orders/{orderId}/bank-transfer-proof`、
+  `/api/wallet/recharge-orders/{orderId}/confirm`。
+- Permission：
+  capabilities/order GET 使用 `wallet:read`；create/refresh/proof/confirm
+  使用 `wallet:write`；default client assertion 已包含 `wallet:write`。
+- Account scope：
+  create 可按 `walletId` 做 wallet row ownership guard，或按
+  `CreateWalletRechargeOrderRequest : AccountScope` 做 owner-scope guard；
+  order read/refresh/proof/confirm 都按 mapped order row guard。
+- Ledger/callback safety：
+  demo mock confirm 只通过 `PostgresPaymentLedger` 的 finance-lane lock、
+  immutable ledger insert 和 `payment:demo_mock:{orderId}` idempotency 入账；
+  live provider paid status 仍只接受 signed `/api/payments/callbacks/{provider}`；
+  callback merge 不覆盖 wallet recharge protected data keys。
+- Bank transfer：
+  I4g 只签 capabilities/create/proof contract；需配置 bank account 才能创建
+  transfer order；proof 后只写 `data.reviewStatus=submitted`，不入账。
+  Admin review/credit posting 留给 I4h。
+- Frontend：
+  `wallet-payment.ts` retired write facade 已盘点，本轮未切 UI caller；
+  后续 UI runtime 必须显式绑定 I4g routes，不恢复 Node payment runtime。
+- 验证通过：
+  focused `dotnet test ... --filter AuthHelpersTests|BackendAdvisoryEndpointRoutesTests|BackendAdvisoryEndpointResponseShapeTests`
+  （353 tests）；
+  full `dotnet test ...XiaoLou.ControlApi.Tests.csproj --no-restore -v:minimal`
+  （378 tests）。
+
+I4h 已完成：
+
+- 已读取本 handoff、phase plan、task record、I4g wallet recharge contract、
+  I1b/I1c payment/account-billing 记录和当前 Admin/Payments module。
+- 已确认 git status、admin/payment route tests baseline（focused 353 tests
+  pass），并保留 I4g dirty files 继续窄改。
+- `.NET Admin/Payments` 已签 manual bank-transfer recharge review contract：
+  `/api/admin/orders` read shape 保持原字段；proof submitted rows 仅投影
+  `status=pending_review`/`reviewStatus=submitted` 供现有 admin review UI。
+- `POST /api/admin/orders/{orderId}/review` 已重新打开，request 为
+  `{ decision: "approve" | "reject", note? }`；route 走 `admin:write` 和
+  platform admin permission，Admin 入口委托 `PostgresPaymentLedger`。
+- Account/ledger 边界：
+  review 不接受 caller wallet scope；按 existing order/account row 锁定
+  finance lane。approve 使用 immutable ledger 和
+  `payment:admin_review:{orderId}` idempotency 入账；reject 只写 audit/failed，
+  不改余额，并阻止 rejected order 继续提交新 proof。
+- Callback safety：
+  callback merge 保护 voucher/proof/review audit keys；bank-transfer wallet
+  recharge callbacks 被 ledger consistency 拒绝，不能绕过 admin review。
+- Admin facade：
+  `reviewAdminOrder` 已改为调用 reopened `.NET` route；未切 client checkout UI、
+  未做 provider adapter、未恢复 Node payment runtime。
+- 验证通过：
+  focused `dotnet test ... --filter AuthHelpersTests|BackendAdvisoryEndpointRoutesTests|BackendAdvisoryEndpointResponseShapeTests`
+  （358 tests）；
+  full `dotnet test ...XiaoLou.ControlApi.Tests.csproj --no-restore -v:minimal`
+  （383 tests）；
+  `npm run test:unit -- src/lib/api/__tests__/admin-enterprise.test.ts src/lib/api/__tests__/route-policy.test.ts`
+  （8 tests）；
+  `git diff --check` pass（仅 LF/CRLF warnings）。
+- `npm run lint` 未通过，但失败在既有 agent-canvas runtime TypeScript baseline
+  （`CanvasMediaImportKind`/`CANVAS_MEDIA_IMPORT_MAX_BYTES` missing、
+  `NodeType`/`NodeStatus` type-only import usage），不在 I4h 修改文件内。
+
+I4i 已完成：
+
+- 已读取本 handoff、phase plan、task record、I2c recent-task/task-history
+  记录、I4f permission matrix 和当前 Jobs/InternalJobs module。
+- 已确认 git status、当前 jobs/task route tests baseline，并保留 I4g/I4h
+  dirty files 继续窄改。
+- `jobsFacade.listTasks` caller 已盘点：
+  comic Entities 用 `listTasks(currentProjectId)`；
+  ImageCreate 用 `listTasks()`；
+  VideoCreate 用 `listTasks(undefined, "create_video_generate")`。
+- `.NET /api/jobs` contract 已补齐：
+  list 支持 `limit`、`offset`、`projectId`、`type` 和 comma-separated `types`，
+  owner scope 仍走 accountId 或 accountOwnerType/accountOwnerId guard；
+  排序为 `created_at DESC, id DESC`。
+- `GET /api/jobs` 和 `GET /api/jobs/{jobId}` 均投影 failure/provider
+  diagnostic fields：
+  `failure_reason`、`error`、`error_stack`、`error_cause`、`error_details`、
+  `provider_status_code`、`provider`、`provider_code`、
+  `provider_support_code`、`provider_message`。
+- Frontend jobs contract：
+  `Task` 新增 direct diagnostics；`ListTasksOptions` 新增
+  `{ limit, offset, types }`；facade 保持旧两参调用不被 reshaped，同时可传
+  options；client-side filtering 保留为 compatibility belt。
+- 未改：
+  ChatPanel、Jaaz iframe/runtime、Node core-api、agent-studio、`.env`、
+  Vite proxy、Caddy、scripts、`/api/tasks/stream`、Node memory/vector stores、
+  payment runtime、I4j memory/vector/recall backend contract、Python sidecar、
+  3D Director、frontend create-page rewrite。
+- 验证通过：
+  focused `.NET` AuthHelpers/BackendAdvisory tests（359 tests）；
+  full `XiaoLou.ControlApi.Tests`（384 tests）；
+  `npm run test:unit -- src/lib/api/__tests__/jobs.test.ts src/lib/api/__tests__/api-compatibility-wrappers.test.ts`
+  （16 tests）；
+  `git diff --check` pass（仅 LF/CRLF warnings）。
+
+I4j 已完成：
+
+- 已读取本 handoff、phase plan、task record、I2d memory-center route-decision、
+  I4f permission matrix、I4i task-history record 和当前 Playground memory module。
+- 已确认 git status、当前 playground/memory route tests baseline，并保留
+  I4g/I4h/I4i dirty files 继续窄改。
+- `.NET Playground` memory contract 已补齐：
+  `POST /api/playground/memories`、`GET /api/playground/memories/vector-index`、
+  `POST /api/playground/memories/vector-index/rebuild` 和
+  `POST /api/playground/memories/recall-test`。
+- Create/upsert：
+  POST 和既有 PUT 均按 account owner scope + memory key upsert；write DTO 支持
+  `value`、`enabled`、`confidence`、`sourceConversationId`、`sourceMessageId`
+  和 `data`。
+- List/filter：
+  `GET /api/playground/memories` 支持 `search`、`enabled`、`limit`、`offset`，
+  response 增加 `limit`、`offset`、`hasMore` 和 `filter`。
+- Vector/recall：
+  route/DTO owner 为 `.NET Playground`；当前未配置 embedding provider/vector
+  table 时明确返回 `not_configured` + `keyword_fallback` + diagnostic code
+  `PLAYGROUND_MEMORY_VECTOR_INDEX_NOT_CONFIGURED`。Recall-test 返回
+  `items[{ memory, score, reason }]`，不改 chat memory extraction/recall injection。
+- Frontend：
+  Playground API types/service/facade/public `api.ts` 增加 list options、create、
+  vector-index/rebuild 和 recall-test helpers；未新增 MemoryCenter route。
+- 未改：
+  ChatPanel、Jaaz iframe/runtime、Node core-api、agent-studio、`.env`、
+  Vite proxy、Caddy、scripts、`/api/tasks/stream`、Node memory/vector stores、
+  Node payment runtime、task-history/jobs contract、local-image-edit、Python
+  sidecar/adapter、3D Director、frontend route rewrite。
+- 验证通过：
+  focused `.NET` AuthHelpers/BackendAdvisory route/response-shape tests
+  （373 tests）；
+  `npm run test:unit -- src/features/playground/api/__tests__/playground.test.ts src/lib/api/__tests__/api-compatibility-wrappers.test.ts`
+  （20 tests）。
+- `npm run lint` 仍未通过，但失败仅在既有 agent-canvas runtime baseline：
+  `CanvasMediaImportKind`/`CANVAS_MEDIA_IMPORT_MAX_BYTES` missing，
+  `NodeType`/`NodeStatus` type-only import usage；I4j Playground files 不再报
+  TypeScript error。
+
+J0/J1/J2 已完成：
+
+- 按用户要求开启新阶段：
+  Phase J `project-stabilization`，新文档为
+  `deploy\records\xiaolouai-project-stabilization-phase-plan.md` 和
+  `deploy\records\xiaolouai-project-stabilization-task-record.md`。
+- J0 自检确认剩余真实问题：
+  `npm run lint` 卡在 agent-canvas runtime 的 TypeScript baseline，不属于 I4j。
+- J1 窄修：
+  `App.tsx` 从 `appOrchestration` 导入 `CANVAS_MEDIA_IMPORT_MAX_BYTES` 和
+  `CanvasMediaImportKind` type；
+  `appOrchestration.ts` 将 `NodeType`、`NodeStatus` 改为值导入，因为 helper
+  内以 enum value 使用。
+- J2 验证通过：
+  `npm run lint`；
+  `npm run test:unit`（19 files / 124 tests）；
+  `npm run build`；
+  full `.NET` `XiaoLou.ControlApi.Tests`（398 tests）；
+  `git diff --check` pass（仅 LF/CRLF warnings）。
+- 当前自检未发现剩余阻塞验证失败。
+
+K0 已完成：
+
+- 用户确认 ChuangJingAI 是下一阶段前端标准。
+- Playground 按 ChuangJingAI 完整重做为创意入口 composer、
+  Skills、模型/模式菜单，同时保留 XiaoLouAI 会话和记忆侧边能力。
+- Agent Canvas 先对齐外观、入口、loading/permission 状态和可见导航；
+  local image edit、overlay、图片标注和 3D Director 后续另开 owner。
+- 账号与个人资料采用 ChuangJingAI 账户中心样式，同时保留 XiaoLouAI
+  资料编辑、改密码和默认组织选择。
+- 新增 K 阶段计划：
+  `deploy\records\xiaolouai-chuangjing-frontend-alignment-phase-plan.md`。
+- 新增 K 阶段任务记录：
+  `deploy\records\xiaolouai-chuangjing-frontend-alignment-task-record.md`。
+- README 已标记这些前端对齐项为 K 阶段 open work，不再写成已完成。
+
+K1 已完成：
+
+- 已读取本 handoff、K phase plan、K task record、Layout/ProfileModal baseline
+  和 ChuangJingAI 对照文件。
+- 已确认 `git status --short`、3000 端口 Vite/Node 服务和 `/home` 浏览器入口。
+- 共享 shell nav 已对齐为 ChuangJingAI 主入口结构：
+  `首页`、`创意入口`、`记忆中心`、`创境天幕`、按权限显示的 `智能画布`、
+  `项目管理`。
+- `记忆中心` 当前落到 `/playground?panel=memory`；K2 再把记忆/会话能力
+  收进 Playground 侧栏或抽屉。
+- `积分统计` 不再作为主菜单项；`/wallet/usage` 和 `/wallet/recharge`
+  继续通过账号中心的订阅/账单入口可达。
+- `ProfileModal` 已改为 ChuangJingAI 风格账号中心，含 `个人主页`、`订阅`、
+  `账单`。
+- 保留 XiaoLouAI 头像上传、显示名、手机号、改密码和企业默认组织选择。
+- 未改 ChatPanel、Playground composer、Agent Canvas runtime、backend runtime、
+  `.env`、Vite proxy、Caddy、scripts、Jaaz/Node core-api、Node memory/vector、
+  Node payment runtime、local-image-edit、3D Director 或 Python sidecar。
+- 验证通过：
+  `npm --prefix .\XIAOLOU-main run lint`；
+  `npm --prefix .\XIAOLOU-main run build`；
+  Playwright smoke 覆盖 `/home` nav、注册用户账号中心、订阅/账单、企业默认组织
+  和移动端账号中心 tabs。
+
 ## 下一棒任务
 
 ```text
-I4g wallet-recharge-dotnet-contract-reopen
-
-只有用户明确要求继续 I4g 时才执行。
-先读本 handoff、phase plan、task record、I4f matrix 记录、
-I1b/I1c payment/account-billing 记录和当前 Payments module。
-先确认 git status、当前 wallet/payment route tests baseline。
-目标以 phase plan/task record 为准：盘点 retired wallet recharge 前端调用
-和 `.NET` PaymentEndpoints baseline，签最小 wallet recharge .NET contract：
-`/api/wallet/recharge-capabilities`、
-`/api/wallet/recharge-orders`、
-`/api/wallet/recharge-orders/{orderId}`、
-`/api/wallet/recharge-orders/{orderId}/refresh-status`、
-`/api/wallet/recharge-orders/{orderId}/bank-transfer-proof`、
-`/api/wallet/recharge-orders/{orderId}/confirm`。
-必须明确 account scope、permission、ledger idempotency 和 callback safety。
-I4g 不做 admin order review；admin review 留给 I4h。
-
+I4j/J 稳定化和 K0/K1 已完成。
+下一棒从 K2 playground-creative-entry 开始。
+开始 K2 前，先读本 handoff、K phase plan、K task record 和 K1 记录；
+先确认 git status、Playground API/UI baseline、ChuangJingAI Playground reference
+和当前浏览器状态。
 不得回滚或大块重写 ChatPanel baseline。
 不得恢复 Jaaz iframe/runtime 或 Node core-api。
 不得删除 agent-studio 目录。
 不得编辑 .env、vite proxy、Caddy、scripts。
 不得恢复 /api/tasks/stream 默认开启。
 不得导入 Node memory/vector stores。
-不得恢复 Node 支付 runtime；支付必须保持 .NET Payments/Admin owner。
-不得修改 I4j memory/vector/recall 后端 contract。
+不得恢复 Node 支付 runtime；I4g/I4h payment contract 已由 .NET Payments/Admin owner 处理。
 默认不创建 Python sidecar 或 adapter。
-完成后自主更新 phase plan、task record 和本短棒。
+K1 已处理共享菜单壳和账号中心/ProfileModal。
+K2 只处理 Playground 创意入口 composer、Skills、模型/模式菜单和记忆/会话侧栏。
+K3 才处理 Agent Canvas 外观和入口；local-image-edit、overlay、3D Director
+继续作为 K 之后的 deferred owners。
+不得扩大到未签 owner 的 chat、payment、jobs、local-image-edit、3D Director、
+env/proxy/Caddy/scripts 或 backend runtime。
 ```
 
 ## 验证入口

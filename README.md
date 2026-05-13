@@ -18,7 +18,8 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
   下载与同步到项目资产库。当前 Vertex Gemini 图片模型已接入真实出图链路。
 - 视频创作：支持视频/图片/音频参考素材、比例与时长参数、模型选择和任务队列。
   Vertex/Veo 视频适配仍是后续工作，现阶段视频侧继续沿用既有任务框架。
-- Playground：用于原生 canonical 会话、消息、记忆偏好、模型配置和聊天任务验证。
+- Playground：用于原生 canonical 会话、消息、记忆偏好、模型配置和聊天任务验证；
+  前端体验按 ChuangJingAI 创意入口 composer、Skills、模型/模式菜单重做。
 - 原生画布与智能体画布：承载视觉素材、生成节点和项目化编排；智能体画布当前从
   XiaoLou 主前端进入，历史 Jaaz 仅保留为非生产参考，不再作为默认生产控制面。
 - 资产与项目管理：按项目沉淀图片、视频、storyboard、dubbing、export 等资产，
@@ -43,11 +44,11 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | 视频反推提示词 | `/create/video-reverse` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-reverse/`，通过 toolbox job API 排队。 |
 | 25 格分镜 | `/create/storyboard-25` | 前端位于 `XIAOLOU-main/src/features/toolbox/storyboard-25/`，通过 toolbox job API 排队。 |
 | 原生画布 | `/create/canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/canvas/`，直接编译进主前端。 |
-| 智能体画布 | `/create/agent-canvas`、`/create/agent-studio` | 前端宿主、runtime 和 Jaaz embed 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`。 |
+| 智能体画布 | `/create/agent-canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`；K 阶段先对齐 ChuangJingAI 外观和入口，深层 local image edit、overlay、3D Director 后续单独迁移。 |
 | 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；资产引用选择器、同步入库控件和生成媒体占位 UI 也由 `assets-media-projects` owner 承载。 |
 | 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`，用于组织成员、企业钱包和项目权限管理。 |
 | 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
-| Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；canonical 会话、消息、记忆和聊天任务调试。 |
+| Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；K 阶段按 ChuangJingAI 完整重做为创意入口 composer，并保留会话与记忆侧边能力。 |
 | 积分统计 | `/wallet/usage` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/credit-usage/`，用于个人或平台视角的积分消耗统计。 |
 | API 中心 | `/api-center` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/api-center/`，用于供应商模型、默认链路和 API Key 配置。 |
 | 钱包充值 | `/wallet/recharge` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/wallet-recharge/`，用于钱包充值订单、支付方式、凭证上传和最近流水。 |
@@ -192,6 +193,39 @@ page/lib/component paths may briefly remain as thin compatibility re-exports,
 but they should be deleted once import scans, route checks, build, and targeted
 tests prove no old-path callers remain. H17 completed that cleanup for the
 known H-stage page/component/lib wrappers.
+
+### ChuangJingAI Frontend Alignment
+
+ChuangJingAI is the frontend visual and interaction reference for the next
+alignment phase. This does not change XiaoLouAI's production architecture:
+frontend code still lives under `XIAOLOU-main/src/features/<product-area>/`,
+talks to the `.NET` Control API through DTOs, and must not restore Jaaz or Node
+`core-api` as live production control planes.
+
+Phase K tracks this work in:
+
+```text
+deploy\records\xiaolouai-chuangjing-frontend-alignment-phase-plan.md
+deploy\records\xiaolouai-chuangjing-frontend-alignment-task-record.md
+```
+
+Confirmed scope:
+
+- Playground: rebuild `/playground` as the ChuangJingAI creative entry with
+  composer, starter prompts, Skills, model menu and mode menu; preserve current
+  XiaoLouAI conversations and memory controls as sidebars or drawers.
+- Agent Canvas: first align `/create/agent-canvas` shell, loading/permission
+  states, top-bar/chat entry and visible navigation; deeper local image edit,
+  node overlay, annotation and 3D Director feature blocks are later owners.
+- Account and profile: use ChuangJingAI account-center styling while retaining
+  XiaoLouAI avatar/profile editing, password change and default organization
+  selection inside the account center.
+
+K1 shared shell/account center is complete: the primary nav now uses the
+ChuangJingAI-style shell entries, `记忆中心` points at the current Playground
+memory surface until K2, wallet usage/recharge stay reachable from the account
+center, and `ProfileModal` now presents `个人主页` / `订阅` / `账单` while keeping
+XiaoLouAI profile editing, password change and default organization selection.
 
 ### Toolbox Frontend Layout
 

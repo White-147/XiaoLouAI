@@ -4,7 +4,14 @@ import {
   normalizeCanvasImageModelId,
 } from './config/canvasImageModels';
 import type { CanvasProjectAssetSyncDraft } from './components/modals/ProjectAssetSyncModal';
-import type { CanvasNodeUploadSource, NodeData, NodeGroup, NodeStatus, NodeType, Viewport } from './types';
+import {
+  NodeStatus,
+  NodeType,
+  type CanvasNodeUploadSource,
+  type NodeData,
+  type NodeGroup,
+  type Viewport,
+} from './types';
 import type { PermissionContext, WalletRechargeCapabilities } from '../../../../lib/api';
 
 export type CanvasMediaImportKind = 'image' | 'video';

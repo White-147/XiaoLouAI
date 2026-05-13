@@ -60,7 +60,7 @@ export type {
   UpdateOrganizationMemberAccountInput,
   User,
 } from "./api/auth-account-types";
-export type { Task } from "./api/jobs-types";
+export type { ListTasksOptions, Task } from "./api/jobs-types";
 export type { UploadedFile } from "./api/media-types";
 export type {
   PlaygroundChatEvent,
@@ -69,7 +69,15 @@ export type {
   PlaygroundChatJobStartResult,
   PlaygroundConversation,
   PlaygroundMemory,
+  PlaygroundMemoryListOptions,
+  PlaygroundMemoryListResponse,
   PlaygroundMemoryPreference,
+  PlaygroundMemoryRecallItem,
+  PlaygroundMemoryRecallTestInput,
+  PlaygroundMemoryRecallTestResult,
+  PlaygroundMemoryVectorIndex,
+  PlaygroundMemoryVectorRebuildResult,
+  PlaygroundMemoryWriteInput,
   PlaygroundMessage,
   PlaygroundModel,
 } from "./api/playground-types";
@@ -272,17 +280,21 @@ export const {
 // Playground.
 export const {
   createPlaygroundConversation,
+  createPlaygroundMemory,
   deletePlaygroundConversation,
   deletePlaygroundMemory,
   getPlaygroundChatJob,
   getPlaygroundConfig,
   getPlaygroundConversation,
+  getPlaygroundMemoryVectorIndex,
   listPlaygroundChatJobs,
   listPlaygroundConversations,
   listPlaygroundMemories,
   listPlaygroundMessages,
   listPlaygroundModels,
+  rebuildPlaygroundMemoryVectorIndex,
   runPlaygroundChatFacade,
+  runPlaygroundMemoryRecallTest,
   startPlaygroundChatJob,
   streamPlaygroundChat,
   updatePlaygroundConversation,
