@@ -1,19 +1,8 @@
 import {
-  Activity,
-  CheckCircle2,
-  Clock,
-  CreditCard,
-  KeyRound,
   LoaderCircle,
-  ReceiptText,
-  RefreshCw,
-  Search,
   ShieldCheck,
   ShieldX,
   Trash2,
-  UserRound,
-  Users,
-  Wallet as WalletIcon,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -28,25 +17,19 @@ import {
   searchCreditUsageSubjects,
   updatePlatformAccount,
   type AdminRechargeOrder,
-  type CreditUsageSeriesPoint,
   type CreditUsageStats,
   type CreditUsageSubject,
   type PermissionContext,
   type PlatformAccount,
   type PlatformRole,
 } from "./api/super-admin-console";
+import { AdminOrdersPanel } from "./AdminOrdersPanel";
+import { PlatformAccountsPanel, type PlatformAccountForm } from "./PlatformAccountsPanel";
+import { PlatformBillingPanel } from "./PlatformBillingPanel";
+import { UsageOverviewPanel } from "./UsageOverviewPanel";
 import { cn } from "../../../lib/utils";
 
 type AdminModule = "usage" | "billing" | "orders" | "accounts";
-
-type PlatformAccountForm = {
-  displayName: string;
-  email: string;
-  phone: string;
-  platformRole: PlatformRole;
-  newPassword: string;
-  confirmPassword: string;
-};
 
 const roleLabels: Record<PlatformRole, string> = {
   guest: "游客",
@@ -125,119 +108,6 @@ function accountFormFrom(account: PlatformAccount): PlatformAccountForm {
     newPassword: "",
     confirmPassword: "",
   };
-}
-
-function seriesPoints(series: CreditUsageSeriesPoint[]) {
-  const width = 760;
-  const height = 220;
-  const paddingX = 28;
-  const paddingY = 24;
-  const maxValue = Math.max(...series.map((item) => item.consumedCredits), 1);
-  const lastIndex = Math.max(series.length - 1, 1);
-  return series.map((item, index) => {
-    const x = paddingX + (index / lastIndex) * (width - paddingX * 2);
-    const y = height - paddingY - (item.consumedCredits / maxValue) * (height - paddingY * 2);
-    return { x, y, item };
-  });
-}
-
-function UsageChart(props: { series: CreditUsageSeriesPoint[]; loading?: boolean }) {
-  const points = seriesPoints(props.series);
-  const polyline = points.map((point) => `${point.x},${point.y}`).join(" ");
-  const area =
-    points.length > 0
-      ? `${points[0].x},196 ${points.map((point) => `${point.x},${point.y}`).join(" ")} ${
-          points[points.length - 1].x
-        },196`
-      : "";
-  const maxValue = Math.max(...props.series.map((item) => item.consumedCredits), 0);
-
-  return (
-    <div className="relative h-[260px] w-full rounded-lg border border-border/70 bg-background p-4">
-      {props.loading ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
-          <LoaderCircle className="h-5 w-5 animate-spin text-primary" />
-        </div>
-      ) : null}
-      <svg viewBox="0 0 760 220" className="h-full w-full" role="img" aria-label="最近 30 天积分消耗">
-        <line x1="28" y1="196" x2="732" y2="196" className="stroke-border" strokeWidth="1" />
-        <line x1="28" y1="24" x2="28" y2="196" className="stroke-border" strokeWidth="1" />
-        {[0.25, 0.5, 0.75].map((ratio) => (
-          <line
-            key={ratio}
-            x1="28"
-            y1={196 - ratio * 172}
-            x2="732"
-            y2={196 - ratio * 172}
-            className="stroke-border/60"
-            strokeDasharray="4 6"
-            strokeWidth="1"
-          />
-        ))}
-        {area ? <polygon points={area} className="fill-primary/10" /> : null}
-        {polyline ? (
-          <polyline points={polyline} fill="none" className="stroke-primary" strokeWidth="3" strokeLinejoin="round" />
-        ) : null}
-        {points.map((point, index) =>
-          index === 0 || index === points.length - 1 || point.item.consumedCredits > 0 ? (
-            <circle key={`${point.item.bucketLabel}-${index}`} cx={point.x} cy={point.y} r="3.5" className="fill-primary" />
-          ) : null,
-        )}
-        <text x="32" y="18" className="fill-muted-foreground text-[11px]">
-          {formatCredits(maxValue)}
-        </text>
-        <text x="32" y="214" className="fill-muted-foreground text-[11px]">
-          {props.series[0]?.bucketLabel || "--"}
-        </text>
-        <text x="696" y="214" className="fill-muted-foreground text-[11px]">
-          {props.series[props.series.length - 1]?.bucketLabel || "--"}
-        </text>
-      </svg>
-    </div>
-  );
-}
-
-function MetricTile(props: { icon: typeof Activity; label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-lg border border-border/70 bg-card p-4">
-      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <props.icon className="h-4 w-4" />
-        <span>{props.label}</span>
-      </div>
-      <div className="mt-3 text-2xl font-semibold tracking-tight text-foreground">{props.value}</div>
-      {props.hint ? <div className="mt-2 text-xs text-muted-foreground">{props.hint}</div> : null}
-    </div>
-  );
-}
-
-function subjectIcon(subject: CreditUsageSubject | null) {
-  if (subject?.type === "organization") return Users;
-  if (subject?.type === "platform") return ShieldCheck;
-  return UserRound;
-}
-
-function SubjectButton(props: { subject: CreditUsageSubject; active: boolean; onClick: () => void }) {
-  const Icon = subjectIcon(props.subject);
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      className={cn(
-        "flex min-h-12 w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition",
-        props.active
-          ? "border-primary/50 bg-primary/10 text-primary"
-          : "border-border/70 bg-background text-foreground hover:border-primary/30 hover:bg-accent/50",
-      )}
-    >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
-        <Icon className="h-4 w-4" />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-medium">{props.subject.label}</span>
-        <span className="block truncate text-xs text-muted-foreground">{props.subject.detail || props.subject.id}</span>
-      </span>
-    </button>
-  );
 }
 
 export default function SuperAdminConsole() {
@@ -556,538 +426,78 @@ export default function SuperAdminConsole() {
         ) : null}
 
         {module === "usage" ? (
-          <>
-            <section className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-              <div className="rounded-lg border border-border/70 bg-card p-4">
-                <label className="text-sm font-medium text-foreground">统计对象</label>
-                <div className="mt-3 flex min-h-10 items-center gap-2 rounded-lg border border-border/70 bg-background px-3">
-                  <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <input
-                    value={subjectSearch}
-                    onChange={(event) => setSubjectSearch(event.target.value)}
-                    placeholder="搜索姓名、邮箱、手机号或企业"
-                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-                  />
-                  {loadingSubjects ? <LoaderCircle className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-                </div>
-                <div className="mt-4 flex max-h-[320px] flex-col gap-2 overflow-y-auto pr-1 custom-scrollbar">
-                  {subjects.length ? (
-                    subjects.map((subject) => (
-                      <SubjectButton
-                        key={`${subject.type}:${subject.id}`}
-                        subject={subject}
-                        active={selectedSubject?.type === subject.type && selectedSubject?.id === subject.id}
-                        onClick={() => setSelectedSubject(subject)}
-                      />
-                    ))
-                  ) : (
-                    <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-                      暂无匹配对象
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-border/70 bg-card p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{stats?.subject.label || "全平台"}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{stats?.subject.detail || "所有钱包总消耗"}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setUsageRefreshKey((value) => value + 1)}
-                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border/70 bg-background px-3 text-xs font-medium text-foreground transition hover:bg-accent"
-                  >
-                    <RefreshCw className={cn("h-4 w-4", loadingUsage && "animate-spin")} />
-                    刷新
-                  </button>
-                </div>
-                <div className="mt-4 text-sm text-muted-foreground">
-                  当前统计：{walletDescription} · 最近 {stats?.windowDays || 30} 天
-                </div>
-              </div>
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-              <MetricTile
-                icon={Activity}
-                label="本期消耗"
-                value={formatCredits(stats?.summary.consumedCredits)}
-                hint={`最近 ${stats?.windowDays || 30} 天`}
-              />
-              <MetricTile icon={Clock} label="今日消耗" value={formatCredits(stats?.summary.todayConsumedCredits)} />
-              <MetricTile icon={RefreshCw} label="退款积分" value={formatCredits(stats?.summary.refundedCredits)} />
-              <MetricTile icon={WalletIcon} label="冻结中" value={formatCredits(stats?.summary.pendingFrozenCredits)} />
-              <MetricTile icon={CreditCard} label="可用余额" value={formatCredits(stats?.summary.availableCredits)} hint={walletDescription} />
-            </section>
-
-            <section className="rounded-lg border border-border/70 bg-card p-4">
-              <div className="mb-4 flex items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-base font-semibold text-foreground">分时消耗</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">按天聚合最近 30 天实际结算消耗。</p>
-                </div>
-              </div>
-              <UsageChart series={stats?.series || []} loading={loadingUsage} />
-            </section>
-          </>
+          <UsageOverviewPanel
+            stats={stats}
+            subjects={subjects}
+            selectedSubject={selectedSubject}
+            setSelectedSubject={setSelectedSubject}
+            subjectSearch={subjectSearch}
+            setSubjectSearch={setSubjectSearch}
+            loadingUsage={loadingUsage}
+            loadingSubjects={loadingSubjects}
+            walletDescription={walletDescription}
+            onRefreshUsage={() => setUsageRefreshKey((value) => value + 1)}
+            formatCredits={formatCredits}
+          />
         ) : null}
 
         {module === "billing" ? (
-          <section className="space-y-4">
-            <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-              <div className="rounded-lg border border-border/70 bg-card p-4">
-                <label className="text-sm font-medium text-foreground">账单对象</label>
-                <div className="mt-3 flex min-h-10 items-center gap-2 rounded-lg border border-border/70 bg-background px-3">
-                  <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <input
-                    value={subjectSearch}
-                    onChange={(event) => setSubjectSearch(event.target.value)}
-                    placeholder="搜索用户、企业或平台"
-                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-                  />
-                  {loadingSubjects ? <LoaderCircle className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-                </div>
-                <div className="mt-4 flex max-h-[320px] flex-col gap-2 overflow-y-auto pr-1 custom-scrollbar">
-                  {subjects.length ? (
-                    subjects.map((subject) => (
-                      <SubjectButton
-                        key={`${subject.type}:${subject.id}`}
-                        subject={subject}
-                        active={selectedSubject?.type === subject.type && selectedSubject?.id === subject.id}
-                        onClick={() => setSelectedSubject(subject)}
-                      />
-                    ))
-                  ) : (
-                    <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-                      暂无匹配对象
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-border/70 bg-card p-4">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                      <ReceiptText className="h-4 w-4" />
-                      <span>平台账单与钱包流水</span>
-                    </div>
-                    <h2 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
-                      {stats?.subject.label || "全平台"}
-                    </h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {stats?.subject.detail || "汇总平台、企业和个人钱包流水。"}
-                    </p>
-                    <p className="mt-3 text-sm text-muted-foreground">
-                      当前账单：{walletDescription} · 最近 {stats?.windowDays || 30} 天
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setUsageRefreshKey((value) => value + 1)}
-                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border/70 bg-background px-3 text-xs font-medium text-foreground transition hover:bg-accent"
-                  >
-                    <RefreshCw className={cn("h-4 w-4", loadingUsage && "animate-spin")} />
-                    刷新
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <MetricTile icon={CreditCard} label="可用余额" value={formatCredits(stats?.summary.availableCredits)} hint={walletDescription} />
-              <MetricTile icon={WalletIcon} label="冻结余额" value={formatCredits(stats?.summary.frozenCredits)} />
-              <MetricTile icon={ReceiptText} label="流水入账" value={formatCredits(billingTotals.income)} />
-              <MetricTile icon={Activity} label="流水支出" value={formatCredits(billingTotals.expense)} />
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
-              <section className="rounded-lg border border-border/70 bg-card p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-base font-semibold text-foreground">钱包列表</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">{stats?.wallets.length || 0} 个钱包纳入当前账单</p>
-                  </div>
-                  {loadingUsage ? <LoaderCircle className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-                </div>
-                <div className="mt-4 space-y-3">
-                  {stats?.wallets.length ? (
-                    stats.wallets.map((wallet) => (
-                      <div key={wallet.id || `${wallet.ownerType}:${wallet.ownerId}`} className="rounded-lg border border-border/70 bg-background/50 p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-foreground">
-                              {wallet.displayName || wallet.id || wallet.ownerId}
-                            </p>
-                            <p className="mt-1 truncate text-xs text-muted-foreground">
-                              {wallet.ownerType || wallet.walletOwnerType || "wallet"} · {wallet.ownerId}
-                            </p>
-                          </div>
-                          <span className="rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground">
-                            {wallet.status || "active"}
-                          </span>
-                        </div>
-                        <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                          <p>可用：{formatCredits(wallet.availableCredits ?? wallet.creditsAvailable)}</p>
-                          <p>冻结：{formatCredits(wallet.frozenCredits ?? wallet.creditsFrozen)}</p>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-lg border border-dashed border-border/70 p-8 text-center text-sm text-muted-foreground">
-                      {loadingUsage ? "正在加载钱包..." : "暂无可查看钱包。"}
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
-                  <div>
-                    <h3 className="text-base font-semibold text-foreground">最近流水</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">{billingEntries.length} 条记录</p>
-                  </div>
-                  {loadingUsage ? (
-                    <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                      正在加载
-                    </span>
-                  ) : null}
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-border/70">
-                    <thead className="bg-background/55 text-left text-xs font-medium text-muted-foreground">
-                      <tr>
-                        <th className="px-4 py-3">项目</th>
-                        <th className="px-4 py-3">来源</th>
-                        <th className="px-4 py-3">时间</th>
-                        <th className="px-4 py-3 text-right">积分</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60">
-                      {billingEntries.length ? (
-                        billingEntries.map((entry) => (
-                          <tr key={entry.id} className="text-sm">
-                            <td className="max-w-[240px] px-4 py-3">
-                              <div className="truncate font-medium text-foreground" title={ledgerEntryLabel(entry)}>
-                                {ledgerEntryLabel(entry)}
-                              </div>
-                              <div className="mt-1 truncate text-xs text-muted-foreground">
-                                余额 {formatCredits(entry.balanceAfter)}
-                                {entry.frozenBalanceAfter ? ` · 冻结 ${formatCredits(entry.frozenBalanceAfter)}` : ""}
-                              </div>
-                            </td>
-                            <td className="max-w-[260px] px-4 py-3 text-muted-foreground">
-                              <span className="block truncate" title={ledgerReference(entry)}>
-                                {ledgerReference(entry)}
-                              </span>
-                            </td>
-                            <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                              {formatTime(entry.createdAt)}
-                            </td>
-                            <td
-                              className={cn(
-                                "whitespace-nowrap px-4 py-3 text-right font-semibold",
-                                entry.amount > 0 ? "text-emerald-600 dark:text-emerald-300" : "text-foreground",
-                              )}
-                            >
-                              {formatSignedCredits(entry.amount)}
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={4} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                            {loadingUsage ? "正在加载钱包流水..." : "暂无钱包流水。"}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </div>
-          </section>
+          <PlatformBillingPanel
+            stats={stats}
+            subjects={subjects}
+            selectedSubject={selectedSubject}
+            setSelectedSubject={setSelectedSubject}
+            subjectSearch={subjectSearch}
+            setSubjectSearch={setSubjectSearch}
+            loadingUsage={loadingUsage}
+            loadingSubjects={loadingSubjects}
+            walletDescription={walletDescription}
+            billingEntries={billingEntries}
+            billingTotals={billingTotals}
+            onRefreshUsage={() => setUsageRefreshKey((value) => value + 1)}
+            formatCredits={formatCredits}
+            formatTime={formatTime}
+            formatSignedCredits={formatSignedCredits}
+            ledgerEntryLabel={ledgerEntryLabel}
+            ledgerReference={ledgerReference}
+          />
         ) : null}
 
         {module === "orders" ? (
-          <section className="space-y-4">
-            <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-foreground">订单审核</h2>
-                <p className="mt-1 text-sm text-muted-foreground">待审核对公转账：{pendingOrders.length}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void loadOrders()}
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border/70 bg-background px-4 text-sm font-medium text-foreground transition hover:bg-accent"
-              >
-                <RefreshCw className={cn("h-4 w-4", loadingOrders && "animate-spin")} />
-                刷新
-              </button>
-            </div>
-
-            {orders.length ? (
-              orders.map((order) => {
-                const canReview =
-                  order.paymentMethod === "bank_transfer" &&
-                  order.status === "pending_review" &&
-                  reviewingOrderId !== order.id;
-                const isReviewing = reviewingOrderId === order.id;
-                return (
-                  <article key={order.id} className="rounded-lg border border-border/70 bg-card p-4">
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 flex-1 space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-base font-semibold text-foreground">{order.planName}</h3>
-                          <span className="rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground">
-                            {paymentMethodLabel(order.paymentMethod)}
-                          </span>
-                          <span
-                            className={cn(
-                              "rounded-full px-2.5 py-1 text-xs",
-                              order.status === "paid"
-                                ? "bg-emerald-500/12 text-emerald-300"
-                                : order.status === "pending_review"
-                                  ? "bg-amber-500/12 text-amber-300"
-                                  : "bg-secondary text-muted-foreground",
-                            )}
-                          >
-                            {orderStatusLabel(order)}
-                          </span>
-                        </div>
-                        <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
-                          <p>订单号：{order.id}</p>
-                          <p>钱包：{order.wallet?.displayName || order.walletId || "--"}</p>
-                          <p>金额：{formatMoney(order.amount)}</p>
-                          <p>积分：{Number(order.credits || 0).toLocaleString("zh-CN")}</p>
-                          <p>模式：{order.mode === "demo_mock" ? "演示 Mock" : "真实支付"}</p>
-                          <p>场景：{order.scene || "--"}</p>
-                          <p>创建时间：{formatTime(order.createdAt)}</p>
-                          <p>支付时间：{formatTime(order.paidAt)}</p>
-                        </div>
-                        {order.voucherFiles?.length ? (
-                          <div className="flex flex-wrap gap-2">
-                            {order.voucherFiles.map((fileUrl) => (
-                              <a
-                                key={fileUrl}
-                                href={fileUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="rounded-full border border-border/70 px-3 py-1 text-xs text-primary transition hover:border-primary/40"
-                              >
-                                查看凭证
-                              </a>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {order.paymentMethod === "bank_transfer" ? (
-                        <div className="w-full max-w-sm space-y-3 rounded-lg border border-border/70 bg-background/50 p-4">
-                          <label className="block text-xs font-medium text-muted-foreground">
-                            审核备注
-                            <textarea
-                              value={reviewNotes[order.id] || ""}
-                              onChange={(event) =>
-                                setReviewNotes((current) => ({
-                                  ...current,
-                                  [order.id]: event.target.value,
-                                }))
-                              }
-                              rows={3}
-                              className="mt-2 w-full rounded-lg border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary/40"
-                              placeholder="可选"
-                            />
-                          </label>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              disabled={!canReview}
-                              onClick={() => void handleReview(order.id, "approve")}
-                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {isReviewing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                              通过
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!canReview}
-                              onClick={() => void handleReview(order.id, "reject")}
-                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-border/70 bg-background px-4 py-2.5 text-sm font-medium text-foreground transition disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <ShieldX className="h-4 w-4" />
-                              拒绝
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })
-            ) : (
-              <div className="rounded-lg border border-dashed border-border/70 bg-card p-8 text-center text-sm text-muted-foreground">
-                {loadingOrders ? "正在加载订单..." : "暂无订单。"}
-              </div>
-            )}
-          </section>
+          <AdminOrdersPanel
+            orders={orders}
+            pendingOrdersCount={pendingOrders.length}
+            loadingOrders={loadingOrders}
+            reviewingOrderId={reviewingOrderId}
+            reviewNotes={reviewNotes}
+            setReviewNotes={setReviewNotes}
+            onLoadOrders={loadOrders}
+            onReview={handleReview}
+            paymentMethodLabel={paymentMethodLabel}
+            orderStatusLabel={orderStatusLabel}
+            formatMoney={formatMoney}
+            formatTime={formatTime}
+          />
         ) : null}
 
         {module === "accounts" ? (
-          <section className="space-y-4">
-            <div className="rounded-lg border border-border/70 bg-card p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h2 className="text-base font-semibold text-foreground">账号管理</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">可按用户名、userId、手机号、邮箱查询。</p>
-                </div>
-                <div className="flex w-full gap-2 lg:w-[520px]">
-                  <div className="relative min-w-0 flex-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="search"
-                      value={accountSearch}
-                      onChange={(event) => setAccountSearch(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          void loadAccounts();
-                        }
-                      }}
-                      className="h-10 w-full rounded-lg border border-border/70 bg-background pl-9 pr-3 text-sm text-foreground outline-none transition focus:border-primary/35"
-                      placeholder="用户名 / userId / 手机号 / 邮箱"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void loadAccounts()}
-                    className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
-                  >
-                    {loadingAccounts ? <LoaderCircle className="h-4 w-4 animate-spin" /> : "查询"}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {accounts.length ? (
-              accounts.map((account) => {
-                const form = accountForms[account.userId] ?? accountFormFrom(account);
-                const disabled = Boolean(account.deleted) || account.status === "disabled" || account.accountStatus === "disabled";
-                const isCurrentAdmin = account.userId === me?.actor.id;
-                const isSaving = savingAccountId === account.userId;
-                const isDeleting = deletingAccountId === account.userId;
-
-                return (
-                  <article key={account.userId} className="rounded-lg border border-border/70 bg-card p-4">
-                    <div className="flex flex-col gap-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="truncate text-base font-semibold text-foreground">
-                              {disabled ? "已删除账号" : account.displayName || account.userId}
-                            </h3>
-                            <span className="rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground">
-                              {account.userId}
-                            </span>
-                            <span
-                              className={cn(
-                                "rounded-full px-2.5 py-1 text-xs",
-                                disabled ? "bg-rose-500/12 text-rose-300" : "bg-emerald-500/12 text-emerald-300",
-                              )}
-                            >
-                              {disabled ? "已删除" : "可用"}
-                            </span>
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {disabled ? `删除时间：${formatTime(account.deletedAt)}` : roleLabels[account.platformRole]}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(account)}
-                          disabled={disabled || isCurrentAdmin || isSaving || isDeleting}
-                          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 text-sm font-medium text-rose-200 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {isDeleting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                          删除
-                        </button>
-                      </div>
-
-                      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
-                        <input
-                          value={form.displayName}
-                          onChange={(event) => updateAccountForm(account, { displayName: event.target.value })}
-                          disabled={disabled}
-                          className="h-10 rounded-lg border border-border/70 bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/35 disabled:opacity-60"
-                          placeholder="用户名"
-                        />
-                        <input
-                          value={form.email}
-                          onChange={(event) => updateAccountForm(account, { email: event.target.value })}
-                          disabled={disabled}
-                          className="h-10 rounded-lg border border-border/70 bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/35 disabled:opacity-60"
-                          placeholder="邮箱"
-                        />
-                        <input
-                          value={form.phone}
-                          onChange={(event) => updateAccountForm(account, { phone: event.target.value })}
-                          disabled={disabled}
-                          className="h-10 rounded-lg border border-border/70 bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/35 disabled:opacity-60"
-                          placeholder="手机号"
-                        />
-                        <select
-                          value={form.platformRole}
-                          onChange={(event) => updateAccountForm(account, { platformRole: event.target.value as PlatformRole })}
-                          disabled={disabled}
-                          className="h-10 rounded-lg border border-border/70 bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/35 disabled:opacity-60"
-                        >
-                          {(["customer", "ops_admin", "super_admin"] as PlatformRole[]).map((role) => (
-                            <option key={role} value={role}>
-                              {roleLabels[role]}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="relative xl:col-span-2">
-                          <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <input
-                            type="password"
-                            value={form.newPassword}
-                            onChange={(event) => updateAccountForm(account, { newPassword: event.target.value })}
-                            disabled={disabled}
-                            className="h-10 w-full rounded-lg border border-border/70 bg-background pl-9 pr-3 text-sm text-foreground outline-none transition focus:border-primary/35 disabled:opacity-60"
-                            placeholder="新密码（不填则不修改）"
-                          />
-                        </div>
-                        <input
-                          type="password"
-                          value={form.confirmPassword}
-                          onChange={(event) => updateAccountForm(account, { confirmPassword: event.target.value })}
-                          disabled={disabled}
-                          className="h-10 rounded-lg border border-border/70 bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary/35 disabled:opacity-60"
-                          placeholder="确认新密码"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void handleSaveAccount(account)}
-                          disabled={disabled || isSaving || isDeleting}
-                          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-                          保存
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })
-            ) : (
-              <div className="rounded-lg border border-dashed border-border/70 bg-card p-8 text-center text-sm text-muted-foreground">
-                {loadingAccounts ? "正在加载账号..." : "暂无匹配账号。"}
-              </div>
-            )}
-          </section>
+          <PlatformAccountsPanel
+            accounts={accounts}
+            accountSearch={accountSearch}
+            setAccountSearch={setAccountSearch}
+            loadingAccounts={loadingAccounts}
+            accountForms={accountForms}
+            currentActorId={me?.actor.id}
+            savingAccountId={savingAccountId}
+            deletingAccountId={deletingAccountId}
+            roleLabels={roleLabels}
+            setDeleteTarget={setDeleteTarget}
+            onLoadAccounts={() => loadAccounts()}
+            getAccountForm={accountFormFrom}
+            updateAccountForm={updateAccountForm}
+            onSaveAccount={handleSaveAccount}
+            formatTime={formatTime}
+          />
         ) : null}
       </div>
 

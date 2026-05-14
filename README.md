@@ -46,9 +46,9 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | 原生画布 | `/create/canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/canvas/`，直接编译进主前端。 |
 | 智能体画布 | `/create/agent-canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`；K3 已对齐 ChuangJingAI 风格加载/权限/空画布入口，深层 local image edit、overlay、3D Director 后续单独迁移。 |
 | 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；资产引用选择器、同步入库控件和生成媒体占位 UI 也由 `assets-media-projects` owner 承载。 |
-| 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`，用于组织成员、企业钱包和项目权限管理。 |
-| 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
-| Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；K2 已按 ChuangJingAI 重做为创意入口 composer，并保留会话与记忆抽屉能力。 |
+| 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`；L4 已拆出 summary、成员创建/监管、账单和账号管理展示面板。 |
+| 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；L4 已拆出用量、平台账单、订单审核和平台账号面板，注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
+| Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；K2 已按 ChuangJingAI 重做为创意入口 composer，L3 已拆出 composer、会话抽屉、记忆抽屉和 display helper。 |
 | 积分统计 | `/wallet/usage` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/credit-usage/`，用于个人或平台视角的积分消耗统计。 |
 | API 中心 | `/api-center` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/api-center/`，用于供应商模型、默认链路和 API Key 配置。 |
 | 钱包充值 | `/wallet/recharge` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/wallet-recharge/`，用于钱包充值订单、支付方式、凭证上传和最近流水。 |
@@ -385,16 +385,20 @@ still follows the project-level direction: feature code is grouped by product
 area, frontend runtime calls go through Control API DTO wrappers, and the
 latest changes did not add new root directories or cross into backend,
 env/proxy/Caddy, payment runtime, Node `core-api`, Jaaz runtime or Python
-sidecar ownership. L2 has since split the shell/account-center surface under
+sidecar ownership. L2 has split the shell/account-center surface under
 `home/nav-layout` into presentational/helper modules for route prefetch, nav
 metadata, sidebar, auth modal, profile, subscription, billing and wallet
-ledger UI while preserving route, permission and API-wrapper behavior. The
-project is not yet fully clean against the ideal high-cohesion target because
-several legacy feature files remain oversized or orchestration-heavy,
-especially the Canvas runtime `App.tsx` files, `VideoCreate.tsx`,
-`Assets.tsx`, `EnterpriseConsole.tsx`, `Playground.tsx` and
-`SuperAdminConsole.tsx`. Treat these as explicit future split/refactor owners;
-do not do a broad rewrite while handling unrelated frontend parity work.
+ledger UI while preserving route, permission and API-wrapper behavior. L3 has
+split the Playground composer, conversation drawer, memory drawer and display
+helpers while keeping signed Playground API inputs and deferred web
+search/attachments unchanged. L4 has split the enterprise and super-admin
+consoles into admin/enterprise presentational panels while keeping .NET
+Payments/Admin contracts, wallet/order/account permissions and API wrappers
+unchanged. The project is not yet fully clean against the ideal high-cohesion
+target because several feature files remain oversized or orchestration-heavy,
+especially the Canvas runtime `App.tsx` files, `VideoCreate.tsx` and
+`Assets.tsx`. Treat these as explicit future split/refactor owners; do not do
+a broad rewrite while handling unrelated frontend parity work.
 
 The same pass fixed the frontend legacy dependency gate. The verifier now reads
 the actual guard implementation in `src/lib/api/control-api-client.ts` and
