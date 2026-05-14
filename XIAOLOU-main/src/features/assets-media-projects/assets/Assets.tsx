@@ -1,29 +1,5 @@
-import {
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  FolderOpen,
-  Image as ImageIcon,
-  LayoutGrid,
-  LoaderCircle,
-  Map,
-  Package,
-  Pencil,
-  Play,
-  Plus,
-  Search,
-  Sparkles,
-  Trash2,
-  Users,
-  Video,
-  X,
-} from "lucide-react";
+import { FolderOpen, LayoutGrid, LoaderCircle, Plus, Search, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  GeneratedMediaPlaceholder,
-  getGeneratedMediaUrl,
-} from "../media/GenerationPlaceholder";
-import { cn } from "../../../lib/utils";
 import {
   createAsset,
   deleteAsset,
@@ -32,7 +8,6 @@ import {
   getAgentCanvasProject,
   getCanvasProject,
   getProject,
-  listAssets,
   listAgentCanvasProjects,
   listCanvasProjects,
   listVideoReplaceJobs,
@@ -42,7 +17,6 @@ import {
   updateAsset,
   uploadFile,
   type Asset,
-  type AssetSourceModule,
   type AgentCanvasProjectSummary,
   type CanvasProjectSummary,
 } from "./api/assets";
@@ -51,272 +25,41 @@ import { isRetiredLegacyMediaUrl } from "../../../lib/media-url-policy";
 import { useCurrentProjectId } from "../../../lib/session";
 import { useNavigate } from "react-router-dom";
 import { generateGridThumbnail } from "../../../lib/grid-thumbnail";
+import {
+  SOURCE_MODULE_LABEL,
+  assetMatchesQuery,
+  assetMediaUrl,
+  imageAssetTypeLabel,
+  isAgentCanvasProjectAsset,
+  isVideoAsset,
+  isVideoReplaceAsset,
+  type AssetFormState,
+  type CategoryFilter,
+  type RootCategory,
+  type SidebarSection,
+} from "./assetDisplay";
+import {
+  ASSETS_BACKGROUND_REFRESH_MS,
+  fetchProjectAssets,
+  getCachedProjectAssets,
+  groupByLocalDate,
+  normalizeAgentCanvasProjectSummaries,
+  normalizeCanvasProjectSummaries,
+  projectTitleCache,
+  setCachedProjectAssets,
+  shouldRefreshProjectAssets,
+  syncedVideoReplaceProjects,
+} from "./assetCache";
+import { AssetFormModal } from "./AssetFormModal";
+import { AssetGrid } from "./AssetGrid";
+import { AssetPreviewModal } from "./AssetPreviewModal";
+import { AssetSidebar } from "./AssetSidebar";
+import { CanvasProjectSection } from "./CanvasProjectSection";
 
 // ── Hierarchical category model ────────────────────────────────────
 //   Root: image | video
 //   Image sub-buckets: character / scene / prop / style (based on assetType)
 //   Video sub-buckets: video_create / canvas / video_replace (based on sourceModule)
-type RootCategory = "image" | "video";
-type CategoryFilter =
-  | { root: "image"; assetType: "all" | "character" | "scene" | "prop" | "style" }
-  | { root: "video"; sourceModule: "all" | AssetSourceModule };
-
-const IMAGE_SUBCATS = [
-  { id: "all", label: "图片资产", icon: ImageIcon },
-  { id: "character", label: "角色", icon: Users },
-  { id: "scene", label: "场景", icon: Map },
-  { id: "prop", label: "道具", icon: Package },
-  { id: "style", label: "风格", icon: ImageIcon },
-] as const;
-
-const VIDEO_SUBCATS: Array<{ id: "all" | AssetSourceModule; label: string }> = [
-  { id: "all", label: "全部视频" },
-  { id: "video_create", label: "视频创作" },
-  { id: "canvas", label: "画布" },
-  { id: "video_replace", label: "人物替换" },
-];
-
-const SOURCE_MODULE_LABEL: Record<AssetSourceModule, string> = {
-  image_create: "图片创作",
-  video_create: "视频创作",
-  canvas: "画布",
-  video_replace: "人物替换",
-  agent_studio: "智能画布",
-};
-
-type AssetFormState = {
-  mode: "create" | "edit";
-  assetId: string | null;
-  rootCategory: RootCategory;
-  assetType: string;
-  name: string;
-  description: string;
-  localFile: File | null;
-  localFilePreviewUrl: string | null;
-};
-
-const ASSET_UPLOAD_ACCEPT =
-  "image/jpeg,image/png,image/webp,image/bmp,image/x-ms-bmp,.jpg,.jpeg,.png,.webp,.bmp,video/*";
-
-const AGENT_CANVAS_PROJECT_ASSET_TYPE = "agent_canvas_project";
-
-function assetPreviewUrl(asset: Asset) {
-  return getGeneratedMediaUrl(asset.previewUrl);
-}
-
-function assetMediaUrl(asset: Asset) {
-  return getGeneratedMediaUrl(asset.mediaUrl) || getGeneratedMediaUrl(asset.previewUrl) || null;
-}
-
-function isVideoAsset(asset: Asset) {
-  if (isAgentCanvasProjectAsset(asset)) return false;
-  return asset.mediaKind === "video" || asset.assetType === "video_ref";
-}
-
-function isAgentCanvasProjectAsset(asset: Asset) {
-  return (
-    asset.sourceModule === "agent_studio" &&
-    (asset.assetType === AGENT_CANVAS_PROJECT_ASSET_TYPE ||
-      asset.mediaKind === AGENT_CANVAS_PROJECT_ASSET_TYPE)
-  );
-}
-
-function canPreviewAssetVideo(asset: Asset) {
-  return isVideoAsset(asset) && Boolean(getGeneratedMediaUrl(asset.mediaUrl));
-}
-
-function isVideoReplaceAsset(asset: Asset) {
-  return asset.sourceModule === "video_replace" && Boolean(asset.sourceTaskId);
-}
-
-function getAgentCanvasProjectMeta(asset: Asset): Record<string, unknown> {
-  return asset.sourceMetadata && typeof asset.sourceMetadata === "object"
-    ? asset.sourceMetadata
-    : {};
-}
-
-function assetMatchesQuery(asset: Asset, rawQuery: string) {
-  const query = rawQuery.trim().toLowerCase();
-  if (!query) return true;
-
-  return [
-    asset.name,
-    asset.description,
-    asset.assetType,
-    asset.mediaKind,
-    asset.sourceModule,
-    asset.sourceTaskId,
-  ]
-    .filter(Boolean)
-    .some((value) => String(value).toLowerCase().includes(query));
-}
-
-function imageAssetTypeLabel(assetType: string) {
-  const match = IMAGE_SUBCATS.find((item) => item.id === assetType);
-  return match?.label || assetType;
-}
-
-function videoAssetSubLabel(asset: Asset) {
-  const mod = (asset.sourceModule as AssetSourceModule | null) ?? null;
-  return mod ? SOURCE_MODULE_LABEL[mod] || mod : "未分组";
-}
-
-const UNKNOWN_DATE_LABEL = "未知日期";
-
-type DateGroup<T> = {
-  dateKey: string;
-  items: T[];
-  sortTime: number;
-};
-
-type ProjectAssetsCacheEntry = {
-  items: Asset[];
-  updatedAt: number;
-};
-
-const ASSETS_CACHE_STALE_MS = 30_000;
-const ASSETS_BACKGROUND_REFRESH_MS = 60_000;
-const projectAssetsCache = new globalThis.Map<string, ProjectAssetsCacheEntry>();
-const projectAssetsInFlight = new globalThis.Map<string, Promise<Asset[]>>();
-const projectTitleCache = new globalThis.Map<string, string>();
-const syncedVideoReplaceProjects = new globalThis.Set<string>();
-
-function toLocalDateKey(value: string | null | undefined) {
-  if (!value) return UNKNOWN_DATE_LABEL;
-  const date = new Date(value);
-  const time = date.getTime();
-  if (!Number.isFinite(time)) return UNKNOWN_DATE_LABEL;
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function toDateSortTime(value: string | null | undefined) {
-  if (!value) return Number.NEGATIVE_INFINITY;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
-}
-
-function groupByLocalDate<T>(
-  items: T[],
-  getDateValue: (item: T) => string | null | undefined,
-): DateGroup<T>[] {
-  const groups = new globalThis.Map<string, DateGroup<T>>();
-
-  for (const item of items) {
-    const dateValue = getDateValue(item);
-    const dateKey = toLocalDateKey(dateValue);
-    const sortTime = toDateSortTime(dateValue);
-    const group = groups.get(dateKey);
-
-    if (group) {
-      group.items.push(item);
-      group.sortTime = Math.max(group.sortTime, sortTime);
-    } else {
-      groups.set(dateKey, { dateKey, items: [item], sortTime });
-    }
-  }
-
-  return Array.from(groups.values())
-    .map((group) => ({
-      ...group,
-      items: [...group.items].sort(
-        (left, right) => toDateSortTime(getDateValue(right)) - toDateSortTime(getDateValue(left)),
-      ),
-    }))
-    .sort((left, right) => right.sortTime - left.sortTime);
-}
-
-function normalizeCanvasProjectSummaries(items: CanvasProjectSummary[]): CanvasProjectSummary[] {
-  const byId = new globalThis.Map<string, CanvasProjectSummary>();
-  for (const item of items) {
-    const id = typeof item?.id === "string" ? item.id.trim() : "";
-    if (!id) continue;
-    const candidate = item.id === id ? item : { ...item, id };
-    const existing = byId.get(id);
-    const candidateUpdatedAt = toDateSortTime(candidate.updatedAt);
-    const existingUpdatedAt = toDateSortTime(existing?.updatedAt);
-    const candidateCreatedAt = toDateSortTime(candidate.createdAt);
-    const existingCreatedAt = toDateSortTime(existing?.createdAt);
-    if (
-      !existing ||
-      candidateUpdatedAt > existingUpdatedAt ||
-      (candidateUpdatedAt === existingUpdatedAt && candidateCreatedAt > existingCreatedAt)
-    ) {
-      byId.set(id, candidate);
-    }
-  }
-  return Array.from(byId.values()).sort(
-    (left, right) =>
-      toDateSortTime(right.updatedAt) - toDateSortTime(left.updatedAt) ||
-      toDateSortTime(right.createdAt) - toDateSortTime(left.createdAt),
-  );
-}
-
-function normalizeAgentCanvasProjectSummaries(items: AgentCanvasProjectSummary[]): AgentCanvasProjectSummary[] {
-  const byId = new globalThis.Map<string, AgentCanvasProjectSummary>();
-  for (const item of items) {
-    const id = typeof item?.id === "string" ? item.id.trim() : "";
-    if (!id) continue;
-    const candidate = item.id === id ? item : { ...item, id };
-    const existing = byId.get(id);
-    const candidateUpdatedAt = toDateSortTime(candidate.updatedAt);
-    const existingUpdatedAt = toDateSortTime(existing?.updatedAt);
-    const candidateCreatedAt = toDateSortTime(candidate.createdAt);
-    const existingCreatedAt = toDateSortTime(existing?.createdAt);
-    if (
-      !existing ||
-      candidateUpdatedAt > existingUpdatedAt ||
-      (candidateUpdatedAt === existingUpdatedAt && candidateCreatedAt > existingCreatedAt)
-    ) {
-      byId.set(id, candidate);
-    }
-  }
-  return Array.from(byId.values()).sort(
-    (left, right) =>
-      toDateSortTime(right.updatedAt) - toDateSortTime(left.updatedAt) ||
-      toDateSortTime(right.createdAt) - toDateSortTime(left.createdAt),
-  );
-}
-
-function getCachedProjectAssets(projectId: string) {
-  return projectAssetsCache.get(projectId) || null;
-}
-
-function setCachedProjectAssets(projectId: string, items: Asset[]) {
-  projectAssetsCache.set(projectId, {
-    items,
-    updatedAt: Date.now(),
-  });
-}
-
-function shouldRefreshProjectAssets(projectId: string) {
-  const cached = getCachedProjectAssets(projectId);
-  return !cached || Date.now() - cached.updatedAt > ASSETS_CACHE_STALE_MS;
-}
-
-function fetchProjectAssets(projectId: string) {
-  const existing = projectAssetsInFlight.get(projectId);
-  if (existing) return existing;
-
-  const request = listAssets(projectId)
-    .then((response) => response.items)
-    .finally(() => {
-      projectAssetsInFlight.delete(projectId);
-    });
-  projectAssetsInFlight.set(projectId, request);
-  return request;
-}
-
-type SidebarSection =
-  | "assets"
-  | "agent-canvas-assets"
-  | "legacy-agent-canvas-project-assets"
-  | "agent-canvas-projects"
-  | "canvas-projects";
-
 export default function Assets() {
   const navigate = useNavigate();
   const actorId = useActorId();
@@ -895,289 +638,25 @@ export default function Assets() {
 
   return (
     <div className="flex h-full w-full bg-background">
-      <aside className="flex w-72 flex-col border-r border-border bg-card/30">
-        <div className="border-b border-border p-4">
-          <h2 className="flex items-center gap-2 font-medium">
-            <FolderOpen className="h-4 w-4 text-primary" />
-            资产库
-          </h2>
-          <p className="mt-2 text-xs text-muted-foreground">当前项目：{projectTitle}</p>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
-          {/* ── 图片资产（一级） ───────────────────────────────── */}
-          <button
-            onClick={() => {
-              setImageExpanded((v) => !v);
-              setActiveSection("assets");
-              setFilter({ root: "image", assetType: "all" });
-            }}
-            className={cn(
-              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              activeSection === "assets" && filter.root === "image" && filter.assetType === "all"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <span className="flex items-center gap-3">
-              {imageExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              <ImageIcon className="h-4 w-4" />
-              图片资产
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-xs",
-                activeSection === "assets" && filter.root === "image" && filter.assetType === "all"
-                  ? "bg-primary/20"
-                  : "bg-secondary",
-              )}
-            >
-              {counts.image.all ?? 0}
-            </span>
-          </button>
-
-          {imageExpanded && (
-            <div className="ml-4 mt-1 space-y-0.5 border-l border-border/50 pl-2">
-              {IMAGE_SUBCATS.filter((item) => item.id !== "all").map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveSection("assets");
-                    setFilter({ root: "image", assetType: item.id });
-                  }}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
-                    activeSection === "assets" &&
-                      filter.root === "image" &&
-                      filter.assetType === item.id
-                      ? "bg-primary/10 font-medium text-primary"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  <span className="flex items-center gap-3">
-                    <item.icon className="h-3.5 w-3.5" />
-                    {item.label}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-xs",
-                      activeSection === "assets" &&
-                        filter.root === "image" &&
-                        filter.assetType === item.id
-                        ? "bg-primary/20"
-                        : "bg-secondary",
-                    )}
-                  >
-                    {counts.image[item.id] ?? 0}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="my-2" />
-
-          {/* ── 视频资产（一级） ───────────────────────────────── */}
-          <button
-            onClick={() => {
-              setVideoExpanded((v) => !v);
-              setActiveSection("assets");
-              setFilter({ root: "video", sourceModule: "all" });
-            }}
-            className={cn(
-              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              activeSection === "assets" && filter.root === "video" && filter.sourceModule === "all"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <span className="flex items-center gap-3">
-              {videoExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              <Video className="h-4 w-4" />
-              视频资产
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-xs",
-                activeSection === "assets" && filter.root === "video" && filter.sourceModule === "all"
-                  ? "bg-primary/20"
-                  : "bg-secondary",
-              )}
-            >
-              {counts.video.all ?? 0}
-            </span>
-          </button>
-
-          {videoExpanded && (
-            <div className="ml-4 mt-1 space-y-0.5 border-l border-border/50 pl-2">
-              {VIDEO_SUBCATS.filter((item) => item.id !== "all").map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveSection("assets");
-                    setFilter({ root: "video", sourceModule: item.id });
-                  }}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
-                    activeSection === "assets" &&
-                      filter.root === "video" &&
-                      filter.sourceModule === item.id
-                      ? "bg-primary/10 font-medium text-primary"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  <span className="flex items-center gap-3">
-                    <Video className="h-3.5 w-3.5 opacity-70" />
-                    {item.label}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-xs",
-                      activeSection === "assets" &&
-                        filter.root === "video" &&
-                        filter.sourceModule === item.id
-                        ? "bg-primary/20"
-                        : "bg-secondary",
-                    )}
-                  >
-                    {counts.video[item.id] ?? 0}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="my-2" />
-
-          <button
-            onClick={() => setActiveSection("agent-canvas-assets")}
-            className={cn(
-              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              activeSection === "agent-canvas-assets"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <span className="flex items-center gap-3">
-              <Sparkles className="h-4 w-4" />
-              智能画布资产
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-xs",
-                activeSection === "agent-canvas-assets" ? "bg-primary/20" : "bg-secondary",
-              )}
-            >
-              {agentCanvasSyncedAssets.length}
-            </span>
-          </button>
-
-          <div className="my-2" />
-
-          <button
-            onClick={() => setActiveSection("legacy-agent-canvas-project-assets")}
-            className={cn(
-              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              activeSection === "legacy-agent-canvas-project-assets"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <span className="flex items-center gap-3">
-              <LayoutGrid className="h-4 w-4" />
-              历史智能画布工程
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-xs",
-                activeSection === "legacy-agent-canvas-project-assets" ? "bg-primary/20" : "bg-secondary",
-              )}
-            >
-              {legacyAgentCanvasProjectAssets.length}
-            </span>
-          </button>
-
-          <div className="my-2" />
-
-          <button
-            onClick={() => setActiveSection("agent-canvas-projects")}
-            className={cn(
-              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              activeSection === "agent-canvas-projects"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <span className="flex items-center gap-3">
-              <Sparkles className="h-4 w-4" />
-              智能画布项目
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-xs",
-                activeSection === "agent-canvas-projects" ? "bg-primary/20" : "bg-secondary",
-              )}
-            >
-              {agentCanvasProjects.length}
-            </span>
-          </button>
-
-          <div className="my-2" />
-
-          {/* ── 画布项目 ───────────────────────────────────────── */}
-          <button
-            onClick={() => {
-              setCanvasExpanded((v) => !v);
-              setActiveSection("canvas-projects");
-            }}
-            className={cn(
-              "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              activeSection === "canvas-projects"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <span className="flex items-center gap-3">
-              {canvasExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              <LayoutGrid className="h-4 w-4" />
-              画布项目
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-xs",
-                activeSection === "canvas-projects" ? "bg-primary/20" : "bg-secondary",
-              )}
-            >
-              {canvasProjects.length}
-            </span>
-          </button>
-
-          {canvasExpanded && activeSection === "canvas-projects" ? (
-            <div className="ml-4 mt-1 space-y-0.5 border-l border-border/50 pl-2">
-              {showInitialCanvasLoading ? (
-                <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                  加载中...
-                </div>
-              ) : canvasProjects.length === 0 ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground">暂无画布项目</p>
-              ) : (
-                canvasProjects.map((cp) => (
-                  <div
-                    key={cp.id}
-                    className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <span className="flex items-center gap-2 truncate">
-                      <Clock className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                      <span className="truncate">{cp.title}</span>
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          ) : null}
-        </div>
-      </aside>
+      <AssetSidebar
+        projectTitle={projectTitle}
+        activeSection={activeSection}
+        filter={filter}
+        counts={counts}
+        imageExpanded={imageExpanded}
+        videoExpanded={videoExpanded}
+        canvasExpanded={canvasExpanded}
+        canvasProjects={canvasProjects}
+        showInitialCanvasLoading={showInitialCanvasLoading}
+        agentCanvasSyncedAssetCount={agentCanvasSyncedAssets.length}
+        legacyAgentCanvasProjectAssetCount={legacyAgentCanvasProjectAssets.length}
+        agentCanvasProjectCount={agentCanvasProjects.length}
+        onActiveSectionChange={setActiveSection}
+        onFilterChange={setFilter}
+        onImageExpandedChange={setImageExpanded}
+        onVideoExpandedChange={setVideoExpanded}
+        onCanvasExpandedChange={setCanvasExpanded}
+      />
 
       <section className="flex flex-1 flex-col overflow-hidden">
         {activeSection === "assets" ? (
@@ -1236,119 +715,17 @@ export default function Assets() {
                   <p className="text-sm">加载资产中...</p>
                 </div>
               ) : (
-                <div className="space-y-8">
-                  {assetDateGroups.map((group) => (
-                    <section key={group.dateKey} className="space-y-3">
-                      {renderDateLine(group.dateKey)}
-                      <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
-                        {group.items.map((asset) => {
-                    const pendingDelete = deletingId === asset.id;
-                    const previewUrl = assetPreviewUrl(asset);
-
-                    return (
-                      <article
-                        key={asset.id}
-                        className="glass-panel group flex flex-col overflow-hidden rounded-xl"
-                      >
-                        <div className="relative aspect-square bg-muted">
-                          <button
-                            onClick={() => setPreviewAsset(asset)}
-                            className="absolute inset-0 block h-full w-full overflow-hidden text-left"
-                          >
-                            {previewUrl ? (
-                              <img
-                                src={previewUrl}
-                                alt={asset.name}
-                                className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                                loading="lazy"
-                                decoding="async"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : isVideoAsset(asset) && assetMediaUrl(asset) ? (
-                              /* Video with no static cover: let the browser render the first
-                                 frame by pointing a muted <video> at the mediaUrl. preload=
-                                 "metadata" keeps bandwidth cost minimal. */
-                              <video
-                                src={assetMediaUrl(asset) || undefined}
-                                className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                                muted
-                                playsInline
-                                preload="metadata"
-                              />
-                            ) : (
-                              <GeneratedMediaPlaceholder
-                                kind={isVideoAsset(asset) ? "video" : "image"}
-                                className="h-full w-full"
-                                description="生成后会在这里显示预览"
-                              />
-                            )}
-                          </button>
-
-                          {isVideoAsset(asset) ? (
-                            <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-medium text-white backdrop-blur">
-                              {videoAssetSubLabel(asset)}
-                            </div>
-                          ) : null}
-
-                          <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
-                            <button
-                              onClick={() => setPreviewAsset(asset)}
-                              className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                              title="预览"
-                            >
-                              <Play className="h-4 w-4" />
-                            </button>
-                            {isVideoAsset(asset) ? (
-                              <button
-                                onClick={() => openVideoReplaceForAsset(asset)}
-                                className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                                title={isVideoReplaceAsset(asset) ? "继续人物替换" : "人物替换"}
-                              >
-                                <Sparkles className="h-4 w-4" />
-                              </button>
-                            ) : null}
-                            <button
-                              onClick={() => openEdit(asset)}
-                              className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                              title="编辑"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => void handleDelete(asset.id)}
-                              disabled={pendingDelete}
-                              className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                              title="删除"
-                            >
-                              {pendingDelete ? (
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-1 flex-col p-3">
-                          <div className="mb-2 flex items-center justify-between gap-2">
-                            <h3 className="truncate text-sm font-medium">{asset.name}</h3>
-                            <span className="rounded bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
-                              {isVideoAsset(asset)
-                                ? videoAssetSubLabel(asset)
-                                : imageAssetTypeLabel(asset.assetType)}
-                            </span>
-                          </div>
-                          <p className="line-clamp-2 flex-1 text-xs text-muted-foreground">
-                            {asset.description || "暂无描述"}
-                          </p>
-                        </div>
-                      </article>
-                    );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
+                <AssetGrid
+                  dateGroups={assetDateGroups}
+                  deletingId={deletingId}
+                  variant="assets"
+                  renderDateLine={renderDateLine}
+                  onPreviewAsset={setPreviewAsset}
+                  onEditAsset={openEdit}
+                  onDeleteAsset={handleDelete}
+                  onOpenVideoReplace={openVideoReplaceForAsset}
+                  onOpenAgentCanvas={() => navigate("/create/agent-canvas")}
+                />
               )}
 
               {!showInitialAssetsLoading && filteredAssets.length === 0 ? (
@@ -1410,112 +787,17 @@ export default function Assets() {
                   <p className="mt-1 text-xs">在智能画布中上传或生成图片/视频后，会自动同步到这里</p>
                 </div>
               ) : (
-                <div className="space-y-8">
-                  {agentCanvasSyncedAssetDateGroups.map((group) => (
-                    <section key={group.dateKey} className="space-y-3">
-                      {renderDateLine(group.dateKey)}
-                      <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
-                        {group.items.map((asset) => {
-                          const pendingDelete = deletingId === asset.id;
-                          const previewUrl = assetPreviewUrl(asset);
-
-                          return (
-                            <article
-                              key={asset.id}
-                              className="glass-panel group flex flex-col overflow-hidden rounded-xl"
-                            >
-                              <div className="relative aspect-square bg-muted">
-                                <button
-                                  onClick={() => setPreviewAsset(asset)}
-                                  className="absolute inset-0 block h-full w-full overflow-hidden text-left"
-                                >
-                                  {previewUrl ? (
-                                    <img
-                                      src={previewUrl}
-                                      alt={asset.name}
-                                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                                      loading="lazy"
-                                      decoding="async"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                  ) : isVideoAsset(asset) && assetMediaUrl(asset) ? (
-                                    <video
-                                      src={assetMediaUrl(asset) || undefined}
-                                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                                      muted
-                                      playsInline
-                                      preload="metadata"
-                                    />
-                                  ) : (
-                                    <GeneratedMediaPlaceholder
-                                      kind={isVideoAsset(asset) ? "video" : "image"}
-                                      className="h-full w-full"
-                                      description="生成后会在这里显示预览"
-                                    />
-                                  )}
-                                </button>
-
-                                <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-medium text-white backdrop-blur">
-                                  {isVideoAsset(asset) ? "视频" : "图片"}
-                                </div>
-
-                                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
-                                  <button
-                                    onClick={() => setPreviewAsset(asset)}
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                                    title="预览"
-                                  >
-                                    <Play className="h-4 w-4" />
-                                  </button>
-                                  {isVideoAsset(asset) ? (
-                                    <button
-                                      onClick={() => openVideoReplaceForAsset(asset)}
-                                      className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                                      title={isVideoReplaceAsset(asset) ? "继续人物替换" : "人物替换"}
-                                    >
-                                      <Sparkles className="h-4 w-4" />
-                                    </button>
-                                  ) : null}
-                                  <button
-                                    onClick={() => openEdit(asset)}
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                                    title="编辑"
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => void handleDelete(asset.id)}
-                                    disabled={pendingDelete}
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                                    title="删除"
-                                  >
-                                    {pendingDelete ? (
-                                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <Trash2 className="h-4 w-4" />
-                                    )}
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="flex flex-1 flex-col p-3">
-                                <div className="mb-2 flex items-center justify-between gap-2">
-                                  <h3 className="truncate text-sm font-medium">{asset.name}</h3>
-                                  <span className="rounded bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
-                                    智能画布
-                                  </span>
-                                </div>
-                                <p className="line-clamp-2 flex-1 text-xs text-muted-foreground">
-                                  {asset.description || "暂无描述"}
-                                </p>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
+                <AssetGrid
+                  dateGroups={agentCanvasSyncedAssetDateGroups}
+                  deletingId={deletingId}
+                  variant="agent-canvas-assets"
+                  renderDateLine={renderDateLine}
+                  onPreviewAsset={setPreviewAsset}
+                  onEditAsset={openEdit}
+                  onDeleteAsset={handleDelete}
+                  onOpenVideoReplace={openVideoReplaceForAsset}
+                  onOpenAgentCanvas={() => navigate("/create/agent-canvas")}
+                />
               )}
             </div>
           </>
@@ -1570,572 +852,66 @@ export default function Assets() {
                   <p className="mt-1 text-xs">旧入口退役后不再新建此类工程，可在智能画布项目中继续创建新项目</p>
                 </div>
               ) : (
-                <div className="space-y-8">
-                  {legacyAgentCanvasProjectDateGroups.map((group) => (
-                    <section key={group.dateKey} className="space-y-3">
-                      {renderDateLine(group.dateKey)}
-                      <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
-                        {group.items.map((asset) => {
-                          const pendingDelete = deletingId === asset.id;
-                          const previewUrl = assetPreviewUrl(asset);
-                          const metadata = getAgentCanvasProjectMeta(asset);
-                          const canvasId =
-                            typeof metadata.canvasId === "string" ? metadata.canvasId : "";
-                          const sessionId =
-                            typeof metadata.sessionId === "string" ? metadata.sessionId : "";
-
-                          return (
-                            <article
-                              key={asset.id}
-                              className="glass-panel group flex flex-col overflow-hidden rounded-xl"
-                            >
-                              <div className="relative aspect-video bg-muted">
-                                {previewUrl ? (
-                                  <img
-                                    src={previewUrl}
-                                    alt={asset.name}
-                                    className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                                    loading="lazy"
-                                    decoding="async"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  <GeneratedMediaPlaceholder
-                                    kind="image"
-                                    label="历史工程"
-                                    className="h-full w-full"
-                                    description="旧入口退役，工程仅保留为资产记录"
-                                  />
-                                )}
-
-                                <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-medium text-white backdrop-blur">
-                                  可编辑工程
-                                </div>
-
-                                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
-                                  <button
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      navigate("/create/agent-canvas");
-                                    }}
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                                    title="新建智能画布"
-                                  >
-                                    <Sparkles className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void handleDelete(asset.id);
-                                    }}
-                                    disabled={pendingDelete}
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                                    title="从项目管理中移除"
-                                  >
-                                    {pendingDelete ? (
-                                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <Trash2 className="h-4 w-4" />
-                                    )}
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="flex flex-1 flex-col p-3">
-                                <div className="mb-2 flex items-center justify-between gap-2">
-                                  <h3 className="truncate text-sm font-medium">{asset.name}</h3>
-                                  <span className="rounded bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
-                                    历史工程
-                                  </span>
-                                </div>
-                                <p className="line-clamp-2 flex-1 text-xs text-muted-foreground">
-                                  {asset.description || "旧入口保存的画布、对话和可编辑工程记录"}
-                                </p>
-                                <div className="mt-2 space-y-1 text-[11px] text-muted-foreground/80">
-                                  {canvasId ? <p className="truncate">Canvas: {canvasId}</p> : null}
-                                  {sessionId ? <p className="truncate">Session: {sessionId}</p> : null}
-                                  <p>{new Date(asset.updatedAt || asset.createdAt).toLocaleString("zh-CN")}</p>
-                                </div>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
+                <AssetGrid
+                  dateGroups={legacyAgentCanvasProjectDateGroups}
+                  deletingId={deletingId}
+                  variant="legacy-agent-canvas-project-assets"
+                  renderDateLine={renderDateLine}
+                  onPreviewAsset={setPreviewAsset}
+                  onEditAsset={openEdit}
+                  onDeleteAsset={handleDelete}
+                  onOpenVideoReplace={openVideoReplaceForAsset}
+                  onOpenAgentCanvas={() => navigate("/create/agent-canvas")}
+                />
               )}
             </div>
           </>
         ) : activeSection === "agent-canvas-projects" ? (
-          <>
-            <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/30 px-6">
-              <h3 className="flex items-center gap-2 text-sm font-medium">
-                <Sparkles className="h-4 w-4 text-primary" />
-                智能画布项目
-                <span className="text-xs text-muted-foreground">
-                  （保存智能画布节点、对话上下文和视口，已保存 {agentCanvasProjects.length} 项）
-                </span>
-              </h3>
-              <div className="flex items-center gap-3">
-                {agentCanvasRefreshing ? <LoaderCircle className="h-4 w-4 animate-spin text-primary" /> : null}
-                <button
-                  onClick={() => void loadAgentCanvasProjects()}
-                  className="rounded-md border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-accent"
-                >
-                  刷新
-                </button>
-                <button
-                  onClick={() => navigate("/create/agent-canvas")}
-                  className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  新建智能画布
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-              {showInitialAgentCanvasLoading ? (
-                <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-sm">加载智能画布项目中...</p>
-                </div>
-              ) : agentCanvasProjects.length === 0 ? (
-                <div className="flex h-64 flex-col items-center justify-center text-muted-foreground">
-                  <Sparkles className="mb-4 h-12 w-12 opacity-20" />
-                  <p>暂无智能画布项目</p>
-                  <p className="mt-1 text-xs">在智能画布中对话或生成后，会自动保存完整界面上下文</p>
-                </div>
-              ) : (
-                <div className="space-y-8">
-                  {agentCanvasProjectDateGroups.map((group) => (
-                    <section key={group.dateKey} className="space-y-3">
-                      {renderDateLine(group.dateKey)}
-                      <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
-                        {group.items.map((cp) => {
-                          const pendingDelete = deletingAgentCanvasId === cp.id;
-                          return (
-                            <article
-                              key={cp.id}
-                              className="glass-panel group flex cursor-pointer flex-col overflow-hidden rounded-xl"
-                              onClick={() => navigate(`/create/agent-canvas?agentCanvasProjectId=${cp.id}`)}
-                            >
-                              <div className="relative aspect-video bg-muted">
-                                {cp.thumbnailUrl ? (
-                                  <img
-                                    src={getGeneratedMediaUrl(cp.thumbnailUrl) || cp.thumbnailUrl}
-                                    alt={cp.title}
-                                    className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                                    loading="lazy"
-                                    decoding="async"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  <GeneratedMediaPlaceholder
-                                    kind="image"
-                                    label="智能画布"
-                                    className="h-full w-full"
-                                    description="点击后恢复画布和对话上下文"
-                                  />
-                                )}
-
-                                <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-medium text-white backdrop-blur">
-                                  智能画布
-                                </div>
-
-                                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
-                                  <button
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      navigate(`/create/agent-canvas?agentCanvasProjectId=${cp.id}`);
-                                    }}
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                                    title="继续编辑"
-                                  >
-                                    <Play className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void handleDeleteAgentCanvasProject(cp.id);
-                                    }}
-                                    disabled={pendingDelete}
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                                    title="删除"
-                                  >
-                                    {pendingDelete ? (
-                                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                      <Trash2 className="h-4 w-4" />
-                                    )}
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="flex flex-1 flex-col p-3">
-                                <div className="mb-2 flex items-center justify-between gap-2">
-                                  <h3 className="truncate text-sm font-medium">{cp.title}</h3>
-                                  <span className="rounded bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
-                                    Agent
-                                  </span>
-                                </div>
-                                <p className="line-clamp-2 flex-1 text-xs text-muted-foreground">
-                                  保存了智能画布节点、分组、视口和侧边栏对话上下文
-                                </p>
-                                <p className="mt-2 text-[11px] text-muted-foreground/80">
-                                  {new Date(cp.updatedAt).toLocaleString("zh-CN")}
-                                </p>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
+          <CanvasProjectSection
+            mode="agent"
+            projects={agentCanvasProjects}
+            dateGroups={agentCanvasProjectDateGroups}
+            loading={showInitialAgentCanvasLoading}
+            refreshing={agentCanvasRefreshing}
+            deletingId={deletingAgentCanvasId}
+            renderDateLine={renderDateLine}
+            onRefresh={loadAgentCanvasProjects}
+            onOpenProject={(projectId) => navigate(`/create/agent-canvas?agentCanvasProjectId=${projectId}`)}
+            onDeleteProject={handleDeleteAgentCanvasProject}
+            onCreateAgentCanvas={() => navigate("/create/agent-canvas")}
+          />
         ) : (
-          <>
-            <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card/30 px-6">
-              <h3 className="flex items-center gap-2 text-sm font-medium">
-                <LayoutGrid className="h-4 w-4 text-primary" />
-                画布项目
-                <span className="text-xs text-muted-foreground">（同账号多设备自动同步）</span>
-              </h3>
-              <div className="flex items-center gap-3">
-                {canvasRefreshing ? <LoaderCircle className="h-4 w-4 animate-spin text-primary" /> : null}
-                <button
-                  onClick={() => void loadCanvasProjects()}
-                  className="rounded-md border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-accent"
-                >
-                  刷新
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-              {showInitialCanvasLoading ? (
-                <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-sm">加载画布项目中...</p>
-                </div>
-              ) : canvasProjects.length === 0 ? (
-                <div className="flex h-64 flex-col items-center justify-center text-muted-foreground">
-                  <LayoutGrid className="mb-4 h-12 w-12 opacity-20" />
-                  <p>暂无画布项目</p>
-                  <p className="mt-1 text-xs">在天幕中点击 SAVE 后，项目会自动保存到这里</p>
-                </div>
-              ) : (
-                <div className="space-y-8">
-                  {canvasProjectDateGroups.map((group) => (
-                    <section key={group.dateKey} className="space-y-3">
-                      {renderDateLine(group.dateKey)}
-                      <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
-                        {group.items.map((cp) => (
-                    <article
-                      key={cp.id}
-                      className="glass-panel group flex cursor-pointer flex-col overflow-hidden rounded-xl"
-                      onClick={() => navigate(`/create/canvas?canvasProjectId=${cp.id}`)}
-                    >
-                      <div className="relative aspect-video bg-muted">
-                        {cp.thumbnailUrl ? (
-                          <img
-                            src={getGeneratedMediaUrl(cp.thumbnailUrl) || cp.thumbnailUrl}
-                            alt={cp.title}
-                            className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                            loading="lazy"
-                            decoding="async"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center">
-                            <LayoutGrid className="h-10 w-10 opacity-20" />
-                          </div>
-                        )}
-
-                        <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/create/canvas?canvasProjectId=${cp.id}`);
-                            }}
-                            className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
-                            title="打开"
-                          >
-                            <Play className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleDeleteCanvasProject(cp.id);
-                            }}
-                            className="flex h-9 w-9 items-center justify-center rounded-full bg-background/85 text-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
-                            title="删除"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-1 flex-col p-3">
-                        <h3 className="truncate text-sm font-medium">{cp.title}</h3>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {new Date(cp.updatedAt).toLocaleString("zh-CN")}
-                        </p>
-                      </div>
-                    </article>
-                        ))}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
+          <CanvasProjectSection
+            mode="canvas"
+            projects={canvasProjects}
+            dateGroups={canvasProjectDateGroups}
+            loading={showInitialCanvasLoading}
+            refreshing={canvasRefreshing}
+            deletingId={deletingCanvasId}
+            renderDateLine={renderDateLine}
+            onRefresh={loadCanvasProjects}
+            onOpenProject={(projectId) => navigate(`/create/canvas?canvasProjectId=${projectId}`)}
+            onDeleteProject={handleDeleteCanvasProject}
+          />
         )}
       </section>
 
       {formState ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-border bg-background p-6 shadow-2xl">
-            <h3 className="mb-6 text-lg font-semibold">
-              {formState.mode === "create" ? "新增资产" : "编辑资产"}
-            </h3>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">资产类型</label>
-                <select
-                  value={formState.assetType}
-                  onChange={(event) =>
-                    setFormState((current) =>
-                      current ? { ...current, assetType: event.target.value } : current,
-                    )
-                  }
-                  className="w-full rounded-lg border border-border bg-input px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                >
-                  {formState.rootCategory === "image"
-                    ? IMAGE_SUBCATS.filter((item) => item.id !== "all").map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.label}
-                        </option>
-                      ))
-                    : [
-                        <option key="video_ref" value="video_ref">
-                          视频素材
-                        </option>,
-                      ]}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">资产名称</label>
-                <input
-                  value={formState.name}
-                  onChange={(event) =>
-                    setFormState((current) =>
-                      current ? { ...current, name: event.target.value } : current,
-                    )
-                  }
-                  className="w-full rounded-lg border border-border bg-input px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">本地文件（图片或视频，可选）</label>
-                <input
-                  type="file"
-                  accept={ASSET_UPLOAD_ACCEPT}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] ?? null;
-                    setFormState((current) => {
-                      if (!current) return current;
-                      if (current.localFilePreviewUrl) {
-                        try {
-                          URL.revokeObjectURL(current.localFilePreviewUrl);
-                        } catch {
-                          /* ignore */
-                        }
-                      }
-                      return {
-                        ...current,
-                        localFile: file,
-                        localFilePreviewUrl: file ? URL.createObjectURL(file) : null,
-                      };
-                    });
-                  }}
-                  className="w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border file:border-border file:bg-background file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground hover:file:bg-accent"
-                />
-                {formState.localFile ? (
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">
-                      已选择文件：{formState.localFile.name}
-                    </p>
-                    {formState.localFilePreviewUrl && formState.localFile.type.startsWith("image/") ? (
-                      <div className="mt-2 inline-flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/40 p-2">
-                        <div className="h-16 w-16 overflow-hidden rounded-md border border-border bg-background">
-                          <img
-                            src={formState.localFilePreviewUrl}
-                            alt={formState.localFile.name}
-                            className="h-full w-full object-cover"
-                          />
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          本地图片预览，仅用于确认上传内容。
-                        </span>
-                      </div>
-                    ) : formState.localFilePreviewUrl && formState.localFile.type.startsWith("video/") ? (
-                      <div className="mt-2 inline-flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/40 p-2">
-                        <div className="h-16 w-16 overflow-hidden rounded-md border border-border bg-background">
-                          <video
-                            src={formState.localFilePreviewUrl}
-                            className="h-full w-full object-cover"
-                            muted
-                          />
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          本地视频预览（静音），用于确认上传内容。
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    支持直接上传本地图片或视频文件，系统会自动保存为当前资产的素材。
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">描述</label>
-                <textarea
-                  value={formState.description}
-                  onChange={(event) =>
-                    setFormState((current) =>
-                      current ? { ...current, description: event.target.value } : current,
-                    )
-                  }
-                  className="h-28 w-full resize-none rounded-lg border border-border bg-input px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={closeForm}
-                className="rounded-lg border border-border px-4 py-2 text-sm font-medium transition-colors hover:bg-accent"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => void handleSubmit()}
-                disabled={submitting || !formState.name.trim()}
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {submitting ? "提交中..." : formState.mode === "create" ? "创建资产" : "保存修改"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <AssetFormModal
+          formState={formState}
+          submitting={submitting}
+          setFormState={setFormState}
+          onClose={closeForm}
+          onSubmit={handleSubmit}
+        />
       ) : null}
 
       {previewAsset ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-4xl rounded-2xl border border-border bg-background shadow-2xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <div>
-                <h3 className="text-lg font-semibold">{previewAsset.name}</h3>
-                <p className="text-xs text-muted-foreground">
-                  {isVideoAsset(previewAsset)
-                    ? `视频资产 · 来源：${videoAssetSubLabel(previewAsset)}`
-                    : `图片资产 · ${imageAssetTypeLabel(previewAsset.assetType)}`}
-                </p>
-              </div>
-              <button
-                onClick={() => setPreviewAsset(null)}
-                className="rounded-md p-2 transition-colors hover:bg-accent"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="grid gap-6 p-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="overflow-hidden rounded-xl border border-border bg-black">
-                {canPreviewAssetVideo(previewAsset) ? (
-                  <video
-                    src={assetMediaUrl(previewAsset) || undefined}
-                    poster={assetPreviewUrl(previewAsset) || undefined}
-                    controls
-                    className="h-full min-h-[320px] w-full object-contain"
-                  />
-                ) : assetPreviewUrl(previewAsset) ? (
-                  <img
-                    src={assetPreviewUrl(previewAsset) || undefined}
-                    alt={previewAsset.name}
-                    className="h-full min-h-[320px] w-full object-contain"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <GeneratedMediaPlaceholder
-                    kind={isVideoAsset(previewAsset) ? "video" : "image"}
-                    className="h-full min-h-[320px] w-full bg-black text-zinc-300"
-                    description="当前资产还没有可预览的真实媒体"
-                  />
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-lg border border-border p-4">
-                  <div className="text-xs text-muted-foreground">资产类型</div>
-                  <div className="mt-1 font-medium">
-                    {isVideoAsset(previewAsset)
-                      ? "视频素材"
-                      : imageAssetTypeLabel(previewAsset.assetType)}
-                  </div>
-                </div>
-                {isVideoAsset(previewAsset) ? (
-                  <div className="rounded-lg border border-border p-4">
-                    <div className="text-xs text-muted-foreground">来源模块</div>
-                    <div className="mt-1 font-medium">{videoAssetSubLabel(previewAsset)}</div>
-                  </div>
-                ) : null}
-                <div className="rounded-lg border border-border p-4">
-                  <div className="text-xs text-muted-foreground">描述</div>
-                  <div className="mt-1 text-sm leading-6">
-                    {previewAsset.description || "暂无描述"}
-                  </div>
-                </div>
-                {isVideoAsset(previewAsset) ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const asset = previewAsset;
-                      setPreviewAsset(null);
-                      openVideoReplaceForAsset(asset);
-                    }}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-accent"
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    {isVideoReplaceAsset(previewAsset) ? "继续人物替换" : "人物替换"}
-                  </button>
-                ) : null}
-                {assetMediaUrl(previewAsset) ? (
-                  <a
-                    href={assetMediaUrl(previewAsset) || undefined}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                  >
-                    打开原始文件
-                  </a>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
+        <AssetPreviewModal
+          asset={previewAsset}
+          onClose={() => setPreviewAsset(null)}
+          onOpenVideoReplace={openVideoReplaceForAsset}
+        />
       ) : null}
     </div>
   );

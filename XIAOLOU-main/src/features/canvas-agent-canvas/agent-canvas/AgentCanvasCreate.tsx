@@ -16,7 +16,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
-  API_BASE_URL,
   createAsset,
   deleteAsset,
   deleteAgentCanvasProject,
@@ -33,10 +32,8 @@ import {
   newIdempotencyKey,
   saveAgentCanvasProject,
   uploadFile,
-  type Asset,
 } from "./api/agent-canvas";
 import { useActorId } from "../../../lib/actor-session";
-import { isRetiredLegacyMediaUrl } from "../../../lib/media-url-policy";
 import { useCurrentProjectId } from "../../../lib/session";
 import { useTheme } from "../../../lib/theme";
 import { generateGridThumbnail } from "../../../lib/grid-thumbnail";
@@ -62,6 +59,28 @@ import {
   sanitizePersistedCanvasString,
 } from "./runtime/utils/canvasPersistence";
 import CanvasApp from "./runtime/App";
+import CanvasProjectLoadOverlay from "./CanvasProjectLoadOverlay";
+import {
+  inlineReferenceImageUrl,
+  normalizeBridgeSelectableValue,
+  normalizeBridgeVideoMode,
+  normalizeBridgeVideoModeDuration,
+  resolveAbsoluteAssetUrl,
+} from "./canvasBridgeMedia";
+import {
+  mapCanvasCategoryToAssetType,
+  normalizeAssetToBridgeItem,
+} from "./canvasAssetBridge";
+import {
+  readAgentCanvasProjectIdFromSearch,
+  readCanvasSessionProjectId,
+  writeAgentCanvasProjectIdToSearch,
+  writeCanvasSessionProjectId,
+} from "./canvasProjectSession";
+import {
+  describeRequestError,
+  type CanvasProjectLoadState,
+} from "./canvasProjectSaveHelpers";
 
 // ─── Polling constants ────────────────────────────────────────────────────────
 
@@ -70,122 +89,6 @@ const CREATE_IMAGE_TIMEOUT_MS = 300000; // 5 minutes
 const CREATE_VIDEO_TIMEOUT_MS = 660000; // 11 minutes
 
 // ─── Helpers shared from original AgentCanvasCreate.tsx ───────────────────────────
-
-function resolveAbsoluteAssetUrl(url?: string | null) {
-  const normalized = String(url || "").trim();
-  if (!normalized || normalized.includes("mock.assets.local")) return null;
-  if (/^(?:data:|blob:)/i.test(normalized)) return normalized;
-  if (isRetiredLegacyMediaUrl(normalized)) return null;
-  if (/^https?:\/\//i.test(normalized)) {
-    return normalized;
-  }
-  const apiBaseUrl = API_BASE_URL.replace(/\/+$/, "");
-  const resolved = normalized.startsWith("/")
-    ? `${apiBaseUrl}${normalized}`
-    : `${apiBaseUrl}/${normalized.replace(/^\/+/, "")}`;
-  return new URL(resolved, window.location.origin).toString();
-}
-
-function isPrivateOrLoopbackHostname(hostname: string) {
-  const h = hostname.toLowerCase();
-  return (
-    h === "127.0.0.1" || h === "localhost" || h === "::1" ||
-    h.startsWith("10.") || h.startsWith("192.168.") ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(h)
-  );
-}
-
-function shouldInlineReferenceImageUrl(url: string) {
-  if (!url) return false;
-  if (/^data:/i.test(url)) return true;
-  if (/^blob:/i.test(url)) return true;
-  if (isRetiredLegacyMediaUrl(url)) return false;
-  try {
-    const parsed = new URL(url);
-    if (
-      parsed.pathname.startsWith("/canvas-library/") ||
-      parsed.pathname.startsWith("/twitcanva-library/") ||
-      parsed.pathname.startsWith("/library/")
-    ) return true;
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return true;
-    return isPrivateOrLoopbackHostname(parsed.hostname);
-  } catch { return true; }
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Failed to read image."));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function convertPngBlobToJpeg(blob: Blob): Promise<string> {
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const img = await new Promise<HTMLImageElement>((res, rej) => {
-      const image = new Image();
-      image.onload = () => res(image);
-      image.onerror = () => rej(new Error("Failed to decode PNG."));
-      image.src = objectUrl;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth || img.width;
-    canvas.height = img.naturalHeight || img.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Could not create canvas context.");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0);
-    const jpegBlob = await new Promise<Blob>((res, rej) =>
-      canvas.toBlob((b) => b ? res(b) : rej(new Error("canvas.toBlob failed")), "image/jpeg", 0.92)
-    );
-    return blobToDataUrl(jpegBlob);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
-async function inlineReferenceImageUrl(url: string): Promise<string> {
-  const normalized = String(url || "").trim();
-  if (!normalized || !shouldInlineReferenceImageUrl(normalized)) return normalized;
-  try {
-    const response = await fetch(normalized);
-    if (!response.ok) throw new Error(`Unexpected status ${response.status}`);
-    const blob = await response.blob();
-    const type = (blob.type || "").toLowerCase();
-    const isPng = type === "image/png" || normalized.toLowerCase().includes(".png");
-    if (isPng) return convertPngBlobToJpeg(blob);
-    return blobToDataUrl(blob);
-  } catch (err) {
-    console.warn("[AgentCanvasCreate] Failed to inline reference image:", err);
-    return normalized;
-  }
-}
-
-function normalizeBridgeVideoMode(mode?: string | null) {
-  const normalized = String(mode || "").trim().toLowerCase();
-  if (normalized === "frame-to-frame") return "start_end_frame";
-  if (normalized === "multi-reference") return "multi_param";
-  if (normalized === "image-to-video") return "image_to_video";
-  if (normalized === "text-to-video") return "text_to_video";
-  if (normalized === "motion-control") return "motion_control";
-  if (normalized === "video-edit") return "video_edit";
-  if (normalized === "video-extend") return "video_extend";
-  return normalized;
-}
-
-function normalizeBridgeVideoModeDuration(duration?: number) {
-  if (!Number.isFinite(duration)) return undefined;
-  return `${Math.max(1, Math.round(Number(duration)))}s`;
-}
-
-function normalizeBridgeSelectableValue(value?: string) {
-  const v = String(value || "").trim();
-  if (!v || v.toLowerCase() === "auto") return undefined;
-  return v;
-}
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -558,133 +461,6 @@ async function findStrayVideoResult(
     console.warn("[AgentCanvasCreate] findStrayVideoResult failed:", err);
   }
   return null;
-}
-
-function isVideoAsset(asset: Asset) {
-  return asset.mediaKind === "video" || asset.assetType === "video_ref";
-}
-
-function isAudioAsset(asset: Asset) {
-  return asset.mediaKind === "audio" || asset.assetType === "audio" || asset.assetType === "sound_effect";
-}
-
-function mapXiaolouAssetTypeToCategory(assetType: string) {
-  switch (assetType) {
-    case "character": return "Character";
-    case "scene": return "Scene";
-    case "prop": return "Item";
-    case "style": return "Style";
-    case "audio":
-    case "sound_effect":
-      return "Sound Effect";
-    default: return "Others";
-  }
-}
-
-function mapCanvasCategoryToAssetType(category: string | undefined, mediaKind: "image" | "video" | "audio") {
-  if (mediaKind === "video") return "video_ref";
-  if (mediaKind === "audio") return "audio";
-  switch ((category || "").trim().toLowerCase()) {
-    case "character": return "character";
-    case "scene": return "scene";
-    case "style": return "style";
-    case "sound effect": return "sound_effect";
-    default: return "prop";
-  }
-}
-
-function normalizeAssetToBridgeItem(asset: Asset): HostAssetItem | null {
-  const mediaUrl = resolveAbsoluteAssetUrl(asset.mediaUrl) || resolveAbsoluteAssetUrl(asset.previewUrl);
-  if (!mediaUrl) return null;
-  const previewUrl = resolveAbsoluteAssetUrl(asset.previewUrl) || mediaUrl;
-  return {
-    id: asset.id,
-    name: asset.name,
-    category: mapXiaolouAssetTypeToCategory(asset.assetType),
-    url: mediaUrl,
-    previewUrl,
-    type: isAudioAsset(asset) ? "audio" : isVideoAsset(asset) ? "video" : "image",
-    description: asset.description || undefined,
-    sourceTaskId: asset.sourceTaskId || undefined,
-    generationPrompt: asset.generationPrompt || undefined,
-    model: asset.imageModel || undefined,
-    aspectRatio: asset.aspectRatio || undefined,
-    createdAt: asset.createdAt || undefined,
-    updatedAt: asset.updatedAt || undefined,
-  };
-}
-
-// ─── Canvas project ID persistence (prevents duplicate projects on refresh) ───
-// Each actor has a single "current draft project ID" stored in localStorage.
-// On mount it is restored so auto-saves update the SAME project instead of
-// creating new ones (Lovart-style stable projectId approach).
-
-const CANVAS_SESSION_PROJECT_KEY_PREFIX = "xiaolou:agent-canvas-session-project";
-
-function getCanvasSessionProjectKey(actorId: string | null): string {
-  return `${CANVAS_SESSION_PROJECT_KEY_PREFIX}:${actorId || "guest"}`;
-}
-
-function readCanvasSessionProjectId(actorId: string | null): string | null {
-  if (typeof window === "undefined") return null;
-  try { return window.localStorage.getItem(getCanvasSessionProjectKey(actorId)); } catch { return null; }
-}
-
-function writeCanvasSessionProjectId(actorId: string | null, projectId: string | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    const key = getCanvasSessionProjectKey(actorId);
-    if (projectId) { window.localStorage.setItem(key, projectId); }
-    else { window.localStorage.removeItem(key); }
-  } catch { /* ignore storage errors */ }
-}
-
-function readAgentCanvasProjectIdFromSearch(search: string): string | null {
-  const params = new URLSearchParams(search);
-  const projectId = params.get("agentCanvasProjectId")?.trim() || params.get("canvasProjectId")?.trim();
-  return projectId || null;
-}
-
-function writeAgentCanvasProjectIdToSearch(projectId: string): void {
-  if (typeof window === "undefined" || !projectId.trim()) return;
-  try {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("agentCanvasProjectId") === projectId) {
-      return;
-    }
-    url.searchParams.delete("canvasProjectId");
-    url.searchParams.set("agentCanvasProjectId", projectId);
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-  } catch {
-    /* keep save successful even if URL state cannot be updated */
-  }
-}
-
-type CanvasProjectLoadState =
-  | { status: "idle" }
-  | { status: "syncing" }
-  | { status: "loading" }
-  | { status: "error"; message: string };
-
-function describeRequestError(error: unknown, fallback: string) {
-  const anyError = error as { code?: string; status?: number; message?: string } | null | undefined;
-  const code = String(anyError?.code || "").trim().toUpperCase();
-  const status = typeof anyError?.status === "number" ? anyError.status : 0;
-  const message = String(anyError?.message || "").trim();
-
-  if (message && code && !message.toUpperCase().includes(code)) {
-    return `[${code}] ${message}`;
-  }
-  if (message) {
-    return message;
-  }
-  if (code) {
-    return `[${code}] ${fallback}`;
-  }
-  if (status > 0) {
-    return `[HTTP ${status}] ${fallback}`;
-  }
-  return fallback;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -1221,49 +997,11 @@ export default function AgentCanvasCreate() {
     >
       <CanvasApp creditQuoteProjectId={currentProjectId} />
       {Boolean(pendingLoadProjectId) && canvasProjectLoadState.status !== "idle" ? (
-        <div className="pointer-events-auto absolute inset-0 z-[120] flex items-center justify-center bg-background/70 px-6 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-border bg-card p-6 text-card-foreground shadow-2xl">
-            <div className="text-sm font-semibold tracking-[0.24em] text-muted-foreground">
-              CANVAS
-            </div>
-            <div className="mt-3 text-2xl font-semibold">
-              {canvasProjectLoadState.status === "syncing"
-                ? "正在同步当前账号项目上下文"
-                : canvasProjectLoadState.status === "loading"
-                  ? "正在加载智能画布项目"
-                  : "智能画布项目加载失败"}
-            </div>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              {canvasProjectLoadState.status === "syncing"
-                ? "正在校准当前账号可访问的项目范围，完成后会自动加载目标画布。"
-                : canvasProjectLoadState.status === "loading"
-                  ? "目标项目已定位，正在恢复节点和视口状态。"
-                  : canvasProjectLoadState.message}
-            </p>
-            {canvasProjectLoadState.status === "error" ? (
-              <div className="mt-5 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setCanvasProjectLoadAttempt((count) => count + 1)}
-                  className="inline-flex items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
-                >
-                  重试加载
-                </button>
-                <button
-                  type="button"
-                  onClick={() => window.location.reload()}
-                  className="inline-flex items-center justify-center rounded-full border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
-                >
-                  刷新当前页
-                </button>
-              </div>
-            ) : (
-              <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-muted">
-                <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
-              </div>
-            )}
-          </div>
-        </div>
+        <CanvasProjectLoadOverlay
+          loadState={canvasProjectLoadState}
+          onRetry={() => setCanvasProjectLoadAttempt((count) => count + 1)}
+          onReload={() => window.location.reload()}
+        />
       ) : null}
     </div>
   );

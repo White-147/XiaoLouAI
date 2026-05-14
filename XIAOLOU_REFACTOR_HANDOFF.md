@@ -9,7 +9,7 @@
 
 ```text
 Phase: L frontend-design-constraint-governance
-Owner: L4 admin-console-split completed
+Owner: L5 create-and-assets-split completed
 Status: ready for explicit single owner selection
 Goal: future frontend work must follow high-cohesion, low-coupling,
 owner-scoped, documented slices.
@@ -29,29 +29,34 @@ Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-task-record.md
 
 ```text
 不要默认继续 runtime。
-等待用户明确选择 L5/L6/L7/L8 或其他单一 owner。
+等待用户明确选择 L6/L7/L8 或其他单一 owner。
 
 已完成：L2 shell-account-center-split、L3 playground-split、
-L4 admin-console-split。L4 只拆
+L4 admin-console-split、L5 create-and-assets-split。L5 只拆
+XIAOLOU-main/src/features/create-video/video-create/VideoCreate.tsx
+和 XIAOLOU-main/src/features/assets-media-projects/assets/Assets.tsx，
+并在同目录抽出 videoCapabilities、videoResultHelpers、
+VideoReferenceInputs、VideoResultsGrid、VideoTaskHistory、
+MultiReferenceSlots、assetDisplay、assetCache、AssetSidebar、AssetGrid、
+CanvasProjectSection、AssetFormModal、AssetPreviewModal。保持
+provider/runtime 行为、任务轮询、缩略图回填写入、资产/项目权限、
+API wrapper 和 UI 文案不变；未碰 runtime、backend、env/proxy/Caddy/scripts。
+
+L4 只拆
 XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/EnterpriseConsole.tsx
 和
 XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/SuperAdminConsole.tsx
 的 presentational/helper 面板，未碰 runtime、backend、env/proxy/Caddy/scripts。
 
 建议下一棒提示词：
-进行 L5 create-and-assets-split。只拆
-XIAOLOU-main/src/features/create-video/video-create/VideoCreate.tsx
-和 XIAOLOU-main/src/features/assets-media-projects/assets/Assets.tsx。
-先做无行为变化的 presentational/helper extraction：videoCapabilities、
-videoResultHelpers、VideoReferenceInputs、VideoResultsGrid、
-VideoTaskHistory、MultiReferenceSlots、assetDisplay、assetCache、
-AssetSidebar、AssetGrid、CanvasProjectSection、AssetFormModal、
-AssetPreviewModal。保持 provider/runtime 行为、任务轮询、缩略图回填写入、
-资产/项目权限、API wrapper 和 UI 文案不变；不要碰 runtime、backend、
-env/proxy/Caddy/scripts。
-
-如果想继续查 Canvas 而不改 runtime，则明确选择 L6
-canvas-app-shell-split-preflight。
+进行 L6 canvas-app-shell-split-preflight。只做 Canvas / Agent Canvas
+app shell 的拆分前自检和清单，不改 runtime 行为，不移动 runtime 代码。
+重点只读检查：
+XIAOLOU-main/src/features/canvas-agent-canvas/canvas/App.tsx
+XIAOLOU-main/src/features/canvas-agent-canvas/agent-canvas/App.tsx
+及其同目录 app shell 边界，输出 oversized split inventory、风险点、
+可拆 presentational/helper 名单和下一步单一 owner 提示词。不要碰
+backend、env/proxy/Caddy/scripts、provider adapters 或 Python sidecars。
 ```
 
 ## 历史归档

@@ -36,7 +36,7 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | --- | --- | --- |
 | 首页 / AI 工具箱 | `/home`、`/` | 能力卡片、工具箱入口、项目导航和账号中心；Layout/nav shell 与 L2 拆出的账号中心 helper 位于 `XIAOLOU-main/src/features/home/nav-layout/`。 |
 | 图片创作 | `/create/image` | 前端位于 `XIAOLOU-main/src/features/create-image/image-create/`，支持参考图和素材库引用；Vertex 图片链路已接入真实 provider。 |
-| 视频创作 | `/create/video` | 前端位于 `XIAOLOU-main/src/features/create-video/video-create/`，保留队列和参数面；Vertex/Veo 视频 adapter 待接入。 |
+| 视频创作 | `/create/video` | 前端位于 `XIAOLOU-main/src/features/create-video/video-create/`；L5 已拆出 videoCapabilities、videoResultHelpers、参考输入、结果网格、任务历史和多参考槽组件，provider/runtime 行为和任务轮询保持不变。 |
 | 剧本广场 | `/script-plaza` | 前端位于 `XIAOLOU-main/src/features/comic-production/script-plaza/`，用于从剧本模板创建漫剧项目。 |
 | 漫剧制作 | `/comic/*` | 前端位于 `XIAOLOU-main/src/features/comic-production/comic/`，包含全局设定、剧本、资产、分镜、视频、配音和预览。 |
 | 剧本拆解 | `/create/script-breakdown` | 前端位于 `XIAOLOU-main/src/features/toolbox/script-breakdown/`，通过 toolbox job API 排队。 |
@@ -45,7 +45,7 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | 25 格分镜 | `/create/storyboard-25` | 前端位于 `XIAOLOU-main/src/features/toolbox/storyboard-25/`，通过 toolbox job API 排队。 |
 | 原生画布 | `/create/canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/canvas/`，直接编译进主前端。 |
 | 智能体画布 | `/create/agent-canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`；K3 已对齐 ChuangJingAI 风格加载/权限/空画布入口，深层 local image edit、overlay、3D Director 后续单独迁移。 |
-| 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；资产引用选择器、同步入库控件和生成媒体占位 UI 也由 `assets-media-projects` owner 承载。 |
+| 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；L5 已拆出 assetDisplay、assetCache、侧栏、资产网格、画布项目区和表单/预览弹窗，资产/项目权限与 API wrapper 保持不变。 |
 | 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`；L4 已拆出 summary、成员创建/监管、账单和账号管理展示面板。 |
 | 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；L4 已拆出用量、平台账单、订单审核和平台账号面板，注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
 | Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；K2 已按 ChuangJingAI 重做为创意入口 composer，L3 已拆出 composer、会话抽屉、记忆抽屉和 display helper。 |
@@ -395,10 +395,10 @@ search/attachments unchanged. L4 has split the enterprise and super-admin
 consoles into admin/enterprise presentational panels while keeping .NET
 Payments/Admin contracts, wallet/order/account permissions and API wrappers
 unchanged. The project is not yet fully clean against the ideal high-cohesion
-target because several feature files remain oversized or orchestration-heavy,
-especially the Canvas runtime `App.tsx` files, `VideoCreate.tsx` and
-`Assets.tsx`. Treat these as explicit future split/refactor owners; do not do
-a broad rewrite while handling unrelated frontend parity work.
+target because several feature files remain oversized or orchestration-heavy.
+The Canvas runtime `App.tsx` files remain the primary explicit future owner.
+`VideoCreate.tsx` and `Assets.tsx` completed the L5 presentational/helper split;
+any further behavior-level cleanup must still wait for an explicit owner.
 
 The same pass fixed the frontend legacy dependency gate. The verifier now reads
 the actual guard implementation in `src/lib/api/control-api-client.ts` and
