@@ -441,7 +441,23 @@ shell are small, cohesive and sensitive to runtime ordering. L18 closed the
 frontend-design-constraint-governance phase: stop this L-series host-shell
 split by default, keep future work as explicit single-owner slices, and do not
 continue runtime cleanup by default; any runtime or behavior-level cleanup must
-still wait for an explicit owner.
+still wait for an explicit owner. M1 then completed the first post-L follow-up:
+frontend validation closeout passed lint, unit tests, build, the frontend
+legacy dependency gate, and `git diff --check`. M2 then completed a read-only
+Canvas/Agent runtime App preflight: Canvas runtime App is 3532 lines and Agent
+runtime App is 3854 lines. The safe runtime candidate is narrow pure-helper
+extraction only, such as mirroring Agent's `appOrchestration` pattern into
+Canvas; broad runtime work should not combine draft/project sync, generation/
+recovery, media import, pointer/selection/history or Agent action bridge in one
+owner. M3 then completed a read-only generation-service preflight: both Canvas
+and Agent host generation services are 533 lines. A later generation-service
+owner is reasonable only as a narrow task-lifecycle helper split covering
+polling, recovery, project-asset fallback, stray result lookup and task error
+description; keep capabilities and generate payload shaping out of that owner.
+M4 then completed docs-and-submit strategy confirmation: current tracked
+changes are documentation only, deploy/records remains ignored/local, and no
+additional code validation is required unless new business-code changes appear.
+The next recommended owner is docs-only submit preparation.
 
 The same pass fixed the frontend legacy dependency gate. The verifier now reads
 the actual guard implementation in `src/lib/api/control-api-client.ts` and
@@ -900,6 +916,8 @@ Read these first before continuing current work:
 - `XIAOLOU_REFACTOR_HANDOFF.md`
 - `deploy/records/xiaolouai-frontend-design-constraint-phase-plan.md`
 - `deploy/records/xiaolouai-frontend-design-constraint-task-record.md`
+- `deploy/records/xiaolouai-frontend-followup-phase-plan.md`
+- `deploy/records/xiaolouai-frontend-followup-task-record.md`
 - Historical only: `deploy/records/xiaolouai-root-handoff-stage-task-archive.md`
 
 The root handoff is a short PowerShell-readable baton. It keeps only the current

@@ -8,11 +8,11 @@
 ## 当前接棒
 
 ```text
-Phase: L frontend-design-constraint-governance
-Owner: L18 frontend-design-constraint-governance-closeout completed
-Status: phase closeout complete; wait for explicit single owner selection
-Goal: future frontend work must follow high-cohesion, low-coupling,
-owner-scoped, documented slices.
+Phase: M frontend-followup-after-host-shell-closeout
+Owner: M4 docs-and-submit-strategy-confirmation completed
+Status: M follow-up checks complete; ready for docs-only submit owner or another explicit single owner
+Goal: preserve L/M closeout context and do not reopen Canvas/Agent host-shell
+or runtime/generation work without an explicit new owner.
 ```
 
 ## 开始前先读
@@ -23,33 +23,69 @@ Get-Content .\README.md -Encoding UTF8
 Get-Content .\XIAOLOU_REFACTOR_HANDOFF.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-phase-plan.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-task-record.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-frontend-followup-phase-plan.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-frontend-followup-task-record.md -Encoding UTF8
 ```
 
-## 收口结论
+## M 阶段
+
+```text
+M 阶段来自 L18 closeout 后的四个明确后续部分：
+M1 frontend-validation-closeout: completed.
+M2 canvas-runtime-app-preflight: completed.
+M3 canvas-generation-service-preflight: completed.
+M4 docs-and-submit-strategy-confirmation: completed.
+
+M1 校验通过：
+npm --prefix .\XIAOLOU-main run lint
+npm --prefix .\XIAOLOU-main run test:unit
+npm --prefix .\XIAOLOU-main run build
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency
+git diff --check
+
+M1 结果：
+test:unit 19 files / 124 tests passed.
+build passed.
+legacy dependency gate status ok, blockers 0, warnings 0.
+git status --short --branch clean against main...origin/main after validation.
+deploy/records remains ignored by git and updated locally.
+
+M2 只读检查：
+Canvas runtime App.tsx: 3532 lines.
+Agent runtime App.tsx: 3854 lines.
+业务代码未改；只回写 handoff/project docs。
+结论：不要进入宽泛 runtime owner。runtime App 可拆点存在，但核心编排
+强耦合于 draft/project sync、generation/recovery、media import、viewport/
+pointer/selection、history 和 Agent action bridge。若以后明确选择 runtime
+owner，优先从 Canvas-only 纯 helper/appOrchestration mirror 这种低风险切片
+开始；否则继续 M3 generation service preflight。
+
+M3 只读检查：
+Canvas generation service: 533 lines.
+Agent generation service: 533 lines.
+业务代码未改；只回写 handoff/project docs。
+结论：可以考虑后续 generation service owner，但必须窄化为
+task lifecycle helper split，只覆盖重复的 polling/recovery/stray lookup
+与任务错误描述。不要把 capabilities 校验或 generateVideo payload shaping
+混进同一 owner。Canvas-only video capability preflight、Agent image batch
+resultUrls 和 Agent video succeeded-without-url error semantics 必须保留差异。
+
+M4 只读检查：
+README.md、XIAOLOU_REFACTOR_HANDOFF.md、deploy/records 下 L/M 记录已检查。
+git status --short --branch: main...origin/main, tracked changes only
+README.md and XIAOLOU_REFACTOR_HANDOFF.md.
+deploy/records is ignored by .gitignore and updated locally only.
+git diff --check passed; only CRLF warnings appeared.
+补校验建议：当前 tracked diff 是 docs-only，不需要重跑 lint/test/build；
+若后续出现业务代码变更，再跑完整验证入口。
+提交/PR 策略：默认不要 force-add deploy/records；提交 tracked docs only。
+```
+
+## L 阶段收口
 
 ```text
 L 系列 frontend-design-constraint-governance 已收口。
-
-已完成 owner：
-L2 shell-account-center-split
-L3 playground-split
-L4 admin-console-split
-L5 create-and-assets-split
-L6 canvas-app-shell-split-preflight
-L7 canvas-host-shell-helper-split
-L8 canvas-host-shell-service-builder-preflight
-L9 canvas-host-generation-service-split
-L10 canvas-host-asset-service-split
-L11 canvas-host-project-save-service-preflight
-L12 canvas-host-project-service-split
-L13 canvas-host-save-service-preflight
-L14 canvas-host-save-service-split
-L15 canvas-host-project-load-service-preflight
-L16 canvas-host-project-load-helper-split
-L17 canvas-host-shell-final-preflight
-L18 frontend-design-constraint-governance-closeout
-
-结论：停止继续拆 Canvas/Agent host shell。
+停止继续拆 Canvas/Agent host shell。
 CanvasCreate.tsx 与 AgentCanvasCreate.tsx 已缩到约 204/194 行，剩余职责是
 actor/project/theme 输入、mutable refs、context-ready resolver、service
 composition、同步 host services 注册、StrictMode cleanup、theme sync 和
@@ -58,34 +94,19 @@ render shell。这些职责属于宿主壳最后一层接线；继续拆 service
 mutable ref 最新值、projectId readiness 和 Canvas/Agent 差异。
 ```
 
-## 工作树状态
+## 下一步
 
 ```text
-当前 git status 显示 L 系列变更尚未提交：
-README.md
-XIAOLOU_REFACTOR_HANDOFF.md
-CanvasCreate.tsx
-AgentCanvasCreate.tsx
-以及同目录新增 generation/asset/project/save/project-load helper/service 文件。
-
-deploy/records 处于 ignored 目录；其中 phase/task record 已在本地回写 L18 closeout。
-```
-
-## 后续候选 Owner
-
-```text
-不要默认继续 runtime。
-等待用户明确选择一个单一 owner。
-
-明确候选：
-1. canvas-runtime-app-preflight：只读检查 Canvas/Agent runtime/App.tsx
-   的职责、风险和可拆 owner；不得默认修改 runtime。
-2. canvas-generation-service-preflight：只读检查已抽出的 generation service
-   是否需要继续按 polling/recovery/capabilities 拆分；不得默认改代码。
-3. frontend-validation-closeout：只读执行/汇总前端校验入口，确认 L 系列
-   工作树提交前风险。
-4. choose-new-product-area-owner：从 README 的功能入口中选择新的单一
-   product-area owner，继续按高内聚低耦合规则推进。
+建议下一棒：
+进行 N1 docs-only-submit-owner。目标是把当前 L/M 收口文档变更准备提交。
+先只读确认 git status --short --branch、git diff --stat、git diff --check；
+确认 tracked changes 仅 README.md 和 XIAOLOU_REFACTOR_HANDOFF.md，且
+deploy/records 继续作为 ignored/local 项目记录不 force-add。若用户明确要求
+提交，则只 stage README.md 和 XIAOLOU_REFACTOR_HANDOFF.md，建议 commit message:
+docs: close frontend follow-up preflights。若用户明确要求 PR，则在提交后 push
+并创建 draft PR。不要改业务代码；不要碰 Canvas/Agent runtime App、
+host shell/service/helper、backend、env/proxy/Caddy/scripts、provider adapters
+或 Python sidecars。
 ```
 
 ## 硬性约束指针
