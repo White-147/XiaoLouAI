@@ -1,43 +1,13 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { createPortal } from "react-dom";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  ArrowRight,
-  BookOpen,
-  Brain,
-  Building2,
-  ChevronLeft,
-  ChevronRight,
-  Eye,
-  EyeOff,
-  Film,
-  FlaskConical,
   FolderOpen,
-  HelpCircle,
-  House,
-  Image as ImageIcon,
-  KeyRound,
-  LayoutTemplate,
   LoaderCircle,
   LogIn,
-  LogOut,
-  Mic,
-  MonitorPlay,
-  Moon,
-  PlaySquare,
-  Settings,
   ShieldCheck,
   Sparkles,
-  Sun,
-  Trash2,
   UserPlus,
-  UserRound,
-  Users,
-  Video,
-  X,
-  type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
 import {
   getMe,
   listProjects,
@@ -72,11 +42,14 @@ import { setCurrentProjectId } from "../../../lib/session";
 import { useTheme } from "../../../lib/theme";
 import { cn } from "../../../lib/utils";
 import { removeGoogleLoginParams } from "../../../lib/google-auth";
+import { AuthModal, type AuthRegisterMode, type AuthTab, type ResetStep } from "./AuthModal";
+import { demoActors, navItems, type NavItem } from "./navItems";
+import { SidebarShell, type CollapsedNavFlyout } from "./SidebarShell";
+import { ProfileModal } from "./ProfileModal";
+
 // Lazy-load the canvas shells so users who never open them pay no parse cost.
 const CanvasCreate = lazy(() => import("../../canvas-agent-canvas/canvas/CanvasCreate"));
 const AgentCanvasCreate = lazy(() => import("../../canvas-agent-canvas/agent-canvas/AgentCanvasCreate"));
-import { ProfileModal } from "./ProfileModal";
-import { GoogleLoginButton } from "../../account-admin-enterprise/auth/GoogleLoginButton";
 
 const CanvasLoadingFallback = () => (
   <div className="flex h-full w-full items-center justify-center bg-[#f8f6f1] px-6 text-[#171512]">
@@ -93,145 +66,6 @@ const CanvasLoadingFallback = () => (
   </div>
 );
 
-type RoutePrefetchEntry = {
-  matches: (path: string) => boolean;
-  loaders: Array<() => Promise<unknown>>;
-};
-
-const pathMatches = (path: string, route: string) =>
-  path === route || path.startsWith(`${route}/`);
-
-const routePrefetchEntries: RoutePrefetchEntry[] = [
-  { matches: (path) => pathMatches(path, "/playground"), loaders: [() => import("../../playground/Playground")] },
-  { matches: (path) => pathMatches(path, "/enterprise"), loaders: [() => import("../../account-admin-enterprise/enterprise-console/EnterpriseConsole")] },
-  { matches: (path) => pathMatches(path, "/wallet/recharge"), loaders: [() => import("../../wallet-payments-api-center/wallet-recharge/WalletRecharge")] },
-  { matches: (path) => pathMatches(path, "/wallet/usage"), loaders: [() => import("../../wallet-payments-api-center/credit-usage/CreditUsage")] },
-  { matches: (path) => pathMatches(path, "/admin"), loaders: [() => import("../../account-admin-enterprise/super-admin-console/SuperAdminConsole")] },
-  { matches: (path) => pathMatches(path, "/script-plaza"), loaders: [() => import("../../comic-production/script-plaza/ScriptPlaza")] },
-  { matches: (path) => pathMatches(path, "/create/image"), loaders: [() => import("../../create-image/image-create/ImageCreate")] },
-  { matches: (path) => pathMatches(path, "/create/video"), loaders: [() => import("../../create-video/video-create/VideoCreate")] },
-  { matches: (path) => pathMatches(path, "/create/video-replace"), loaders: [() => import("../../toolbox/video-replace/VideoReplace")] },
-  { matches: (path) => pathMatches(path, "/create/script-breakdown"), loaders: [() => import("../../toolbox/script-breakdown/ScriptBreakdown")] },
-  { matches: (path) => pathMatches(path, "/create/video-reverse"), loaders: [() => import("../../toolbox/video-reverse/VideoReverse")] },
-  { matches: (path) => pathMatches(path, "/create/storyboard-25"), loaders: [() => import("../../toolbox/storyboard-25/StoryboardGrid25")] },
-  { matches: (path) => pathMatches(path, "/create/canvas"), loaders: [() => import("../../canvas-agent-canvas/canvas/CanvasCreate")] },
-  { matches: (path) => pathMatches(path, "/create/agent-canvas"), loaders: [() => import("../../canvas-agent-canvas/agent-canvas/AgentCanvasCreate")] },
-  {
-    matches: (path) => pathMatches(path, "/comic/global"),
-    loaders: [() => import("../../comic-production/comic/ComicShell"), () => import("../../comic-production/comic/GlobalSettings")],
-  },
-  {
-    matches: (path) => pathMatches(path, "/comic/script"),
-    loaders: [() => import("../../comic-production/comic/ComicShell"), () => import("../../comic-production/comic/StoryScript")],
-  },
-  {
-    matches: (path) => pathMatches(path, "/comic/entities"),
-    loaders: [() => import("../../comic-production/comic/ComicShell"), () => import("../../comic-production/comic/Entities")],
-  },
-  {
-    matches: (path) => pathMatches(path, "/comic/storyboard"),
-    loaders: [() => import("../../comic-production/comic/ComicShell"), () => import("../../comic-production/comic/Storyboard")],
-  },
-  {
-    matches: (path) => pathMatches(path, "/comic/video"),
-    loaders: [() => import("../../comic-production/comic/ComicShell"), () => import("../../comic-production/comic/Video")],
-  },
-  {
-    matches: (path) => pathMatches(path, "/comic/dubbing"),
-    loaders: [() => import("../../comic-production/comic/ComicShell"), () => import("../../comic-production/comic/Dubbing")],
-  },
-  {
-    matches: (path) => pathMatches(path, "/comic/preview"),
-    loaders: [() => import("../../comic-production/comic/ComicShell"), () => import("../../comic-production/comic/Preview")],
-  },
-  { matches: (path) => pathMatches(path, "/assets"), loaders: [() => import("../../assets-media-projects/assets/Assets")] },
-];
-
-const prefetchedRouteModules = new Set<string>();
-
-function prefetchRouteModule(path: string) {
-  if (typeof window === "undefined") return;
-
-  const pathname = path.split(/[?#]/, 1)[0] || "/";
-  const entry = routePrefetchEntries.find((candidate) => candidate.matches(pathname));
-  if (!entry || prefetchedRouteModules.has(pathname)) return;
-
-  prefetchedRouteModules.add(pathname);
-  void Promise.all(entry.loaders.map((load) => load())).catch(() => {
-    prefetchedRouteModules.delete(pathname);
-  });
-}
-
-type NavItem = {
-  name: string;
-  path?: string;
-  icon: LucideIcon;
-  children?: Array<{
-    name: string;
-    path: string;
-    icon: LucideIcon;
-  }>;
-};
-
-const navItems: NavItem[] = [
-  { name: "首页", path: "/home", icon: House },
-  { name: "创意入口", path: "/playground", icon: FlaskConical },
-  { name: "记忆中心", path: "/playground?panel=memory", icon: Brain },
-  { name: "创境天幕", path: "/create/canvas", icon: LayoutTemplate },
-  {
-    name: "通用创作",
-    icon: ImageIcon,
-    children: [
-      { name: "图片创作", path: "/create/image", icon: ImageIcon },
-      { name: "视频创作", path: "/create/video", icon: Video },
-    ],
-  },
-  {
-    name: "剧集创作",
-    icon: Film,
-    children: [
-      { name: "全局设定", path: "/comic/global", icon: Settings },
-      { name: "故事叙述", path: "/comic/script", icon: BookOpen },
-      { name: "角色场景资产", path: "/comic/entities", icon: Users },
-      { name: "分镜脚本", path: "/comic/storyboard", icon: LayoutTemplate },
-      { name: "分镜视频", path: "/comic/video", icon: PlaySquare },
-      { name: "配音与口型", path: "/comic/dubbing", icon: Mic },
-      { name: "成片预览", path: "/comic/preview", icon: MonitorPlay },
-    ],
-  },
-  { name: "项目管理", path: "/assets", icon: FolderOpen },
-];
-
-const demoActors = [
-  { id: "guest", label: "游客", detail: "浏览案例与注册入口，不可创建作品" },
-  { id: "user_personal_001", label: "注册用户", detail: "个人项目、个人资产与积分钱包" },
-  { id: "user_member_001", label: "企业成员", detail: "共享项目、企业资产与团队协作" },
-  { id: "user_demo_001", label: "企业管理员", detail: "成员管理、钱包扣费与共享权限" },
-  { id: "ops_demo_001", label: "运营管理员", detail: "平台配置、企业审核与订单管理" },
-  { id: SUPER_ADMIN_DEMO_ACTOR_ID, label: "超级管理员", detail: "系统配置、审计日志与风控能力" },
-];
-
-function AuthField(props: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-muted-foreground">{props.label}</span>
-      <input
-        type={props.type || "text"}
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        placeholder={props.placeholder}
-        className="h-10 w-full rounded-xl border border-border/70 bg-background/55 px-3.5 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-      />
-    </label>
-  );
-}
-
 export default function Layout() {
   const actorId = useActorId();
   const location = useLocation();
@@ -239,12 +73,7 @@ export default function Layout() {
   const isCanvasRoute = location.pathname === "/create/canvas";
   const isAgentCanvasRoute = location.pathname === "/create/agent-canvas";
   const [isCollapsed, setIsCollapsed] = useState(true);
-  /** 收起侧栏时，带子菜单项的浮层（不自动展开侧栏） */
-  const [collapsedNavFlyout, setCollapsedNavFlyout] = useState<{
-    parentName: string;
-    top: number;
-    left: number;
-  } | null>(null);
+  const [collapsedNavFlyout, setCollapsedNavFlyout] = useState<CollapsedNavFlyout | null>(null);
   const [theme, setTheme] = useTheme();
   const [isMoreModalOpen, setIsMoreModalOpen] = useState(false);
   const [isSettingsIdentityOpen, setIsSettingsIdentityOpen] = useState(false);
@@ -257,22 +86,18 @@ export default function Layout() {
     剧集创作: false,
     通用创作: false,
   });
-  /** 侧栏展开宽度约为原 272px 的 2/3；收起宽度略收，与整体比例协调 */
-  const sidebarWidthExpanded = 182;
-  const sidebarWidthCollapsed = 72;
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authTab, setAuthTab] = useState<"login" | "register" | "reset">("login");
-  const [authRegisterMode, setAuthRegisterMode] = useState<"personal" | "enterprise_admin">("personal");
+  const [authTab, setAuthTab] = useState<AuthTab>("login");
+  const [authRegisterMode, setAuthRegisterMode] = useState<AuthRegisterMode>("personal");
   const [authPending, setAuthPending] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [knownActorsVer, setKnownActorsVer] = useState(0);
-  // Canvas mounting policy: canvas shells are mounted only for their routes.
   const hasMountedCanvas = isCanvasRoute;
   const hasMountedAgentCanvas = isAgentCanvasRoute;
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
-  const [resetStep, setResetStep] = useState<"request" | "complete">("request");
+  const [resetStep, setResetStep] = useState<ResetStep>("request");
   const [resetForm, setResetForm] = useState({
     email: "",
     resetToken: "",
@@ -280,8 +105,6 @@ export default function Layout() {
     confirmPassword: "",
   });
 
-  // True only for localhost / 127.0.0.1 / ::1 — false on every real external domain
-  // or LAN IP. Stable for the lifetime of the page (hostname never changes).
   const isLoopback = typeof window !== "undefined" && isLocalLoopbackAccess();
 
   const visibleDemoActors = useMemo(() => {
@@ -445,7 +268,6 @@ export default function Layout() {
     permissionContext?.permissions.canCreateProject === true ||
     (isLoopback && actorId === SUPER_ADMIN_DEMO_ACTOR_ID) ||
     permissionContext?.platformRole === "super_admin";
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const recentActors = useMemo(
     () => getKnownActors().filter((item) => !demoActors.some((actor) => actor.id === item.id)),
     [knownActorsVer, actorId],
@@ -480,13 +302,13 @@ export default function Layout() {
 
   useEffect(() => {
     if (!collapsedNavFlyout) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
       const panel = document.getElementById("sidebar-collapsed-nav-flyout");
       if (panel?.contains(target)) return;
       const triggers = document.querySelectorAll("[data-sidebar-flyout-trigger]");
-      for (const el of triggers) {
-        if (el.contains(target)) return;
+      for (const element of triggers) {
+        if (element.contains(target)) return;
       }
       setCollapsedNavFlyout(null);
     };
@@ -496,8 +318,8 @@ export default function Layout() {
 
   useEffect(() => {
     if (!collapsedNavFlyout) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCollapsedNavFlyout(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCollapsedNavFlyout(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -745,930 +567,102 @@ export default function Layout() {
     }
   };
 
+  const openAuthModal = () => {
+    setAuthError(null);
+    setIsAuthModalOpen(true);
+  };
+
+  const openLoginModal = () => {
+    setAuthTab("login");
+    setAuthError(null);
+    setIsAuthModalOpen(true);
+  };
+
+  const openRegisterModal = () => {
+    setIsMoreModalOpen(false);
+    setAuthTab("register");
+    setAuthError(null);
+    setIsAuthModalOpen(true);
+  };
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
-      <motion.aside
-        initial={false}
-        animate={{ width: isCollapsed ? sidebarWidthCollapsed : sidebarWidthExpanded }}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="relative z-20 flex h-full shrink-0 flex-col border-r border-border bg-card/50 backdrop-blur-sm"
-      >
-        <div className="flex h-16 items-center overflow-hidden border-b border-border">
-          {/* paddingLeft animates in sync with sidebar width — avoids the instant jump that justify-center causes */}
-          <motion.div
-            animate={{ paddingLeft: isCollapsed ? 20 : 12 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="flex flex-1 items-center gap-3 overflow-hidden"
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-transparent">
-              <img
-                src="/chuangjing-logo-shell.png"
-                alt="创境AI Logo"
-                className="h-8 w-8 object-contain"
-              />
-            </div>
-            <AnimatePresence>
-              {!isCollapsed ? (
-                <motion.span
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.18 }}
-                  className="whitespace-nowrap text-lg font-semibold tracking-tight text-foreground"
-                >
-                  创境AI
-                </motion.span>
-              ) : null}
-            </AnimatePresence>
-          </motion.div>
+      <SidebarShell
+        actorId={actorId}
+        isCollapsed={isCollapsed}
+        setIsCollapsed={setIsCollapsed}
+        collapsedNavFlyout={collapsedNavFlyout}
+        setCollapsedNavFlyout={setCollapsedNavFlyout}
+        visibleNavItems={visibleNavItems}
+        expandedMenus={expandedMenus}
+        setExpandedMenus={setExpandedMenus}
+        handleGuardedNavigate={handleGuardedNavigate}
+        permissionContext={permissionContext}
+        loadingAccount={loadingAccount}
+        isDark={isDark}
+        themeToggleLabel={themeToggleLabel}
+        onToggleTheme={() => setTheme((currentTheme) => (currentTheme === "dark" ? "light" : "dark"))}
+        isMoreModalOpen={isMoreModalOpen}
+        setIsMoreModalOpen={setIsMoreModalOpen}
+        isSettingsIdentityOpen={isSettingsIdentityOpen}
+        setIsSettingsIdentityOpen={setIsSettingsIdentityOpen}
+        settingsMenuRef={settingsMenuRef}
+        canOpenManagementPanel={canOpenManagementPanel}
+        isLoopback={isLoopback}
+        visibleDemoActors={visibleDemoActors}
+        recentActors={recentActors}
+        onOpenProfile={() => setIsProfileModalOpen(true)}
+        onOpenAuth={openAuthModal}
+        onOpenLogin={openLoginModal}
+        onOpenRegister={openRegisterModal}
+        onOpenManagementPanel={() =>
+          navigate(permissionContext?.platformRole === "super_admin" ? "/admin" : "/enterprise")
+        }
+        onLogout={handleLogout}
+        onSwitchActor={(nextActorId) => void handleSwitchActor(nextActorId)}
+        onRecentActorLoginNeeded={(emailGuess) => {
+          setLoginForm({ email: emailGuess, password: "" });
+          setAuthTab("login");
+          setAuthError(null);
+          setIsMoreModalOpen(false);
+          setIsAuthModalOpen(true);
+        }}
+        onRemoveKnownActor={(nextActorId) => {
+          removeKnownActor(nextActorId);
+          setKnownActorsVer((value) => value + 1);
+        }}
+      />
 
-          <button
-            type="button"
-            aria-label={isCollapsed ? "展开侧边栏" : "收起侧边栏"}
-            onClick={() => setIsCollapsed((prev) => !prev)}
-            className="absolute -right-3 top-5 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-secondary transition-colors hover:bg-accent"
-          >
-            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          </button>
-        </div>
-
-        <div
-          className="flex-1 space-y-1 overflow-y-auto px-2 py-4 custom-scrollbar"
-          onScroll={() => {
-            if (collapsedNavFlyout) setCollapsedNavFlyout(null);
-          }}
-        >
-          {visibleNavItems.map((item) => (
-            <div key={item.name}>
-              {item.children ? (
-                <div>
-                  <button
-                    type="button"
-                    data-sidebar-flyout-trigger
-                    aria-expanded={
-                      isCollapsed
-                        ? collapsedNavFlyout?.parentName === item.name
-                        : Boolean(expandedMenus[item.name])
-                    }
-                    onClick={(e) => {
-                      if (isCollapsed) {
-                        const el = e.currentTarget;
-                        const r = el.getBoundingClientRect();
-                        setCollapsedNavFlyout((prev) =>
-                          prev?.parentName === item.name ? null : { parentName: item.name, top: r.top, left: r.right + 8 },
-                        );
-                      } else {
-                        setExpandedMenus((prev) => ({ ...prev, [item.name]: !prev[item.name] }));
-                      }
-                    }}
-                    className={cn(
-                      "flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                      isCollapsed ? "justify-center" : "justify-start text-left",
-                      !isCollapsed && expandedMenus[item.name] ? "text-foreground" : "text-muted-foreground",
-                    )}
-                  >
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                      <item.icon className="h-5 w-5" />
-                    </span>
-                    {!isCollapsed ? (
-                      <span className="min-w-0 flex-1 text-left leading-snug">{item.name}</span>
-                    ) : null}
-                  </button>
-
-                  <AnimatePresence>
-                    {!isCollapsed && expandedMenus[item.name] ? (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="ml-3 mt-1 space-y-1 overflow-hidden border-l border-border pl-3"
-                      >
-                        {item.children.map((child) => (
-                          <NavLink
-                            key={child.path}
-                            to={child.path}
-                            end
-                            onMouseEnter={() => prefetchRouteModule(child.path)}
-                            onFocus={() => prefetchRouteModule(child.path)}
-                            onClick={(event) => {
-                              void handleGuardedNavigate(child.path, event);
-                            }}
-                            className={({ isActive }) =>
-                              cn(
-                                "flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors",
-                                isActive
-                                  ? "bg-primary/10 font-medium text-primary"
-                                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                              )
-                            }
-                          >
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                              <child.icon className="h-4 w-4" />
-                            </span>
-                            <span className="min-w-0 flex-1 text-left leading-snug">{child.name}</span>
-                          </NavLink>
-                        ))}
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-                </div>
-              ) : (
-                <NavLink
-                  to={item.path || "/home"}
-                  onMouseEnter={() => item.path && prefetchRouteModule(item.path)}
-                  onFocus={() => item.path && prefetchRouteModule(item.path)}
-                  onClick={(event) => item.path && void handleGuardedNavigate(item.path, event)}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors",
-                      isCollapsed ? "justify-center" : "justify-start text-left",
-                      isActive
-                        ? "bg-primary/10 font-medium text-primary"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    )
-                  }
-                  title={isCollapsed ? item.name : undefined}
-                >
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                    <item.icon className="h-5 w-5" />
-                  </span>
-                  {!isCollapsed ? (
-                    <span className="min-w-0 flex-1 text-left leading-snug">{item.name}</span>
-                  ) : null}
-                </NavLink>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div className="border-t border-border p-3">
-          {permissionContext && permissionContext.platformRole !== "guest" ? (
-            <div className="mb-3">
-              <button
-                type="button"
-                title="账号与个人资料"
-                onClick={() => setIsProfileModalOpen(true)}
-                className={cn(
-                  "w-full rounded-xl border border-border/70 bg-background/40 transition-all hover:border-primary/30 hover:bg-background/60",
-                  isCollapsed
-                    ? "flex flex-col items-center gap-1.5 p-2"
-                    : "flex items-center gap-3 px-2.5 py-2.5",
-                )}
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-primary/20 bg-primary/10 text-primary">
-                  {permissionContext.actor.avatar ? (
-                    <img src={permissionContext.actor.avatar} alt="Avatar" className="h-full w-full object-cover" />
-                  ) : (
-                    <UserRound className="h-4 w-4" />
-                  )}
-                </div>
-                {!isCollapsed && (
-                  <div className="min-w-0 flex-1 text-left">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {permissionContext.actor.displayName}
-                    </p>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-                      <span className="text-[10px] text-muted-foreground">Active</span>
-                    </div>
-                  </div>
-                )}
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setAuthError(null);
-                setIsAuthModalOpen(true);
-              }}
-              className={cn(
-                "group mb-3 w-full rounded-xl border text-left transition-all duration-200",
-                "border-primary/40 bg-gradient-to-r from-primary/10 to-primary/5",
-                "hover:border-primary/60 hover:from-primary/20 hover:to-primary/10 hover:shadow-sm hover:shadow-primary/10",
-                "active:scale-[0.98]",
-                isCollapsed ? "p-2" : "px-3 py-2.5",
-              )}
-              title={isCollapsed ? "登录 / 注册" : undefined}
-            >
-              {!isCollapsed ? (
-                loadingAccount ? (
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15">
-                      <LoaderCircle className="h-4 w-4 animate-spin text-primary/70" />
-                    </div>
-                    <p className="text-sm text-muted-foreground">同步中...</p>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2.5">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary transition-colors group-hover:bg-primary/25">
-                      <LogIn className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-primary">登录 / 注册</p>
-                      <p className="truncate text-[11px] leading-tight text-muted-foreground">解锁全部功能</p>
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div className="flex items-center justify-center">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary transition-colors group-hover:bg-primary/25">
-                    <LogIn className="h-4 w-4" />
-                  </div>
-                </div>
-              )}
-            </button>
-          )}
-
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={() => setTheme((currentTheme) => (currentTheme === "dark" ? "light" : "dark"))}
-              className={cn(
-                "flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
-                isCollapsed ? "justify-center" : "justify-start",
-              )}
-              title={isCollapsed ? themeToggleLabel : undefined}
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-              </span>
-              {!isCollapsed ? (
-                <span className="min-w-0 flex-1 text-left leading-snug">{themeToggleLabel}</span>
-              ) : null}
-            </button>
-            <div ref={settingsMenuRef} className="relative">
-              <button
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded={isMoreModalOpen}
-                onClick={() => setIsMoreModalOpen((open) => !open)}
-                className={cn(
-                  "flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
-                  isMoreModalOpen ? "bg-accent text-accent-foreground" : "",
-                  isCollapsed ? "justify-center" : "justify-start",
-                )}
-                title={isCollapsed ? "设置" : undefined}
-              >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                  <Settings className="h-5 w-5" />
-                </span>
-                {!isCollapsed ? <span className="min-w-0 flex-1 text-left leading-snug">设置</span> : null}
-              </button>
-
-              <AnimatePresence>
-                {isMoreModalOpen ? (
-                  <motion.div
-                    role="menu"
-                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 8, scale: 0.98 }}
-                    transition={{ duration: 0.16 }}
-                    className={cn(
-                      "absolute bottom-full left-0 z-[120] mb-2 max-w-[calc(100vw-24px)] rounded-xl border border-border bg-card p-2 shadow-2xl transition-[width] duration-200 ease-out",
-                      isSettingsIdentityOpen ? "w-80" : "w-48",
-                    )}
-                  >
-                    <div className="space-y-1">
-                      <ProfileMenuItem
-                        icon={UserRound}
-                        label="账号与个人资料"
-                        onClick={() => {
-                          setIsMoreModalOpen(false);
-                          if (permissionContext && permissionContext.platformRole !== "guest") {
-                            setIsProfileModalOpen(true);
-                          } else {
-                            setAuthTab("login");
-                            setAuthError(null);
-                            setIsAuthModalOpen(true);
-                          }
-                        }}
-                      />
-
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => setIsSettingsIdentityOpen((open) => !open)}
-                        className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      >
-                        <Users className="h-4 w-4 shrink-0" />
-                        <span className="flex min-w-0 items-center gap-0.5">
-                          <span className="truncate">身份切换</span>
-                          <ChevronRight
-                            className={cn(
-                              "h-4 w-4 shrink-0 transition-transform",
-                              isSettingsIdentityOpen ? "rotate-90" : "",
-                            )}
-                          />
-                        </span>
-                      </button>
-
-                      <AnimatePresence initial={false}>
-                        {isSettingsIdentityOpen ? (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="my-1 max-h-72 overflow-y-auto rounded-lg border border-border/70 bg-background/40 p-2 custom-scrollbar">
-                              <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                                <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                                  可用身份
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsMoreModalOpen(false);
-                                    setAuthTab("register");
-                                    setAuthError(null);
-                                    setIsAuthModalOpen(true);
-                                  }}
-                                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
-                                >
-                                  <UserPlus className="h-3.5 w-3.5" />
-                                  注册账号
-                                </button>
-                              </div>
-
-                              {isLoopback ? (
-                                <div className="space-y-1">
-                                  {visibleDemoActors.map((actor) => (
-                                    <button
-                                      key={actor.id}
-                                      type="button"
-                                      onClick={() => void handleSwitchActor(actor.id)}
-                                      className={cn(
-                                        "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
-                                        actorId === actor.id
-                                          ? "bg-primary/10 text-primary"
-                                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                                      )}
-                                    >
-                                      <UserRound className="h-4 w-4 shrink-0" />
-                                      <span className="min-w-0 flex-1">
-                                        <span className="block truncate font-medium">{actor.label}</span>
-                                        <span className="block truncate text-xs opacity-75">{actor.detail}</span>
-                                      </span>
-                                      {actorId === actor.id ? (
-                                        <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium">
-                                          当前
-                                        </span>
-                                      ) : null}
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : null}
-
-                              {recentActors.length ? (
-                                <div className={cn("space-y-1", isLoopback ? "mt-2 border-t border-border/60 pt-2" : "")}>
-                                  {recentActors.map((actor) => {
-                                    const isActive = actorId === actor.id;
-                                    const hasToken = !!actor.token;
-                                    return (
-                                      <div key={actor.id} className="group relative">
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            if (isActive) return;
-                                            if (hasToken) {
-                                              void handleSwitchActor(actor.id);
-                                            } else {
-                                              const emailGuess = actor.detail?.includes("@") ? actor.detail : "";
-                                              setLoginForm({ email: emailGuess, password: "" });
-                                              setAuthTab("login");
-                                              setAuthError(null);
-                                              setIsMoreModalOpen(false);
-                                              setIsAuthModalOpen(true);
-                                            }
-                                          }}
-                                          className={cn(
-                                            "flex w-full items-center gap-2 rounded-md py-2 pl-2.5 pr-8 text-left text-sm transition-colors",
-                                            isActive
-                                              ? "bg-primary/10 text-primary"
-                                              : hasToken
-                                                ? "text-muted-foreground hover:bg-accent hover:text-foreground"
-                                                : "text-muted-foreground/75 hover:bg-accent",
-                                          )}
-                                        >
-                                          <UserRound className="h-4 w-4 shrink-0" />
-                                          <span className="min-w-0 flex-1">
-                                            <span className="block truncate font-medium">{actor.label}</span>
-                                            <span className="block truncate text-xs opacity-75">
-                                              {actor.detail || (hasToken ? "可快速切换" : "需重新登录")}
-                                            </span>
-                                          </span>
-                                          {!isActive ? (
-                                            hasToken ? (
-                                              <ArrowRight className="h-4 w-4 shrink-0 opacity-45" />
-                                            ) : (
-                                              <LogIn className="h-4 w-4 shrink-0 text-amber-500/70" />
-                                            )
-                                          ) : null}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          title="移除此账号记录"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            removeKnownActor(actor.id);
-                                            setKnownActorsVer((value) => value + 1);
-                                          }}
-                                          className="absolute right-1.5 top-1.5 rounded-md p-1.5 text-muted-foreground/40 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                                        >
-                                          <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : !isLoopback ? (
-                                <div className="rounded-md border border-dashed border-border/70 px-3 py-4 text-center text-sm text-muted-foreground">
-                                  暂无已记录的账号
-                                </div>
-                              ) : null}
-                            </div>
-                          </motion.div>
-                        ) : null}
-                      </AnimatePresence>
-
-                      {canOpenManagementPanel ? (
-                        <ProfileMenuItem
-                          icon={Building2}
-                          label="管理面板"
-                          onClick={() => {
-                            setIsMoreModalOpen(false);
-                            navigate(permissionContext?.platformRole === "super_admin" ? "/admin" : "/enterprise");
-                          }}
-                        />
-                      ) : null}
-                      <ProfileMenuItem icon={LogOut} label="退出登录" danger onClick={handleLogout} />
-                    </div>
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-            </div>
-          </div>
-        </div>
-      </motion.aside>
-
-      <AnimatePresence>
-        {isAuthModalOpen ? (
-          <div
-            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-            onClick={() => setIsAuthModalOpen(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 16 }}
-              transition={{ duration: 0.2 }}
-              onClick={(e) => e.stopPropagation()}
-              className="mx-4 w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
-            >
-              <div className="relative border-b border-border px-6 pt-6">
-                <div className="mb-5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary">
-                      <Film className="h-5 w-5 text-primary-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-base font-semibold text-foreground">欢迎来到小楼</p>
-                      <p className="text-xs text-muted-foreground">AI 漫剧创作平台</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label="关闭"
-                    onClick={() => setIsAuthModalOpen(false)}
-                    className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-                <div className="flex">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthTab("login");
-                      setAuthError(null);
-                      setAuthNotice(null);
-                    }}
-                    className={cn(
-                      "flex-1 border-b-2 pb-3 text-sm font-medium transition-colors",
-                      authTab === "login" || authTab === "reset"
-                        ? "border-primary text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    登录
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthTab("register");
-                      setAuthError(null);
-                      setAuthNotice(null);
-                    }}
-                    className={cn(
-                      "flex-1 border-b-2 pb-3 text-sm font-medium transition-colors",
-                      authTab === "register"
-                        ? "border-primary text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    注册
-                  </button>
-                </div>
-              </div>
-
-              <div className="max-h-[70vh] overflow-y-auto p-6 custom-scrollbar">
-                {authTab === "login" ? (
-                  <div className="space-y-4">
-                    <GoogleLoginButton returnTo={location.pathname} />
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span className="h-px flex-1 bg-border" />
-                      <span>或使用邮箱登录</span>
-                      <span className="h-px flex-1 bg-border" />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">邮箱</label>
-                      <input
-                        type="email"
-                        value={loginForm.email}
-                        onChange={(e) => setLoginForm((prev) => ({ ...prev, email: e.target.value }))}
-                        placeholder="请输入邮箱地址"
-                        className="h-10 w-full rounded-xl border border-border/70 bg-background/55 px-3.5 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">密码</label>
-                      <div className="relative">
-                        <input
-                          type={showPassword ? "text" : "password"}
-                          value={loginForm.password}
-                          onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
-                          placeholder="请输入密码"
-                          className="h-10 w-full rounded-xl border border-border/70 bg-background/55 px-3.5 pr-10 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword((p) => !p)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
-                        >
-                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const email = loginForm.email.trim();
-                          setResetForm((current) => ({ ...current, email }));
-                          setResetStep("request");
-                          setAuthTab("reset");
-                          setAuthError(null);
-                          setAuthNotice(null);
-                        }}
-                        className="text-xs font-medium text-primary transition hover:text-primary/80"
-                      >
-                        忘记密码？
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={authPending || !loginForm.email || !loginForm.password}
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-                      onClick={handleLogin}
-                    >
-                      {authPending ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <LogIn className="h-4 w-4" />
-                      )}
-                      {authPending ? "登录中…" : "登录"}
-                    </button>
-
-                    {authError && authTab === "login" ? (
-                      <div className="rounded-xl border border-amber-600/40 bg-amber-500/15 px-4 py-3 text-xs leading-5 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
-                        {authError}
-                      </div>
-                    ) : null}
-
-                    {authNotice && authTab === "login" ? (
-                      <div className="rounded-xl border border-primary/20 bg-primary/8 px-4 py-3 text-xs leading-5 text-primary">
-                        {authNotice}
-                      </div>
-                    ) : null}
-
-                    <p className="text-center text-xs text-muted-foreground">
-                      还没有账号？
-                      <button
-                        type="button"
-                        onClick={() => { setAuthTab("register"); setAuthError(null); setAuthNotice(null); }}
-                        className="ml-1 text-primary transition hover:text-primary/80"
-                      >
-                        立即注册
-                      </button>
-                    </p>
-                  </div>
-                ) : authTab === "reset" ? (
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="text-base font-semibold text-foreground">重置密码</h3>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        输入账号邮箱后获取重置 token，再设置新密码。
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">邮箱</label>
-                      <input
-                        type="email"
-                        value={resetForm.email}
-                        onChange={(event) =>
-                          setResetForm((current) => ({ ...current, email: event.target.value }))
-                        }
-                        placeholder="name@example.com"
-                        className="h-10 w-full rounded-xl border border-border/70 bg-background/55 px-3.5 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                      />
-                    </div>
-
-                    {resetStep === "complete" ? (
-                      <div className="space-y-3">
-                        <div>
-                          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">重置 token</label>
-                          <input
-                            value={resetForm.resetToken}
-                            onChange={(event) =>
-                              setResetForm((current) => ({ ...current, resetToken: event.target.value }))
-                            }
-                            className="h-10 w-full rounded-xl border border-border/70 bg-background/55 px-3.5 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                            placeholder="请输入重置 token"
-                          />
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <div>
-                            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">新密码</label>
-                            <input
-                              type="password"
-                              value={resetForm.newPassword}
-                              onChange={(event) =>
-                                setResetForm((current) => ({ ...current, newPassword: event.target.value }))
-                              }
-                              className="h-10 w-full rounded-xl border border-border/70 bg-background/55 px-3.5 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                              placeholder="设置新密码"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">确认新密码</label>
-                            <input
-                              type="password"
-                              value={resetForm.confirmPassword}
-                              onChange={(event) =>
-                                setResetForm((current) => ({ ...current, confirmPassword: event.target.value }))
-                              }
-                              className="h-10 w-full rounded-xl border border-border/70 bg-background/55 px-3.5 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                              placeholder="再次输入新密码"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {authError && authTab === "reset" ? (
-                      <div className="rounded-xl border border-rose-600/40 bg-rose-500/15 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
-                        {authError}
-                      </div>
-                    ) : null}
-
-                    {authNotice && authTab === "reset" ? (
-                      <div className="rounded-xl border border-primary/20 bg-primary/8 px-4 py-3 text-xs leading-5 text-primary">
-                        {authNotice}
-                      </div>
-                    ) : null}
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        resetStep === "request"
-                          ? void handleRequestPasswordReset()
-                          : void handleCompletePasswordReset()
-                      }
-                      disabled={
-                        authPending ||
-                        !resetForm.email.trim() ||
-                        (resetStep === "complete" &&
-                          (!resetForm.resetToken.trim() ||
-                            !resetForm.newPassword.trim() ||
-                            !resetForm.confirmPassword.trim()))
-                      }
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-                    >
-                      {authPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                      {resetStep === "request" ? "发送重置请求" : "保存新密码"}
-                    </button>
-
-                    <p className="text-center text-xs text-muted-foreground">
-                      想起密码了？
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthTab("login");
-                          setAuthError(null);
-                          setAuthNotice(null);
-                        }}
-                        className="ml-1 text-primary transition hover:text-primary/80"
-                      >
-                        返回登录
-                      </button>
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <GoogleLoginButton
-                      returnTo={location.pathname}
-                      label="使用 Google 注册/登录个人账号"
-                    />
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span className="h-px flex-1 bg-border" />
-                      <span>或填写资料注册</span>
-                      <span className="h-px flex-1 bg-border" />
-                    </div>
-                    <div className="flex h-10 items-center rounded-xl border border-border/70 bg-background/40 p-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthRegisterMode("personal");
-                          setAuthError(null);
-                        }}
-                        className={cn(
-                          "flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition",
-                          authRegisterMode === "personal"
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        个人用户
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthRegisterMode("enterprise_admin");
-                          setAuthError(null);
-                        }}
-                        className={cn(
-                          "flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition",
-                          authRegisterMode === "enterprise_admin"
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        企业管理员
-                      </button>
-                    </div>
-
-                    <div className="rounded-xl border border-primary/20 bg-primary/8 px-4 py-3 text-xs leading-5 text-primary">
-                      {authRegisterMode === "personal"
-                        ? "注册后自动开通积分钱包与创作权限。"
-                        : "注册后自动创建企业组织、企业积分钱包和管理员身份。"}
-                    </div>
-
-                    {authRegisterMode === "personal" ? (
-                      <div className="space-y-3">
-                        <AuthField
-                          label="昵称"
-                          value={personalForm.displayName}
-                          onChange={(v) => setPersonalForm((p) => ({ ...p, displayName: v }))}
-                          placeholder="请输入昵称"
-                        />
-                        <AuthField
-                          label="邮箱"
-                          value={personalForm.email}
-                          onChange={(v) => setPersonalForm((p) => ({ ...p, email: v }))}
-                          type="email"
-                          placeholder="name@example.com"
-                        />
-                        <AuthField
-                          label="手机号（选填）"
-                          value={personalForm.phone || ""}
-                          onChange={(v) => setPersonalForm((p) => ({ ...p, phone: v }))}
-                          type="tel"
-                          placeholder="用于接收通知"
-                        />
-                        <AuthField
-                          label="密码"
-                          value={personalForm.password}
-                          onChange={(v) => setPersonalForm((p) => ({ ...p, password: v }))}
-                          type="password"
-                          placeholder="至少 8 位"
-                        />
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <AuthField
-                          label="企业名称"
-                          value={enterpriseForm.companyName}
-                          onChange={(v) => setEnterpriseForm((p) => ({ ...p, companyName: v }))}
-                          placeholder="请输入企业名称"
-                        />
-                        <div className="grid grid-cols-2 gap-3">
-                          <AuthField
-                            label="管理员姓名"
-                            value={enterpriseForm.adminName}
-                            onChange={(v) => setEnterpriseForm((p) => ({ ...p, adminName: v }))}
-                            placeholder="负责人姓名"
-                          />
-                          <AuthField
-                            label="手机号"
-                            value={enterpriseForm.phone || ""}
-                            onChange={(v) => setEnterpriseForm((p) => ({ ...p, phone: v }))}
-                            type="tel"
-                            placeholder="手机号"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <AuthField
-                            label="邮箱"
-                            value={enterpriseForm.email}
-                            onChange={(v) => setEnterpriseForm((p) => ({ ...p, email: v }))}
-                            type="email"
-                            placeholder="admin@company.com"
-                          />
-                          <AuthField
-                            label="密码"
-                            value={enterpriseForm.password}
-                            onChange={(v) => setEnterpriseForm((p) => ({ ...p, password: v }))}
-                            type="password"
-                            placeholder="设置密码"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <AuthField
-                            label="信用代码（选填）"
-                            value={enterpriseForm.licenseNo || ""}
-                            onChange={(v) => setEnterpriseForm((p) => ({ ...p, licenseNo: v }))}
-                            placeholder="统一社会信用代码"
-                          />
-                          <AuthField
-                            label="团队规模（选填）"
-                            value={enterpriseForm.teamSize || ""}
-                            onChange={(v) => setEnterpriseForm((p) => ({ ...p, teamSize: v }))}
-                            placeholder="如 11-50"
-                          />
-                        </div>
-                        <AuthField
-                          label="行业（选填）"
-                          value={enterpriseForm.industry || ""}
-                          onChange={(v) => setEnterpriseForm((p) => ({ ...p, industry: v }))}
-                          placeholder="如 影视、动漫、广告"
-                        />
-                      </div>
-                    )}
-
-                    {authError && authTab === "register" ? (
-                      <div className="rounded-xl border border-rose-600/40 bg-rose-500/15 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
-                        {authError}
-                      </div>
-                    ) : null}
-
-                    <button
-                      type="button"
-                      onClick={() => void handleRegister()}
-                      disabled={authPending}
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {authPending ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <ArrowRight className="h-4 w-4" />
-                      )}
-                      {authRegisterMode === "personal" ? "注册个人用户" : "注册企业管理员"}
-                    </button>
-
-                    <p className="text-center text-xs text-muted-foreground">
-                      已有账号？
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthTab("login");
-                          setAuthError(null);
-                        }}
-                        className="ml-1 text-primary transition hover:underline"
-                      >
-                        立即登录
-                      </button>
-                    </p>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        ) : null}
-      </AnimatePresence>
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        returnTo={location.pathname}
+        authTab={authTab}
+        setAuthTab={setAuthTab}
+        authRegisterMode={authRegisterMode}
+        setAuthRegisterMode={setAuthRegisterMode}
+        authPending={authPending}
+        authError={authError}
+        setAuthError={setAuthError}
+        authNotice={authNotice}
+        setAuthNotice={setAuthNotice}
+        showPassword={showPassword}
+        setShowPassword={setShowPassword}
+        loginForm={loginForm}
+        setLoginForm={setLoginForm}
+        resetStep={resetStep}
+        setResetStep={setResetStep}
+        resetForm={resetForm}
+        setResetForm={setResetForm}
+        personalForm={personalForm}
+        setPersonalForm={setPersonalForm}
+        enterpriseForm={enterpriseForm}
+        setEnterpriseForm={setEnterpriseForm}
+        onLogin={handleLogin}
+        onRequestPasswordReset={handleRequestPasswordReset}
+        onCompletePasswordReset={handleCompletePasswordReset}
+        onRegister={handleRegister}
+      />
 
       <ProfileModal
         isOpen={isProfileModalOpen}
@@ -1709,91 +703,61 @@ export default function Layout() {
             ) : loadingAccount ? (
               <CanvasLoadingFallback />
             ) : (
-              <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-background px-6 text-center">
-                <div className="max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
-                  <ShieldCheck className="mx-auto h-10 w-10 text-muted-foreground" />
-                  <h2 className="mt-4 text-lg font-semibold text-foreground">暂无智能画布权限</h2>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    当前账号没有创作项目权限，请切换到已注册账号。
+              <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-[#f7f5ef] px-6 text-center text-[#171512] dark:bg-background dark:text-foreground">
+                <div className="w-full max-w-[520px]">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#171512] text-[#f7f5ef] shadow-sm dark:bg-primary dark:text-primary-foreground">
+                    <ShieldCheck className="h-6 w-6" />
+                  </div>
+                  <div className="mt-5 text-xs font-semibold tracking-[0.24em] text-[#8f877a] dark:text-muted-foreground">
+                    AGENT CANVAS
+                  </div>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-normal">暂无智能画布权限</h2>
+                  <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[#6c655b] dark:text-muted-foreground">
+                    当前账号没有创作项目权限。登录或注册后即可进入智能画布，已有项目也会继续从项目库打开。
                   </p>
+                  <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthTab("login");
+                        setAuthError(null);
+                        setAuthNotice(null);
+                        setIsAuthModalOpen(true);
+                      }}
+                      className="inline-flex h-10 items-center gap-2 rounded-full bg-[#171512] px-4 text-sm font-medium text-[#f7f5ef] transition hover:bg-[#2b2924] dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90"
+                    >
+                      <LogIn className="h-4 w-4" />
+                      登录账号
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthTab("register");
+                        setAuthRegisterMode("personal");
+                        setAuthError(null);
+                        setAuthNotice(null);
+                        setIsAuthModalOpen(true);
+                      }}
+                      className="inline-flex h-10 items-center gap-2 rounded-full border border-[rgba(23,21,18,0.12)] bg-white px-4 text-sm font-medium text-[#171512] transition hover:bg-[#eeece6] dark:border-border dark:bg-card dark:text-foreground dark:hover:bg-accent"
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      注册创作账号
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/assets")}
+                      className="inline-flex h-10 items-center gap-2 rounded-full border border-transparent px-3 text-sm font-medium text-[#6c655b] transition hover:bg-white hover:text-[#171512] dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-foreground"
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      查看项目库
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
           </div>
         ) : null}
-
       </main>
-
-      {typeof document !== "undefined" &&
-        isCollapsed &&
-        collapsedNavFlyout &&
-        createPortal(
-          <div
-            id="sidebar-collapsed-nav-flyout"
-            role="menu"
-            aria-label="子菜单"
-            className="fixed z-[300] min-w-[220px] rounded-lg border border-border bg-card py-1 shadow-2xl"
-            style={{ top: collapsedNavFlyout.top, left: collapsedNavFlyout.left }}
-          >
-            {visibleNavItems
-              .find((i) => i.name === collapsedNavFlyout.parentName)
-              ?.children?.map((child) => (
-                <NavLink
-                  key={child.path}
-                  to={child.path}
-                  end
-                  onMouseEnter={() => prefetchRouteModule(child.path)}
-                  onFocus={() => prefetchRouteModule(child.path)}
-                  onClick={(event) => {
-                    setCollapsedNavFlyout(null);
-                    void handleGuardedNavigate(child.path, event);
-                  }}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
-                      isActive
-                        ? "bg-primary/10 font-medium text-primary"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    )
-                  }
-                >
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                    <child.icon className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0 flex-1 text-left leading-snug">{child.name}</span>
-                </NavLink>
-              ))}
-          </div>,
-          document.body,
-        )}
     </div>
-  );
-}
-
-function ProfileMenuItem({
-  icon: Icon,
-  label,
-  danger,
-  onClick,
-}: {
-  icon: typeof Settings;
-  label: string;
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
-        danger
-          ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
-    >
-      <Icon className="h-4 w-4 shrink-0" />
-      <span>{label}</span>
-    </button>
   );
 }

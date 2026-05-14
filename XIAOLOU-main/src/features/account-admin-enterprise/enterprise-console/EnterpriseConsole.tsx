@@ -5,6 +5,8 @@ import {
   CreditCard,
   KeyRound,
   LoaderCircle,
+  ReceiptText,
+  RefreshCw,
   Save,
   Search,
   ShieldCheck,
@@ -22,6 +24,7 @@ import {
   deleteOrganizationMemberAccount,
   getMe,
   getOrganizationWallet,
+  listWalletLedger,
   listOrganizationMembers,
   listProjects,
   type CreateOrganizationMemberInput,
@@ -30,6 +33,7 @@ import {
   type Project,
   type UpdateOrganizationMemberAccountInput,
   type Wallet as WalletInfo,
+  type WalletLedgerEntry,
   updateOrganizationMemberAccount,
 } from "./api/enterprise-console";
 import { rememberKnownActor, setCurrentActorId, useActorId } from "../../../lib/actor-session";
@@ -64,6 +68,28 @@ function billingPolicyLabel(policy: Project["billingPolicy"] | undefined) {
   return "企业扣费";
 }
 
+function ledgerEntryLabel(entry: WalletLedgerEntry) {
+  const labelMap: Record<string, string> = {
+    recharge: "充值入账",
+    grant: "额度发放",
+    freeze: "任务冻结",
+    settle: "任务结算",
+    refund: "积分退回",
+  };
+  return labelMap[entry.entryType] || entry.entryType.replace(/_/g, " ");
+}
+
+function ledgerReference(entry: WalletLedgerEntry) {
+  if (entry.orderId) return `订单 ${entry.orderId}`;
+  if (entry.projectId) return `项目 ${entry.projectId}`;
+  if (entry.sourceId) return `${entry.sourceType || "来源"} ${entry.sourceId}`;
+  return entry.sourceType || "--";
+}
+
+function formatSignedCredits(value: number) {
+  return `${value > 0 ? "+" : ""}${formatCredits(value)}`;
+}
+
 const defaultMemberForm: CreateOrganizationMemberInput = {
   displayName: "",
   email: "",
@@ -74,6 +100,7 @@ const defaultMemberForm: CreateOrganizationMemberInput = {
   canUseOrganizationWallet: true,
 };
 
+type MemberModule = "create" | "monitor" | "billing" | "accounts";
 type MemberSearchTarget = "monitor" | "accounts";
 
 type MemberAccountForm = {
@@ -133,10 +160,14 @@ export default function EnterpriseConsole() {
   const actorId = useActorId();
   const [me, setMe] = useState<PermissionContext | null>(null);
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
+  const [walletLedgerEntries, setWalletLedgerEntries] = useState<WalletLedgerEntry[]>([]);
+  const [walletLedgerLoading, setWalletLedgerLoading] = useState(false);
+  const [walletLedgerError, setWalletLedgerError] = useState<string | null>(null);
+  const [walletLedgerRefreshKey, setWalletLedgerRefreshKey] = useState(0);
   const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [memberModule, setMemberModule] = useState<"create" | "monitor" | "accounts">("create");
+  const [memberModule, setMemberModule] = useState<MemberModule>("create");
   const [memberForm, setMemberForm] = useState<CreateOrganizationMemberInput>(defaultMemberForm);
   const [creatingMember, setCreatingMember] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -199,6 +230,40 @@ export default function EnterpriseConsole() {
     };
   }, [actorId]);
 
+  useEffect(() => {
+    let active = true;
+    const walletId = wallet?.id;
+
+    if (!walletId) {
+      setWalletLedgerEntries([]);
+      setWalletLedgerError(null);
+      setWalletLedgerLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setWalletLedgerLoading(true);
+    setWalletLedgerError(null);
+    void listWalletLedger(walletId)
+      .then((response) => {
+        if (active) setWalletLedgerEntries(response.items);
+      })
+      .catch((error) => {
+        if (active) {
+          setWalletLedgerEntries([]);
+          setWalletLedgerError(error instanceof Error ? error.message : "企业账单加载失败，请稍后重试。");
+        }
+      })
+      .finally(() => {
+        if (active) setWalletLedgerLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [wallet?.id, walletLedgerRefreshKey]);
+
   const currentOrganization = useMemo(
     () => me?.organizations.find((item) => item.id === me.currentOrganizationId) ?? null,
     [me],
@@ -220,6 +285,17 @@ export default function EnterpriseConsole() {
       { today: 0, month: 0, pending: 0, total: 0 },
     );
   }, [members]);
+  const walletLedgerSummary = useMemo(() => {
+    return walletLedgerEntries.reduce(
+      (summary, entry) => {
+        if (entry.amount > 0) summary.income += entry.amount;
+        if (entry.amount < 0) summary.expense += Math.abs(entry.amount);
+        return summary;
+      },
+      { income: 0, expense: 0 },
+    );
+  }, [walletLedgerEntries]);
+  const recentWalletLedgerEntries = walletLedgerEntries.slice(0, 12);
 
   const monitorMembers = useMemo(
     () => members.filter((member) => memberMatchesSearch(member, monitorSearch)),
@@ -501,10 +577,10 @@ export default function EnterpriseConsole() {
               </div>
 
               <div className="mt-6 text-3xl font-semibold tracking-tight text-foreground">
-                {formatCredits(wallet?.creditsAvailable)}
+                {formatCredits(wallet?.availableCredits ?? wallet?.creditsAvailable)}
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                冻结 {formatCredits(wallet?.creditsFrozen)}
+                冻结 {formatCredits(wallet?.frozenCredits ?? wallet?.creditsFrozen)}
               </p>
 
               <div className="mt-6 space-y-3 rounded-2xl border border-border/70 bg-background/30 p-4 text-sm">
@@ -522,31 +598,50 @@ export default function EnterpriseConsole() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => navigate("/wallet/recharge")}
-                className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm font-medium text-primary transition-colors hover:bg-primary/15"
-              >
-                <CreditCard className="h-4 w-4" />
-                进入充值页
-              </button>
+              <div className="mt-6 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate("/wallet/recharge")}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm font-medium text-primary transition-colors hover:bg-primary/15"
+                >
+                  <CreditCard className="h-4 w-4" />
+                  进入充值页
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMemberModule("billing");
+                    window.requestAnimationFrame(() => {
+                      document.getElementById("enterprise-management-modules")?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      });
+                    });
+                  }}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-border/70 bg-background/55 px-4 py-3 text-sm font-medium text-foreground transition hover:bg-secondary/70"
+                >
+                  <ReceiptText className="h-4 w-4" />
+                  查看账单
+                </button>
+              </div>
             </aside>
           </div>
         </section>
 
-        <section className="glass-panel rounded-[28px] p-6">
+        <section id="enterprise-management-modules" className="glass-panel rounded-[28px] p-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex h-10 items-center rounded-xl border border-border/70 bg-background/35 p-1">
+            <div className="flex min-h-10 flex-wrap items-center rounded-xl border border-border/70 bg-background/35 p-1">
               {[
                 ["create", "成员创建"],
                 ["monitor", "成员监管"],
-                ["accounts", "员工账号管理"],
+                ["billing", "账单与流水"],
+                ["accounts", "账号管理"],
               ].map(([value, label]) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => {
-                    setMemberModule(value as "create" | "monitor" | "accounts");
+                    setMemberModule(value as MemberModule);
                     setFormError(null);
                     setAccountError(null);
                     setAccountHint(null);
@@ -931,11 +1026,149 @@ export default function EnterpriseConsole() {
           </div>
           ) : null}
 
+          {memberModule === "billing" ? (
+            <div id="enterprise-wallet-ledger" className="space-y-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">企业钱包</p>
+                  <h2 className="mt-2 text-xl font-semibold tracking-tight text-foreground">账单与流水</h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                    企业管理员可在这里查看企业钱包的充值、冻结、结算和退款记录；账户中心账单暂时保留，确认管理台体验完整后再隐藏。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWalletLedgerRefreshKey((value) => value + 1)}
+                    disabled={!wallet?.id || walletLedgerLoading}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border/70 bg-background/55 px-4 py-2 text-sm font-medium text-foreground transition hover:bg-secondary/70 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${walletLedgerLoading ? "animate-spin" : ""}`} />
+                    刷新流水
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/wallet/recharge")}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/15"
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    企业充值
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-2xl border border-border/70 bg-background/35 p-4">
+                  <Wallet className="h-5 w-5 text-primary" />
+                  <p className="mt-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">可用余额</p>
+                  <p className="mt-2 text-sm font-medium text-foreground">
+                    {formatCredits(wallet?.availableCredits ?? wallet?.creditsAvailable)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/35 p-4">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  <p className="mt-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">冻结余额</p>
+                  <p className="mt-2 text-sm font-medium text-foreground">
+                    {formatCredits(wallet?.frozenCredits ?? wallet?.creditsFrozen)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/35 p-4">
+                  <ReceiptText className="h-5 w-5 text-primary" />
+                  <p className="mt-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">流水入账</p>
+                  <p className="mt-2 text-sm font-medium text-foreground">
+                    {formatCredits(walletLedgerSummary.income)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-background/35 p-4">
+                  <CreditCard className="h-5 w-5 text-primary" />
+                  <p className="mt-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">流水支出</p>
+                  <p className="mt-2 text-sm font-medium text-foreground">
+                    {formatCredits(walletLedgerSummary.expense)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-border/70 bg-background/35">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">企业钱包流水</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {wallet?.displayName || "企业钱包"} · {walletLedgerEntries.length} 条记录
+                    </p>
+                  </div>
+                  {walletLedgerLoading ? (
+                    <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                      正在加载
+                    </span>
+                  ) : null}
+                </div>
+
+                {walletLedgerError ? (
+                  <div className="border-b border-border/70 bg-rose-500/10 px-4 py-3 text-sm text-rose-600 dark:text-rose-200">
+                    {walletLedgerError}
+                  </div>
+                ) : null}
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-border/70">
+                    <thead className="bg-background/45 text-left text-xs font-medium text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-3">项目</th>
+                        <th className="px-4 py-3">来源</th>
+                        <th className="px-4 py-3">时间</th>
+                        <th className="px-4 py-3 text-right">积分</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {recentWalletLedgerEntries.length ? (
+                        recentWalletLedgerEntries.map((entry) => (
+                          <tr key={entry.id} className="text-sm">
+                            <td className="max-w-[240px] px-4 py-3">
+                              <div className="truncate font-medium text-foreground" title={ledgerEntryLabel(entry)}>
+                                {ledgerEntryLabel(entry)}
+                              </div>
+                              <div className="mt-1 truncate text-xs text-muted-foreground">
+                                余额 {formatCredits(entry.balanceAfter)}
+                                {entry.frozenBalanceAfter ? ` · 冻结 ${formatCredits(entry.frozenBalanceAfter)}` : ""}
+                              </div>
+                            </td>
+                            <td className="max-w-[260px] px-4 py-3 text-muted-foreground">
+                              <span className="block truncate" title={ledgerReference(entry)}>
+                                {ledgerReference(entry)}
+                              </span>
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                              {formatShortDate(entry.createdAt)}
+                            </td>
+                            <td
+                              className={`whitespace-nowrap px-4 py-3 text-right font-semibold ${
+                                entry.amount > 0 ? "text-emerald-600 dark:text-emerald-300" : "text-foreground"
+                              }`}
+                            >
+                              {formatSignedCredits(entry.amount)}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                            {walletLedgerLoading ? "正在加载企业钱包流水..." : "暂无企业钱包流水。"}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {memberModule === "accounts" ? (
             <div>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">员工账号管理</p>
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">账号管理</p>
                   <h2 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
                     编辑员工账号
                   </h2>

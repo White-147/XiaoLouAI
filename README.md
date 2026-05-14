@@ -34,7 +34,7 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 
 | 模块 | 路径 | 当前说明 |
 | --- | --- | --- |
-| 首页 / AI 工具箱 | `/home`、`/` | 能力卡片、工具箱任务入口和项目导航；Layout/nav shell 位于 `XIAOLOU-main/src/features/home/nav-layout/`。 |
+| 首页 / AI 工具箱 | `/home`、`/` | 能力卡片、工具箱入口、项目导航和账号中心；Layout/nav shell 与 L2 拆出的账号中心 helper 位于 `XIAOLOU-main/src/features/home/nav-layout/`。 |
 | 图片创作 | `/create/image` | 前端位于 `XIAOLOU-main/src/features/create-image/image-create/`，支持参考图和素材库引用；Vertex 图片链路已接入真实 provider。 |
 | 视频创作 | `/create/video` | 前端位于 `XIAOLOU-main/src/features/create-video/video-create/`，保留队列和参数面；Vertex/Veo 视频 adapter 待接入。 |
 | 剧本广场 | `/script-plaza` | 前端位于 `XIAOLOU-main/src/features/comic-production/script-plaza/`，用于从剧本模板创建漫剧项目。 |
@@ -44,7 +44,7 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | 视频反推提示词 | `/create/video-reverse` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-reverse/`，通过 toolbox job API 排队。 |
 | 25 格分镜 | `/create/storyboard-25` | 前端位于 `XIAOLOU-main/src/features/toolbox/storyboard-25/`，通过 toolbox job API 排队。 |
 | 原生画布 | `/create/canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/canvas/`，直接编译进主前端。 |
-| 智能体画布 | `/create/agent-canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`；K 阶段先对齐 ChuangJingAI 外观和入口，深层 local image edit、overlay、3D Director 后续单独迁移。 |
+| 智能体画布 | `/create/agent-canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`；K3 已对齐 ChuangJingAI 风格加载/权限/空画布入口，深层 local image edit、overlay、3D Director 后续单独迁移。 |
 | 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；资产引用选择器、同步入库控件和生成媒体占位 UI 也由 `assets-media-projects` owner 承载。 |
 | 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`，用于组织成员、企业钱包和项目权限管理。 |
 | 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
@@ -73,6 +73,118 @@ The production target does not use Linux hosts, Linux containers, Docker,
 Kubernetes, Windows + Celery, or Redis Open Source on Windows as critical
 runtime dependencies. First-stage async execution uses PostgreSQL advisory
 locks, `FOR UPDATE SKIP LOCKED`, and `LISTEN/NOTIFY`.
+
+## Hard Constraints
+
+These constraints are canonical for future XiaoLouAI work. If they conflict
+with an older handoff note, follow this section and the current phase plan.
+
+### Software Design
+
+- Prefer high cohesion and low coupling.
+- Keep each owner slice responsible for one clear reason to change.
+- Keep concerns separated: shell/navigation, data loading, API adapters, forms,
+  tables, dialogs, runtime orchestration and provider execution should not be
+  mixed without a documented reason.
+- Use dependency inversion at practical boundaries: UI should depend on feature
+  API wrappers and DTOs, not concrete backend/runtime implementation details.
+- Do not add abstractions just to look architecturally complete. Add them only
+  when they remove real duplication, isolate a real variation point, or make a
+  targeted split safer.
+- Do not broad-rewrite large files during unrelated feature or parity work.
+  Large files must be split through explicit owners with before/after
+  validation.
+- Avoid cross-layer reverse dependencies, circular dependencies and implicit
+  shared global state.
+- If temporary direct wiring is needed to land a narrow MVP behavior, keep it
+  inside a single adapter/gateway and record the debt in the task record.
+
+### Directory And Ownership
+
+- Active frontend product code belongs under
+  `XIAOLOU-main/src/features/<product-area>/`.
+- Group by route, product area or feature capability; do not scatter one
+  product capability across low-information directories.
+- Shared UI/layout primitives may live in an existing shared owner only when
+  they are genuinely reused. Do not create broad `common`, `misc`, `helpers` or
+  `utils` buckets for unrelated work.
+- Backend Control API work belongs under `backend/dotnet/control-plane/`.
+- Non-.NET runtime services belong under `backend/services/<product-area>/...`
+  only after an explicit owner signs the service boundary.
+- Deployment, retained evidence, operations notes and long-running records
+  belong under `deploy/`.
+- The root handoff must remain a short baton; long plans and task history
+  belong in `deploy/records`.
+
+### Runtime Boundaries
+
+- Frontend must communicate through `.NET Control API` DTO/API wrappers.
+- UI must not directly access databases, filesystem writes, Python scripts,
+  model SDKs, FFmpeg or provider credentials.
+- PostgreSQL remains canonical for account, organization, wallet/payment,
+  project, job, Playground memory/conversation and asset state.
+- Jobs are leased from PostgreSQL-backed queues; workers must not hold
+  canonical task state only in memory.
+- Python is reserved for explicitly signed local model/sidecar adapters.
+- Payment callbacks use canonical `/api/payments/callbacks/{provider}` routes
+  and idempotent ledger writes.
+- Real provider secrets, production dumps, payment captures, object-storage
+  credentials and retained local secrets must stay out of Git.
+
+### Forbidden Restorations
+
+- Do not restore Jaaz iframe/runtime as a default production path.
+- Do not restore Node `core-api` or make Node/Express a control plane.
+- Do not restore Node memory/vector stores.
+- Do not restore Node payment runtime or legacy payment aliases.
+- Do not restore `/api/tasks/stream` as a default live path.
+- Do not route production traffic to legacy Jaaz, legacy Node services, Vite
+  dev/preview servers, Docker, Linux, Kubernetes, Windows + Celery or Redis
+  Open Source on Windows.
+- Do not delete `agent-studio`; it remains retained for debug/reference until
+  an explicit owner decides otherwise.
+- Do not import ChuangJingAI monolith files wholesale. Use ChuangJingAI as a
+  reference and port behavior into XiaoLouAI owners.
+
+### Environment And Tooling
+
+- Do not edit `.env`, Vite proxy, Caddy, IIS, Windows service scripts or
+  deployment scripts unless the current owner explicitly covers that surface.
+- Do not create Python sidecars/adapters by default.
+- Dependencies, runtime data, logs, uploads, generated media and caches should
+  stay under the project directory or an explicitly approved D-drive tool path.
+- Do not intentionally write project dependencies, caches, runtime data or
+  generated assets to C drive. If a tool cannot avoid C-drive writes, stop and
+  ask for confirmation.
+- Keep verification scripts strict, but distinguish runtime dependencies from
+  test fixtures.
+
+### Documentation And Verification
+
+- Every code, script, config, runtime or README change must update the related
+  phase/task documentation before handoff closure.
+- Root handoff only records the current phase, immediate next owner, hard
+  boundaries and validation entry. It must not duplicate old phase history.
+- New phases must have a phase plan and task record in `deploy/records`.
+- Use UTF-8 Markdown that is readable with PowerShell `Get-Content` and
+  searchable with `Select-String`.
+- Prefer short lines, ordinary headings, ordinary lists and text code blocks.
+- Default frontend validation is:
+
+```powershell
+git status --short --branch
+npm --prefix .\XIAOLOU-main run lint
+npm --prefix .\XIAOLOU-main run test:unit
+npm --prefix .\XIAOLOU-main run build
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency
+git diff --check
+```
+
+- If backend contracts are touched, also run:
+
+```powershell
+dotnet test .\backend\dotnet\control-plane\tests\XiaoLou.ControlApi.Tests\XiaoLou.ControlApi.Tests.csproj --no-restore -v:minimal
+```
 
 ## Repository Layout
 
@@ -234,6 +346,63 @@ chat jobs, memory preference and memories remain on the existing Control API,
 with history and memory moved into secondary drawers via Playground controls and
 `/playground?panel=history|memory`. Web search and attachments remain deferred
 until the signed Playground API contract exposes those inputs.
+
+K3 Agent Canvas shell entry is complete: `/create/agent-canvas` now uses the
+ChuangJingAI-aligned Agent Canvas loading and permission states, and signed
+creator accounts see an empty-canvas entry guide for project library, image
+node, video node, chat orchestration, text, workflow and asset-library actions.
+The current XiaoLouAI direct runtime, TopBar, CanvasToolbar, ChatPanel modules
+and `.NET` project/chat contracts remain in place; local image edit, overlays
+and 3D Director remain deferred owners.
+
+K4 verification and handoff refresh is complete: frontend `lint`, unit tests
+and build pass, and browser smoke covers the K1 shared shell/account center,
+K2 Playground memory/history drawers and K3 Agent Canvas entry states on
+desktop and mobile. The K owner sequence is complete; the remaining
+ChuangJingAI parity gaps are explicit deferred owners:
+Agent Canvas project hub parity review, local image edit wiring, image
+overlays, image annotation, 3D Director, required provider/runtime sidecars,
+and Playground web search/attachments after a signed XiaoLouAI Playground API
+contract exists.
+
+Post-K frontend correction and design-constraint audit is complete on
+2026-05-14. The primary shell keeps only one Playground/Memory entry in the
+main navigation and uses the ChuangJingAI brain-like entry icon for
+`/playground`; memory remains a Playground drawer/control rather than an
+independent primary route. `/create/canvas` remains compiled and routable for
+debug/reference, but it is not a primary nav entry; `/create/agent-canvas`
+remains the visible smart-canvas entry. The account center hides billing for
+platform and enterprise admins after billing and wallet ledger views were added
+to the appropriate admin consoles: super admin now has separate `账单与流水` and
+`订单审核` modules, and enterprise admin has a separate `账单与流水` module plus
+renamed `账号管理`. Personal users and enterprise members still use account
+center billing.
+
+The same audit re-checked the broader software-design constraints. External
+references used for calibration were Microsoft's class-coupling guidance and
+the high-cohesion/low-coupling/SRP summaries from TechTarget. Current XiaoLouAI
+still follows the project-level direction: feature code is grouped by product
+area, frontend runtime calls go through Control API DTO wrappers, and the
+latest changes did not add new root directories or cross into backend,
+env/proxy/Caddy, payment runtime, Node `core-api`, Jaaz runtime or Python
+sidecar ownership. L2 has since split the shell/account-center surface under
+`home/nav-layout` into presentational/helper modules for route prefetch, nav
+metadata, sidebar, auth modal, profile, subscription, billing and wallet
+ledger UI while preserving route, permission and API-wrapper behavior. The
+project is not yet fully clean against the ideal high-cohesion target because
+several legacy feature files remain oversized or orchestration-heavy,
+especially the Canvas runtime `App.tsx` files, `VideoCreate.tsx`,
+`Assets.tsx`, `EnterpriseConsole.tsx`, `Playground.tsx` and
+`SuperAdminConsole.tsx`. Treat these as explicit future split/refactor owners;
+do not do a broad rewrite while handling unrelated frontend parity work.
+
+The same pass fixed the frontend legacy dependency gate. The verifier now reads
+the actual guard implementation in `src/lib/api/control-api-client.ts` and
+`src/lib/api/route-policy.ts`, and it records legacy route literals under
+`__tests__` or `.test/.spec` files as guard fixtures instead of runtime
+dependencies. Runtime non-Control legacy route literals still remain review
+items until they are migrated, explicitly retired or accepted as read-only
+compatibility references.
 
 ### Toolbox Frontend Layout
 
@@ -679,26 +848,22 @@ Select-String -Path .\deploy\records\xiaolouai-finalization-handoff.md -Pattern 
 
 ## Handoff
 
-Read these first before continuing the refactor:
+Read these first before continuing current work:
 
 - `XIAOLOU_REFACTOR_HANDOFF.md`
-- `deploy/records/xiaolouai-finalization-handoff.md`
-- `deploy/records/xiaolouai-deep-research-structured.md`
-- `deploy/records/xiaolouai-legacy-physical-archive-contract.md`, for the completed
-  G2b-2 archive record and rollback path
+- `deploy/records/xiaolouai-frontend-design-constraint-phase-plan.md`
+- `deploy/records/xiaolouai-frontend-design-constraint-task-record.md`
+- Historical only: `deploy/records/xiaolouai-root-handoff-stage-task-archive.md`
 
 The root handoff is a short PowerShell-readable baton. It keeps only the current
-short next-step context and verification entrypoints. Completed G9-G13 records
-belong in the docs handoff files above; long-wait G13 test/fixture/runtime
-follow-ups are tracked in `Deferred CI/Test Gate Follow-Up` in this README.
+phase, next owner, boundaries and verification entrypoints. Old phase task
+details belong in `deploy/records`, not in the short handoff.
 
 After every code, script, config, reverse-proxy, runtime, or README change,
-update the root handoff plus the related docs handoff files before closing the
-work. Use the structured deep research reader to keep the remaining work as
-finite task cards. If a prior
-"next execution" note has been superseded, mark it as historical in
-`deploy/records/xiaolouai-finalization-handoff.md` instead of leaving two competing
-instructions.
+update the root handoff plus the active phase plan/task record before closing
+the work. If a prior "next execution" note is superseded, move it to the
+appropriate historical record under `deploy/records` instead of leaving two
+competing instructions.
 
 ## README Policy
 

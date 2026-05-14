@@ -287,6 +287,7 @@ export default function Playground() {
     : null;
   const isBusy = sending || Boolean(activeConversationJob);
   const hasActiveJobs = activeJobs.some(isActiveChatJob);
+  const enabledMemoryCount = memories.filter((memory) => memory.enabled !== false).length;
   const activeJobIds = activeJobs
     .filter(isActiveChatJob)
     .map((job) => `${job.id}:${job.status}`)
@@ -729,15 +730,15 @@ export default function Playground() {
   );
 
   const renderMemoryPanel = () => (
-    <aside className="flex h-full w-[min(370px,calc(100vw-40px))] shrink-0 flex-col border-l border-neutral-200 bg-white shadow-2xl xl:w-[350px] xl:shadow-none dark:border-border dark:bg-card">
+    <aside className="flex h-full w-[min(360px,100%)] shrink-0 flex-col border-l border-neutral-200 bg-white shadow-2xl xl:w-[340px] xl:shadow-none dark:border-border dark:bg-card">
       <header className="flex min-h-16 items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-border">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-neutral-950 dark:text-foreground">
             <StickyNote className="h-4 w-4 text-blue-500" />
-            记忆中心
+            记忆
           </h2>
           <p className="mt-1 text-xs text-neutral-500">
-            {memories.length ? `${memories.length} 条已保存` : "暂无记忆"}
+            {memories.length ? `${enabledMemoryCount}/${memories.length} 条启用` : "暂无记忆"}
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -761,6 +762,7 @@ export default function Playground() {
             disabled={!canUsePlayground}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 text-neutral-500 transition hover:bg-neutral-50 hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-border dark:hover:bg-accent dark:hover:text-foreground"
             aria-label="刷新记忆"
+            title="刷新记忆"
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
@@ -768,9 +770,10 @@ export default function Playground() {
             type="button"
             onClick={() => setMemoryPanelOpen(false)}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-950 dark:hover:bg-accent dark:hover:text-foreground"
-            aria-label="关闭记忆栏"
+            aria-label="收起记忆"
+            title="收起记忆"
           >
-            <X className="h-4 w-4" />
+            <ChevronRight className="h-3.5 w-3.5" />
           </button>
         </div>
       </header>

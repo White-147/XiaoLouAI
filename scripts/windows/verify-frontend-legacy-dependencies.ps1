@@ -100,6 +100,13 @@ function Get-DisplayPath {
   return $fullPath
 }
 
+function Test-FrontendTestFixturePath {
+  param([string]$RelativePath)
+
+  return $RelativePath -match '(^|\\)__tests__\\' `
+    -or $RelativePath -match '\.(test|spec)\.(ts|tsx|js|jsx)$'
+}
+
 $checks = New-List
 $warnings = New-List
 $blockers = New-List
@@ -107,33 +114,37 @@ $reviewItems = New-List
 
 $frontendSrc = Join-Path $RepoRoot "XIAOLOU-main\src"
 $apiTs = Join-Path $frontendSrc "lib\api.ts"
+$controlApiClientTs = Join-Path $frontendSrc "lib\api\control-api-client.ts"
+$routePolicyTs = Join-Path $frontendSrc "lib\api\route-policy.ts"
 $caddyPath = Join-Path $RepoRoot "deploy\windows\Caddyfile.windows.example"
 $iisPath = Join-Path $RepoRoot "deploy\windows\iis-web.config.example"
 $frontendLegacyMutationGuardPresent = $false
 
-foreach ($path in @($frontendSrc, $apiTs, $caddyPath, $iisPath)) {
+foreach ($path in @($frontendSrc, $apiTs, $controlApiClientTs, $routePolicyTs, $caddyPath, $iisPath)) {
   if (-not (Test-Path -LiteralPath $path)) {
     Add-Item $blockers "required-path" "missing" $path
   }
 }
 
-if (Test-Path -LiteralPath $apiTs) {
-  $apiText = Get-Content -LiteralPath $apiTs -Raw
-  $frontendLegacyMutationGuardPresent = $apiText -match "function\s+assertNoLegacyMutatingRequest" `
-    -and $apiText -match "LEGACY_WRITE_DISABLED" `
-    -and $apiText -match "VITE_ALLOW_LEGACY_MUTATIONS"
-  if ($apiText -match 'path\.startsWith\("/api/media/"\)') {
+if ((Test-Path -LiteralPath $controlApiClientTs) -and (Test-Path -LiteralPath $routePolicyTs)) {
+  $controlApiClientText = Get-Content -LiteralPath $controlApiClientTs -Raw
+  $routePolicyText = Get-Content -LiteralPath $routePolicyTs -Raw
+  $frontendLegacyMutationGuardPresent = $controlApiClientText -match "function\s+assertNoLegacyMutatingRequest" `
+    -and $controlApiClientText -match "LEGACY_WRITE_DISABLED" `
+    -and $routePolicyText -match "VITE_ALLOW_LEGACY_MUTATIONS" `
+    -and $routePolicyText -match "function\s+shouldBlockLegacyMutatingRequest"
+  if ($routePolicyText -match 'path\.startsWith\("/api/media/"\)') {
     Add-Item $blockers "frontend-control-api-client-path" "too-wide" "isControlApiClientPath must not grant Control API assertions to all /api/media/* routes."
-  } elseif ($apiText -match 'CONTROL_API_CLIENT_EXACT_PATHS' -and $apiText -match '/api/media/signed-read-url') {
+  } elseif ($routePolicyText -match 'CONTROL_API_CLIENT_EXACT_PATHS' -and $routePolicyText -match '/api/media/signed-read-url') {
     Add-Item $checks "frontend-control-api-client-path" "ok" "Control API assertion routes are explicit."
   } else {
-    Add-Item $warnings "frontend-control-api-client-path" "review" "Could not find the explicit Control API client path set in XIAOLOU-main/src/lib/api.ts."
+    Add-Item $warnings "frontend-control-api-client-path" "review" "Could not find the explicit Control API client path set in XIAOLOU-main/src/lib/api/route-policy.ts."
   }
 
   if ($frontendLegacyMutationGuardPresent) {
-    Add-Item $checks "frontend-legacy-mutation-guard" "ok" "api.ts blocks non-Control API mutating legacy requests by default; VITE_ALLOW_LEGACY_MUTATIONS is the explicit dev escape hatch."
+    Add-Item $checks "frontend-legacy-mutation-guard" "ok" "control-api-client.ts blocks non-Control API mutating legacy requests by default; VITE_ALLOW_LEGACY_MUTATIONS is the explicit dev escape hatch."
   } else {
-    Add-Item $warnings "frontend-legacy-mutation-guard" "missing" "api.ts should block non-Control API mutating legacy requests by default."
+    Add-Item $warnings "frontend-legacy-mutation-guard" "missing" "control-api-client.ts should block non-Control API mutating legacy requests by default."
   }
 }
 
@@ -212,6 +223,8 @@ if (Test-Path -LiteralPath $iisPath) {
 $legacyReferences = New-List
 $legacyWriteCandidates = New-List
 $retiredLegacyWriteCandidates = New-List
+$testFixtureLegacyReferences = New-List
+$testFixtureLegacyWriteCandidates = New-List
 $literalPattern = '["''`](?<path>/(?:api|uploads|jaaz-api|jaaz|vr-)[A-Za-z0-9_./:?=&%-]*)'
 if (Test-Path -LiteralPath $frontendSrc) {
   $files = @(Get-ChildItem -LiteralPath $frontendSrc -Recurse -File -Include *.ts,*.tsx,*.js,*.jsx)
@@ -225,6 +238,7 @@ if (Test-Path -LiteralPath $frontendSrc) {
 
       $line = ($text.Substring(0, $match.Index).Split("`n").Count)
       $relativePath = Get-DisplayPath $file.FullName
+      $isTestFixture = Test-FrontendTestFixturePath $relativePath
       $windowStart = $match.Index
       $windowLength = [Math]::Min($text.Length - $windowStart, 520)
       $window = $text.Substring($windowStart, $windowLength)
@@ -236,9 +250,23 @@ if (Test-Path -LiteralPath $frontendSrc) {
         path = $path
         method = $method
       }
+
+      if ($isTestFixture) {
+        $testFixtureLegacyReferences.Add($entry) | Out-Null
+        if ($method -ne "UNKNOWN") {
+          $testFixtureLegacyWriteCandidates.Add($entry) | Out-Null
+        }
+        continue
+      }
+
       $legacyReferences.Add($entry) | Out-Null
       if ($method -ne "UNKNOWN") {
-        if ($frontendLegacyMutationGuardPresent -and $relativePath -eq "XIAOLOU-main\src\lib\api.ts") {
+        if (
+          $frontendLegacyMutationGuardPresent -and (
+            $relativePath -eq "XIAOLOU-main\src\lib\api\control-api-client.ts" -or
+            $relativePath -eq "XIAOLOU-main\src\lib\api\route-policy.ts"
+          )
+        ) {
           $retiredLegacyWriteCandidates.Add($entry) | Out-Null
         } else {
           $legacyWriteCandidates.Add($entry) | Out-Null
@@ -260,6 +288,10 @@ if ($legacyWriteCandidates.Count -eq 0) {
   Add-Item $blockers "frontend-legacy-write-candidates" "failed" "Found $($legacyWriteCandidates.Count) mutating legacy route candidate(s) in frontend source." $legacyWriteCandidates
 } else {
   Add-Item $warnings "frontend-legacy-write-candidates" "pending-migration" "Found $($legacyWriteCandidates.Count) mutating legacy route candidate(s); keep them blocked by proxy until migrated to .NET Control API or explicitly retired." $legacyWriteCandidates
+}
+
+if ($testFixtureLegacyReferences.Count -gt 0) {
+  Add-Item $checks "frontend-test-legacy-route-fixtures" "ignored" "Ignored $($testFixtureLegacyReferences.Count) test-only legacy route literal(s), including $($testFixtureLegacyWriteCandidates.Count) mutating fixture(s); these fixtures exercise the legacy mutation guard and are not runtime dependencies." $testFixtureLegacyReferences
 }
 
 if ($retiredLegacyWriteCandidates.Count -gt 0) {

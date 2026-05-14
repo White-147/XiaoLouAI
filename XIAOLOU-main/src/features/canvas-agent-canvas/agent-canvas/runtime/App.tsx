@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { FolderOpen, Image as ImageIcon, MessageSquare, Sparkles, Type as TypeIcon, Video } from 'lucide-react';
 import { CanvasToolbar, CanvasTool } from './components/CanvasToolbar';
 import { TopBar } from './components/TopBar';
 import { CanvasNode } from './components/canvas/CanvasNode';
@@ -2712,6 +2713,24 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
   const storyboardModalActive = features.storyboard && storyboardGenerator.isModalOpen;
   const tiktokModalActive = features.tiktokImport && isTikTokModalOpen;
   const shouldHideGlobalChrome = storyboardModalActive || tiktokModalActive;
+  const shouldShowCanvasEntryGuide =
+    !shouldHideGlobalChrome &&
+    !pendingReferenceChoice &&
+    !isChatOpen &&
+    !isWorkflowPanelOpen &&
+    !isHistoryPanelOpen &&
+    !isAssetLibraryOpen &&
+    !hasMeaningfulCanvasContent({ nodes, groups, title: canvasTitle });
+  const entryPanelClassName = canvasTheme === 'dark'
+    ? 'border-[rgba(245,244,239,0.12)] bg-[#171612]/92 text-[#f5f4ef] shadow-[0_32px_90px_rgba(0,0,0,0.38)]'
+    : 'border-[rgba(23,21,18,0.08)] bg-[rgba(255,255,253,0.94)] text-[#171512] shadow-[0_32px_90px_rgba(23,21,18,0.12)]';
+  const entryMutedClassName = canvasTheme === 'dark' ? 'text-[#aaa59a]' : 'text-[#6d665c]';
+  const entryButtonClassName = canvasTheme === 'dark'
+    ? 'border-white/10 bg-white/[0.04] text-[#f5f4ef] hover:border-white/20 hover:bg-white/[0.08]'
+    : 'border-[rgba(23,21,18,0.08)] bg-white text-[#171512] hover:border-[rgba(23,21,18,0.16)] hover:bg-[#f3f1eb]';
+  const entryGhostButtonClassName = canvasTheme === 'dark'
+    ? 'border-white/10 text-[#d8d3c8] hover:bg-white/[0.06] hover:text-white'
+    : 'border-[rgba(23,21,18,0.10)] text-[#504a42] hover:bg-white hover:text-[#171512]';
 
   const getCanvasSnapshotForAgent = React.useCallback<() => AgentCanvasSnapshot>(() => ({
     title: latestCanvasTitleRef.current,
@@ -3274,6 +3293,109 @@ export default function App({ creditQuoteProjectId = null }: AppProps = {}) {
           onZoomOut={handleZoomOutFromMenu}
           canvasTheme={canvasTheme}
         />
+      )}
+
+      {shouldShowCanvasEntryGuide && (
+        <div className="pointer-events-none absolute inset-0 z-[30] flex items-center justify-center px-4 pb-28 pt-24 sm:px-6">
+          <section
+            className={`pointer-events-auto w-[min(760px,calc(100vw-32px))] rounded-[28px] border p-5 backdrop-blur-xl sm:p-6 ${entryPanelClassName}`}
+            aria-label="Agent Canvas entry"
+          >
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${entryGhostButtonClassName}`}>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  AGENT CANVAS
+                </div>
+                <h1 className="mt-4 text-[28px] font-semibold leading-tight tracking-normal sm:text-[34px]">
+                  从这里开始你的智能画布
+                </h1>
+                <p className={`mt-3 max-w-[560px] text-sm leading-6 ${entryMutedClassName}`}>
+                  选择一个创作节点，或先打开对话把想法整理成画布动作。项目菜单、资源库和工作流仍保留在同一套画布壳里。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenProjectLibraryFromMenu}
+                className={`inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full border px-4 text-sm font-medium transition ${entryGhostButtonClassName}`}
+              >
+                <FolderOpen className="h-4 w-4" />
+                项目库
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => handleToolbarQuickAdd(NodeType.IMAGE)}
+                className={`group flex min-h-[108px] flex-col items-start justify-between rounded-2xl border p-4 text-left transition ${entryButtonClassName}`}
+              >
+                <ImageIcon className="h-5 w-5" />
+                <span>
+                  <span className="block text-base font-semibold">图像节点</span>
+                  <span className={`mt-1 block text-xs leading-5 ${entryMutedClassName}`}>生成图片、编辑素材或接入参考图。</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToolbarQuickAdd(NodeType.VIDEO)}
+                className={`group flex min-h-[108px] flex-col items-start justify-between rounded-2xl border p-4 text-left transition ${entryButtonClassName}`}
+              >
+                <Video className="h-5 w-5" />
+                <span>
+                  <span className="block text-base font-semibold">视频节点</span>
+                  <span className={`mt-1 block text-xs leading-5 ${entryMutedClassName}`}>从文本、图片或关键帧推进视频创作。</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isChatOpen) {
+                    toggleChat();
+                  }
+                }}
+                className={`group flex min-h-[108px] flex-col items-start justify-between rounded-2xl border p-4 text-left transition ${entryButtonClassName}`}
+              >
+                <MessageSquare className="h-5 w-5" />
+                <span>
+                  <span className="block text-base font-semibold">对话编排</span>
+                  <span className={`mt-1 block text-xs leading-5 ${entryMutedClassName}`}>把需求交给画布助手，再应用为节点。</span>
+                </span>
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => handleToolbarQuickAdd(NodeType.TEXT)}
+                className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition ${entryGhostButtonClassName}`}
+              >
+                <TypeIcon className="h-4 w-4" />
+                添加文字
+              </button>
+              {features.workflows && (
+                <button
+                  type="button"
+                  onClick={handleWorkflowsClick}
+                  className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition ${entryGhostButtonClassName}`}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  工作流
+                </button>
+              )}
+              {features.assets && (
+                <button
+                  type="button"
+                  onClick={handleAssetsClick}
+                  className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition ${entryGhostButtonClassName}`}
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  资源库
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
       )}
 
       {pendingReferenceChoice && pendingReferenceSourceNode && pendingReferenceTargetNode && (

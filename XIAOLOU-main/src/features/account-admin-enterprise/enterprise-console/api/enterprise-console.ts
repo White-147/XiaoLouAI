@@ -3,6 +3,7 @@ export {
   deleteOrganizationMemberAccount,
   getMe,
   getOrganizationWallet,
+  listWalletLedger,
   listOrganizationMembers,
   listProjects,
   updateOrganizationMemberAccount,
@@ -12,4 +13,5 @@ export {
   type Project,
   type UpdateOrganizationMemberAccountInput,
   type Wallet,
+  type WalletLedgerEntry,
 } from "../../../../lib/api";
