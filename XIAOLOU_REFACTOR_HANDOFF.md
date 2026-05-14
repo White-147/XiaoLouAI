@@ -9,8 +9,8 @@
 
 ```text
 Phase: L frontend-design-constraint-governance
-Owner: L5 create-and-assets-split completed
-Status: ready for explicit single owner selection
+Owner: L18 frontend-design-constraint-governance-closeout completed
+Status: phase closeout complete; wait for explicit single owner selection
 Goal: future frontend work must follow high-cohesion, low-coupling,
 owner-scoped, documented slices.
 ```
@@ -25,47 +25,67 @@ Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-phase-plan.md 
 Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-task-record.md -Encoding UTF8
 ```
 
-## 下一步
+## 收口结论
+
+```text
+L 系列 frontend-design-constraint-governance 已收口。
+
+已完成 owner：
+L2 shell-account-center-split
+L3 playground-split
+L4 admin-console-split
+L5 create-and-assets-split
+L6 canvas-app-shell-split-preflight
+L7 canvas-host-shell-helper-split
+L8 canvas-host-shell-service-builder-preflight
+L9 canvas-host-generation-service-split
+L10 canvas-host-asset-service-split
+L11 canvas-host-project-save-service-preflight
+L12 canvas-host-project-service-split
+L13 canvas-host-save-service-preflight
+L14 canvas-host-save-service-split
+L15 canvas-host-project-load-service-preflight
+L16 canvas-host-project-load-helper-split
+L17 canvas-host-shell-final-preflight
+L18 frontend-design-constraint-governance-closeout
+
+结论：停止继续拆 Canvas/Agent host shell。
+CanvasCreate.tsx 与 AgentCanvasCreate.tsx 已缩到约 204/194 行，剩余职责是
+actor/project/theme 输入、mutable refs、context-ready resolver、service
+composition、同步 host services 注册、StrictMode cleanup、theme sync 和
+render shell。这些职责属于宿主壳最后一层接线；继续拆 service composition
+或 context-ready resolver 收益低，风险集中在首帧同步注册、StrictMode 清理、
+mutable ref 最新值、projectId readiness 和 Canvas/Agent 差异。
+```
+
+## 工作树状态
+
+```text
+当前 git status 显示 L 系列变更尚未提交：
+README.md
+XIAOLOU_REFACTOR_HANDOFF.md
+CanvasCreate.tsx
+AgentCanvasCreate.tsx
+以及同目录新增 generation/asset/project/save/project-load helper/service 文件。
+
+deploy/records 处于 ignored 目录；其中 phase/task record 已在本地回写 L18 closeout。
+```
+
+## 后续候选 Owner
 
 ```text
 不要默认继续 runtime。
-等待用户明确选择 L6/L7/L8 或其他单一 owner。
+等待用户明确选择一个单一 owner。
 
-已完成：L2 shell-account-center-split、L3 playground-split、
-L4 admin-console-split、L5 create-and-assets-split。L5 只拆
-XIAOLOU-main/src/features/create-video/video-create/VideoCreate.tsx
-和 XIAOLOU-main/src/features/assets-media-projects/assets/Assets.tsx，
-并在同目录抽出 videoCapabilities、videoResultHelpers、
-VideoReferenceInputs、VideoResultsGrid、VideoTaskHistory、
-MultiReferenceSlots、assetDisplay、assetCache、AssetSidebar、AssetGrid、
-CanvasProjectSection、AssetFormModal、AssetPreviewModal。保持
-provider/runtime 行为、任务轮询、缩略图回填写入、资产/项目权限、
-API wrapper 和 UI 文案不变；未碰 runtime、backend、env/proxy/Caddy/scripts。
-
-L4 只拆
-XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/EnterpriseConsole.tsx
-和
-XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/SuperAdminConsole.tsx
-的 presentational/helper 面板，未碰 runtime、backend、env/proxy/Caddy/scripts。
-
-建议下一棒提示词：
-进行 L6 canvas-app-shell-split-preflight。只做 Canvas / Agent Canvas
-app shell 的拆分前自检和清单，不改 runtime 行为，不移动 runtime 代码。
-重点只读检查：
-XIAOLOU-main/src/features/canvas-agent-canvas/canvas/App.tsx
-XIAOLOU-main/src/features/canvas-agent-canvas/agent-canvas/App.tsx
-及其同目录 app shell 边界，输出 oversized split inventory、风险点、
-可拆 presentational/helper 名单和下一步单一 owner 提示词。不要碰
-backend、env/proxy/Caddy/scripts、provider adapters 或 Python sidecars。
-```
-
-## 历史归档
-
-```text
-旧根 handoff 中的阶段任务记录已归档到：
-deploy\records\xiaolouai-root-handoff-stage-task-archive.md
-
-该文件只用于追溯历史，不作为下一棒默认阅读内容。
+明确候选：
+1. canvas-runtime-app-preflight：只读检查 Canvas/Agent runtime/App.tsx
+   的职责、风险和可拆 owner；不得默认修改 runtime。
+2. canvas-generation-service-preflight：只读检查已抽出的 generation service
+   是否需要继续按 polling/recovery/capabilities 拆分；不得默认改代码。
+3. frontend-validation-closeout：只读执行/汇总前端校验入口，确认 L 系列
+   工作树提交前风险。
+4. choose-new-product-area-owner：从 README 的功能入口中选择新的单一
+   product-area owner，继续按高内聚低耦合规则推进。
 ```
 
 ## 硬性约束指针

@@ -43,8 +43,8 @@ Windows 原生部署里，让创作者可以从创意、提示词、素材、生
 | 人物替换 | `/create/video-replace` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-replace/`，Python sidecar 位于 `backend/services/toolbox/video-replace-sidecar/`。 |
 | 视频反推提示词 | `/create/video-reverse` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-reverse/`，通过 toolbox job API 排队。 |
 | 25 格分镜 | `/create/storyboard-25` | 前端位于 `XIAOLOU-main/src/features/toolbox/storyboard-25/`，通过 toolbox job API 排队。 |
-| 原生画布 | `/create/canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/canvas/`，直接编译进主前端。 |
-| 智能体画布 | `/create/agent-canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/`；K3 已对齐 ChuangJingAI 风格加载/权限/空画布入口，深层 local image edit、overlay、3D Director 后续单独迁移。 |
+| 原生画布 | `/create/canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/canvas/`；L6 已确认实际 host shell 为 `CanvasCreate.tsx`、runtime 为 `runtime/App.tsx`，L7 已拆出 host shell helper/presentational 文件，L9/L10/L12/L14/L16 已抽出 generation、asset、project、save、project-load helpers，L18 已收口并建议停止继续拆 host shell，runtime 行为未改。 |
+| 智能体画布 | `/create/agent-canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/agent-canvas/`；K3 已对齐 ChuangJingAI 风格加载/权限/空画布入口，L7 已拆出 host shell helper/presentational 文件，L9/L10/L12/L14/L16 已抽出 Agent Canvas generation、asset、project、save、project-load helpers，L18 已收口并建议停止继续拆 host shell；深层 local image edit、overlay、3D Director 与 runtime cleanup 后续单独 owner。 |
 | 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；L5 已拆出 assetDisplay、assetCache、侧栏、资产网格、画布项目区和表单/预览弹窗，资产/项目权限与 API wrapper 保持不变。 |
 | 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`；L4 已拆出 summary、成员创建/监管、账单和账号管理展示面板。 |
 | 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；L4 已拆出用量、平台账单、订单审核和平台账号面板，注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
@@ -394,11 +394,54 @@ helpers while keeping signed Playground API inputs and deferred web
 search/attachments unchanged. L4 has split the enterprise and super-admin
 consoles into admin/enterprise presentational panels while keeping .NET
 Payments/Admin contracts, wallet/order/account permissions and API wrappers
-unchanged. The project is not yet fully clean against the ideal high-cohesion
-target because several feature files remain oversized or orchestration-heavy.
-The Canvas runtime `App.tsx` files remain the primary explicit future owner.
-`VideoCreate.tsx` and `Assets.tsx` completed the L5 presentational/helper split;
-any further behavior-level cleanup must still wait for an explicit owner.
+unchanged. `VideoCreate.tsx` and `Assets.tsx` completed the L5
+presentational/helper split. L6 then completed a read-only Canvas / Agent
+Canvas app-shell preflight and corrected the effective boundaries: the active
+host shell files are `CanvasCreate.tsx` and `AgentCanvasCreate.tsx`; runtime
+apps remain under each `runtime/App.tsx`. L7 completed a no-behavior host-shell
+helper split under both Canvas directories, extracting `canvasBridgeMedia`,
+`canvasAssetBridge`, `canvasProjectSession`, `canvasProjectSaveHelpers` and
+`CanvasProjectLoadOverlay` while keeping API wrappers, task polling, project
+save/load, session/URL project IDs, thumbnail upload and UI copy stable. L8
+completed a read-only host-shell service-builder preflight. L9 completed a
+no-behavior generation service split under both Canvas directories, extracting
+`canvasHostGenerationService` and `agentCanvasHostGenerationService` for
+generation, task polling, recovery, stray lookup and capabilities while keeping
+API wrappers, project resolver, Canvas model capability checks, Agent Canvas
+`resultUrls`, recovery error copy, UI copy and host-service registration timing
+stable. L10 completed a no-behavior asset service split under both Canvas
+directories, extracting `canvasHostAssetService` and
+`agentCanvasHostAssetService` for asset context, list/create/delete/upload,
+asset DTO normalization, sourceModule and media-kind mapping while keeping API
+wrappers, project resolver, permissions, upload kind, thumbnail/save callers,
+UI copy and host-service registration timing stable. L11 completed a read-only
+project/save service preflight, then L12 completed a no-behavior project
+service split under both Canvas directories, extracting
+`canvasHostProjectService` and `agentCanvasHostProjectService` for project
+list/load/delete/reset, Canvas-only project version adopt/get, and project DTO
+sanitize/normalization while keeping saveCanvas, thumbnail upload, pending
+URL/session load effects, UI copy and host-service registration timing stable.
+L13 completed a read-only save-service preflight, then L14 completed a
+no-behavior save service split under both Canvas directories, extracting
+`canvasHostSaveService` and `agentCanvasHostSaveService` for saveCanvas,
+thumbnail generation/upload, cloud-save sanitize, save request shaping,
+post-save refs/session, Agent URL writeback, Canvas conflict merge/merged
+notify and existing error handling while keeping pending URL/session load
+effects, UI copy and host-service registration timing stable. L15 completed a
+read-only pending project load preflight and confirmed that URL/session load
+effects, clear/notify project load, render guard/overlay state, session/URL
+writeback and conflict-unblock ref resets remain in the host shells for a
+separate owner. L16 completed that no-behavior project-load helper/hook split,
+extracting `canvasHostProjectLoad` and `agentCanvasHostProjectLoad` while
+preserving Canvas render blocking/save guards and Agent overlay/URL/agentContext
+semantics. L17 completed a read-only final host-shell preflight and recommends
+stopping the L-series host-shell split: the remaining composition,
+context-ready resolver, synchronous service registration, theme sync and render
+shell are small, cohesive and sensitive to runtime ordering. L18 closed the
+frontend-design-constraint-governance phase: stop this L-series host-shell
+split by default, keep future work as explicit single-owner slices, and do not
+continue runtime cleanup by default; any runtime or behavior-level cleanup must
+still wait for an explicit owner.
 
 The same pass fixed the frontend legacy dependency gate. The verifier now reads
 the actual guard implementation in `src/lib/api/control-api-client.ts` and
