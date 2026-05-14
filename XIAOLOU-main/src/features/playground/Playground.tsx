@@ -3,30 +3,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  BookOpen,
-  Bot,
-  Box,
-  Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Clock,
   History,
-  Image as ImageIcon,
-  Lightbulb,
   LoaderCircle,
   MessageSquarePlus,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Save,
-  Search,
-  Send,
   Sparkles,
   StickyNote,
-  Trash2,
-  Video,
-  X,
 } from "lucide-react";
 import {
   deletePlaygroundConversation,
@@ -50,200 +33,25 @@ import {
 } from "../../lib/api";
 import { hasSessionCredentials, useActorId } from "../../lib/actor-session";
 import { cn } from "../../lib/utils";
-
-type MemoryDraft = {
-  key: string;
-  value: string;
-  enabled: boolean;
-};
-
-type ComposerMode = "agent" | "image" | "video";
-
-type PlaygroundSkillCategory = {
-  id: string;
-  label: string;
-};
-
-type PlaygroundSkill = {
-  id: string;
-  category: string;
-  title: string;
-  description: string;
-  prompt: string;
-};
-
-const starterPrompts = [
-  "把一个悬疑短剧创意拆成三幕，并给出每幕冲突",
-  "帮我把角色设定整理成可执行的视觉方向",
-  "先问我 3 个关键问题，再整理成可拍摄方案",
-  "把这个营销短片写成 10 条分镜提示词",
-];
-
-const composerModes: Array<{
-  value: ComposerMode;
-  label: string;
-  description: string;
-  icon: typeof Bot;
-}> = [
-  {
-    value: "agent",
-    label: "Agent",
-    description: "规划、拆解和执行创意任务",
-    icon: Bot,
-  },
-  {
-    value: "image",
-    label: "图像",
-    description: "偏向画面、构图、风格与生图提示词",
-    icon: ImageIcon,
-  },
-  {
-    value: "video",
-    label: "视频",
-    description: "偏向镜头、节奏、运动和分镜",
-    icon: Video,
-  },
-];
-
-const skillCategories: PlaygroundSkillCategory[] = [
-  { id: "script", label: "脚本" },
-  { id: "video", label: "视频" },
-  { id: "brand", label: "品牌" },
-];
-
-const playgroundSkills: PlaygroundSkill[] = [
-  {
-    id: "story-breakdown",
-    category: "script",
-    title: "剧本拆解提示词",
-    description: "把剧本或故事梗概拆成可执行分镜。",
-    prompt: "请把我提供的剧本拆成结构清晰的分镜提示词，保留人物、场景、镜头运动、情绪和时长。",
-  },
-  {
-    id: "character-visual",
-    category: "script",
-    title: "角色视觉设定",
-    description: "整理角色、服装、表演和视觉连续性。",
-    prompt: "请把角色设定整理成可用于图像和视频生成的视觉说明，包含外观、服装、表演、光影和一致性约束。",
-  },
-  {
-    id: "short-video-plan",
-    category: "video",
-    title: "短视频创作方案",
-    description: "从一句想法生成镜头节奏和发布结构。",
-    prompt: "请把我的想法拆成短视频创作方案，包含开场钩子、镜头节奏、画面提示词、字幕和发布文案。",
-  },
-  {
-    id: "video-prompt-polish",
-    category: "video",
-    title: "视频提示词润色",
-    description: "把粗略想法改写成稳定的视频生成提示。",
-    prompt: "请把我的描述润色成视频生成提示词，强调镜头运动、主体动作、光影、景别、转场和负面约束。",
-  },
-  {
-    id: "brand-style",
-    category: "brand",
-    title: "品牌视觉延展",
-    description: "延展品牌调性、版式和视觉语言。",
-    prompt: "请保持品牌一致性，为我的主题生成 3 个可执行视觉方向，包含色彩、构图、材质、字体氛围和示例提示词。",
-  },
-];
-
-function formatTime(value: string | null | undefined) {
-  if (!value) return "刚刚";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "刚刚";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function upsertMessage(items: PlaygroundMessage[], message: PlaygroundMessage) {
-  const existingIndex = items.findIndex((item) => item.id === message.id);
-  if (existingIndex === -1) return [...items, message];
-  const next = [...items];
-  next[existingIndex] = message;
-  return next;
-}
-
-function upsertConversation(items: PlaygroundConversation[], conversation: PlaygroundConversation) {
-  const existingIndex = items.findIndex((item) => item.id === conversation.id);
-  if (existingIndex === -1) return [conversation, ...items];
-  const next = [...items];
-  next[existingIndex] = conversation;
-  return next;
-}
-
-function isActiveChatJob(job: PlaygroundChatJob | null | undefined) {
-  return job ? job.status === "queued" || job.status === "running" : false;
-}
-
-function buildMemoryDrafts(memories: PlaygroundMemory[]) {
-  return Object.fromEntries(
-    memories.map((item) => [
-      item.key,
-      {
-        key: item.key,
-        value: item.value,
-        enabled: item.enabled !== false,
-      },
-    ]),
-  );
-}
-
-function replacePlaygroundConversationUrl(conversationId: string | null) {
-  const url = new URL(window.location.href);
-  if (conversationId) {
-    url.searchParams.set("conversationId", conversationId);
-  } else {
-    url.searchParams.delete("conversationId");
-  }
-  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-}
-
-function getJobLabel(job: PlaygroundChatJob | null | undefined) {
-  if (!job) return "";
-  if (job.status === "queued") return "排队中";
-  if (job.status === "running") return "生成中";
-  if (job.status === "failed") return "失败";
-  if (job.status === "cancelled") return "已取消";
-  return "已完成";
-}
-
-function getMessageStatusLabel(status: PlaygroundMessage["status"]) {
-  if (status === "queued") return "排队中";
-  if (status === "running" || status === "pending") return "后台生成中";
-  return "后台生成中";
-}
-
-function buildComposerMessage(
-  rawMessage: string,
-  mode: ComposerMode,
-  skill: PlaygroundSkill | null,
-  thinkingEnabled: boolean,
-) {
-  const instructions: string[] = [];
-  if (skill) {
-    instructions.push(`当前启用 Skill：${skill.title}\n${skill.prompt}`);
-  }
-  if (mode === "image") {
-    instructions.push("请按图像创作方向回复，优先给出画面、风格、构图、主体、光影和提示词。");
-  }
-  if (mode === "video") {
-    instructions.push("请按视频创作方向回复，优先给出镜头、节奏、运动、分镜、时长和可执行提示词。");
-  }
-  if (thinkingEnabled) {
-    instructions.push("请先给出简短思路或步骤，再给出可直接执行的结果。");
-  }
-  return [...instructions, rawMessage].join("\n\n");
-}
-
-function modelLabel(model: PlaygroundModel) {
-  return model.name || model.id;
-}
+import { ConversationDrawer } from "./ConversationDrawer";
+import { MemoryDrawer } from "./MemoryDrawer";
+import { PlaygroundComposer } from "./PlaygroundComposer";
+import {
+  buildComposerMessage,
+  buildMemoryDrafts,
+  getJobLabel,
+  getMessageStatusLabel,
+  isActiveChatJob,
+  playgroundSkills,
+  replacePlaygroundConversationUrl,
+  skillCategories,
+  starterPrompts,
+  upsertConversation,
+  upsertMessage,
+  type ComposerMode,
+  type MemoryDraft,
+  type PlaygroundSkill,
+} from "./playgroundDisplay";
 
 export default function Playground() {
   const actorId = useActorId();
@@ -292,10 +100,6 @@ export default function Playground() {
     .filter(isActiveChatJob)
     .map((job) => `${job.id}:${job.status}`)
     .join("|");
-  const selectedModelName =
-    models.find((model) => model.id === selectedModel)?.name || selectedModel || "Qwen Plus";
-  const activeMode = composerModes.find((mode) => mode.value === composerMode) || composerModes[0];
-  const ActiveModeIcon = activeMode.icon;
   const visibleSkills = playgroundSkills.filter((skill) => skill.category === activeSkillCategory);
 
   useEffect(() => {
@@ -627,241 +431,35 @@ export default function Playground() {
   };
 
   const renderConversationPanel = () => (
-    <aside className="flex h-full w-[min(350px,calc(100vw-40px))] shrink-0 flex-col border-r border-neutral-200 bg-white shadow-2xl xl:w-[330px] xl:shadow-none dark:border-border dark:bg-card">
-      <header className="border-b border-neutral-200 px-4 py-4 dark:border-border">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-neutral-950 dark:text-foreground">历史对话</h2>
-            <p className="mt-1 text-xs text-neutral-500">{conversations.length || 0} 个历史记录</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setConversationPanelOpen(false)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-950 dark:hover:bg-accent dark:hover:text-foreground"
-            aria-label="关闭会话栏"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={startNewConversation}
-          className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-full bg-neutral-950 text-sm font-medium text-white transition hover:bg-neutral-800 dark:bg-primary dark:text-primary-foreground"
-        >
-          <Plus className="h-4 w-4" />
-          新对话
-        </button>
-        <label className="mt-3 flex h-10 items-center gap-2 rounded-full border border-neutral-200 bg-neutral-50 px-3 text-sm text-neutral-500 dark:border-border dark:bg-background">
-          <Search className="h-4 w-4" />
-          <input
-            value={conversationSearch}
-            onChange={(event) => setConversationSearch(event.currentTarget.value)}
-            placeholder="搜索会话"
-            className="min-w-0 flex-1 bg-transparent text-neutral-950 outline-none placeholder:text-neutral-400 dark:text-foreground"
-          />
-        </label>
-      </header>
-
-      <div className="flex-1 overflow-y-auto p-2">
-        {conversations.length === 0 ? (
-          <div className="flex h-44 flex-col items-center justify-center px-4 text-center text-sm text-neutral-500">
-            <History className="mb-3 h-6 w-6" />
-            还没有对话记录
-          </div>
-        ) : (
-          conversations.map((conversation) => {
-            const job = activeJobByConversation.get(conversation.id);
-            return (
-              <div
-                key={conversation.id}
-                className={cn(
-                  "group mb-1 rounded-xl border border-transparent p-3 transition",
-                  activeConversation?.id === conversation.id
-                    ? "border-neutral-300 bg-neutral-100 dark:border-primary/30 dark:bg-primary/10"
-                    : "hover:bg-neutral-50 dark:hover:bg-accent",
-                )}
-              >
-                <button
-                  type="button"
-                  onClick={() => void openConversation(conversation)}
-                  className="block w-full text-left"
-                >
-                  <div className="line-clamp-1 text-sm font-medium text-neutral-950 dark:text-foreground">
-                    {conversation.title || "新对话"}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
-                    {job ? (
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin text-blue-500" />
-                    ) : (
-                      <Clock className="h-3.5 w-3.5" />
-                    )}
-                    <span>
-                      {job
-                        ? `${getJobLabel(job)} ${job.progress || 0}%`
-                        : formatTime(conversation.lastMessageAt || conversation.updatedAt)}
-                    </span>
-                    <span>{conversation.messageCount || 0} 条</span>
-                  </div>
-                </button>
-                <div className="mt-2 hidden items-center gap-1 group-hover:flex">
-                  <button
-                    type="button"
-                    onClick={() => void renameConversation(conversation)}
-                    className="inline-flex h-7 items-center gap-1 rounded-full border border-neutral-200 px-2 text-xs text-neutral-500 hover:bg-white hover:text-neutral-950 dark:border-border dark:hover:bg-background dark:hover:text-foreground"
-                  >
-                    <Pencil className="h-3 w-3" />
-                    重命名
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void removeConversation(conversation)}
-                    className="inline-flex h-7 items-center gap-1 rounded-full border border-neutral-200 px-2 text-xs text-neutral-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-border"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    删除
-                  </button>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </aside>
+    <ConversationDrawer
+      conversations={conversations}
+      activeConversation={activeConversation}
+      activeJobByConversation={activeJobByConversation}
+      conversationSearch={conversationSearch}
+      setConversationSearch={setConversationSearch}
+      onClose={() => setConversationPanelOpen(false)}
+      onStartNewConversation={startNewConversation}
+      onOpenConversation={openConversation}
+      onRenameConversation={renameConversation}
+      onRemoveConversation={removeConversation}
+    />
   );
 
   const renderMemoryPanel = () => (
-    <aside className="flex h-full w-[min(360px,100%)] shrink-0 flex-col border-l border-neutral-200 bg-white shadow-2xl xl:w-[340px] xl:shadow-none dark:border-border dark:bg-card">
-      <header className="flex min-h-16 items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-border">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-neutral-950 dark:text-foreground">
-            <StickyNote className="h-4 w-4 text-blue-500" />
-            记忆
-          </h2>
-          <p className="mt-1 text-xs text-neutral-500">
-            {memories.length ? `${enabledMemoryCount}/${memories.length} 条启用` : "暂无记忆"}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={toggleMemoryPreference}
-            disabled={!canUsePlayground}
-            className={cn(
-              "inline-flex h-8 items-center gap-1 rounded-full border px-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-50",
-              memoryPreference.enabled
-                ? "border-blue-100 bg-blue-50 text-blue-700"
-                : "border-neutral-200 text-neutral-500 hover:bg-neutral-50 dark:border-border",
-            )}
-          >
-            <Check className="h-3.5 w-3.5" />
-            {memoryPreference.enabled ? "启用" : "停用"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void loadMemories()}
-            disabled={!canUsePlayground}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 text-neutral-500 transition hover:bg-neutral-50 hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-border dark:hover:bg-accent dark:hover:text-foreground"
-            aria-label="刷新记忆"
-            title="刷新记忆"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setMemoryPanelOpen(false)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-950 dark:hover:bg-accent dark:hover:text-foreground"
-            aria-label="收起记忆"
-            title="收起记忆"
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto p-3">
-        {memories.length === 0 ? (
-          <div className="flex h-full min-h-64 flex-col items-center justify-center px-6 text-center">
-            <Sparkles className="h-8 w-8 text-neutral-400" />
-            <h3 className="mt-3 text-sm font-semibold text-neutral-950 dark:text-foreground">还没有自动记忆</h3>
-            <p className="mt-2 text-xs leading-5 text-neutral-500">
-              持续对话后，系统会把稳定偏好和长期信息沉淀到这里。
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {memories.map((memory) => {
-              const draft = memoryDrafts[memory.key] || {
-                key: memory.key,
-                value: memory.value,
-                enabled: memory.enabled !== false,
-              };
-              return (
-                <article
-                  key={memory.key}
-                  className="rounded-xl border border-neutral-200 bg-neutral-50/80 p-3 dark:border-border dark:bg-background"
-                >
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <label className="flex items-center gap-2 text-xs font-medium text-neutral-500">
-                      <input
-                        type="checkbox"
-                        checked={draft.enabled}
-                        onChange={(event) =>
-                          updateDraft(memory.key, { enabled: event.currentTarget.checked })
-                        }
-                        className="h-3.5 w-3.5 accent-neutral-950"
-                      />
-                      启用
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => void saveMemory(memory.key)}
-                        disabled={savingMemoryKey === memory.key}
-                        className="inline-flex h-7 items-center gap-1 rounded-full border border-neutral-200 bg-white px-2 text-xs text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950 disabled:opacity-60 dark:border-border dark:bg-card"
-                      >
-                        {savingMemoryKey === memory.key ? (
-                          <LoaderCircle className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Save className="h-3 w-3" />
-                        )}
-                        保存
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void removeMemory(memory)}
-                        className="inline-flex h-7 items-center justify-center rounded-full border border-neutral-200 bg-white px-2 text-neutral-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-border dark:bg-card"
-                        aria-label="删除记忆"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                  <input
-                    value={draft.key}
-                    onChange={(event) => updateDraft(memory.key, { key: event.currentTarget.value })}
-                    className="h-9 w-full rounded-lg border border-neutral-200 bg-white px-2.5 text-xs font-medium text-neutral-950 outline-none transition focus:border-neutral-400 dark:border-border dark:bg-card dark:text-foreground"
-                  />
-                  <textarea
-                    value={draft.value}
-                    onChange={(event) =>
-                      updateDraft(memory.key, { value: event.currentTarget.value })
-                    }
-                    rows={4}
-                    className="mt-2 w-full resize-none rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-xs leading-5 text-neutral-950 outline-none transition focus:border-neutral-400 dark:border-border dark:bg-card dark:text-foreground"
-                  />
-                  <div className="mt-2 flex items-center justify-between text-[11px] text-neutral-500">
-                    <span>
-                      置信度 {memory.confidence == null ? "--" : Math.round(memory.confidence * 100)}
-                    </span>
-                    <span>{formatTime(memory.updatedAt)}</span>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </aside>
+    <MemoryDrawer
+      memories={memories}
+      enabledMemoryCount={enabledMemoryCount}
+      memoryPreference={memoryPreference}
+      canUsePlayground={canUsePlayground}
+      memoryDrafts={memoryDrafts}
+      savingMemoryKey={savingMemoryKey}
+      onToggleMemoryPreference={toggleMemoryPreference}
+      onRefreshMemories={() => void loadMemories()}
+      onClose={() => setMemoryPanelOpen(false)}
+      updateDraft={updateDraft}
+      saveMemory={saveMemory}
+      removeMemory={removeMemory}
+    />
   );
 
   const renderComposer = (compact = false) => (
