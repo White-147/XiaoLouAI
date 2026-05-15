@@ -9,14 +9,13 @@
 
 ```text
 Phase: O public-access-hardening-owner-queue
-Owner: O6 capacity-and-load-verification-owner completed
-Status: Public access capacity/readiness is now measurable through
-scripts/windows/verify-public-access-capacity.ps1. Default mode is offline and
-non-secret; -RunHttp verifies public-origin static cache, metadata
-compression/cache/ETag, object range reads, active-job polling p95, and optional
-auth 429 behavior.
-Goal: close media storage, edge/API protection, prewarm budget, API cache/
-compression and capacity-verification gaps without broad runtime rewrites.
+Owner: docs-sync-readme-navigation-owner completed
+Status: O queue is closed. Root README has been rewritten as a public-facing
+project entry like D:\code\BookRecommendation\README.md, and detailed
+architecture/development/deployment/constraints/operations notes now live under
+docs/.
+Goal: keep the repository readable after public-access hardening without
+restoring legacy runtime paths or turning README back into a long task log.
 ```
 
 ## 开始前先读
@@ -24,6 +23,11 @@ compression and capacity-verification gaps without broad runtime rewrites.
 ```powershell
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Get-Content .\README.md -Encoding UTF8
+Get-Content .\docs\architecture.md -Encoding UTF8
+Get-Content .\docs\development.md -Encoding UTF8
+Get-Content .\docs\deployment-windows.md -Encoding UTF8
+Get-Content .\docs\engineering-constraints.md -Encoding UTF8
+Get-Content .\docs\operations-and-evidence.md -Encoding UTF8
 Get-Content .\XIAOLOU_REFACTOR_HANDOFF.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-phase-plan.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-task-record.md -Encoding UTF8
@@ -92,6 +96,9 @@ O6 capacity-and-load-verification-owner 已完成：新增
 read、active-job p95 和可选 auth 429。
 O 队列已收口。若只想提交当前代码/文档，先做提交准备 owner，确认 tracked diff
 只包含预期代码/文档；deploy/records 仍然不要 force-add。
+README/docs sync 已完成：根 README 改为项目入口、功能/技术栈/架构/目录/部署/
+文档导航/后续方向结构；详细架构、开发、Windows 部署、公网访问、工程约束和
+运维证据边界已拆到 docs/。
 不要同时开启新的未命名 owner。
 不要恢复 Jaaz/Node core-api/Vite dev 生产入口。
 ```
@@ -99,7 +106,7 @@ O 队列已收口。若只想提交当前代码/文档，先做提交准备 owne
 ## 硬性约束指针
 
 ```text
-完整约束以 README 的 Hard Constraints 为准。
+完整约束以 README 与 docs\engineering-constraints.md 为准。
 本短棒只提示：高内聚、低耦合、按 product-area 聚合、前端只走
 Control API DTO/API wrappers、不得恢复 Jaaz/Node core-api/Node payment
 runtime/task-stream/Node memory-vector、不得碰 .env/Vite proxy/Caddy/IIS/
@@ -122,7 +129,8 @@ git diff --check
 
 ```text
 根 handoff 只写短棒。
-阶段计划、任务记录、历史 owner 展开和归档材料写入 deploy\records。
+公开入口与稳定说明写入 README/docs；阶段计划、任务记录、历史 owner 展开和
+归档材料写入 deploy\records。
 所有 handoff/docs 保持 UTF-8 Markdown。
 关键 owner、决策和验证入口一事一行。
 ```

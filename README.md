@@ -1,259 +1,119 @@
-# XiaoLouAI - Windows 原生 AI 创作平台
+# XiaoLouAI
 
-本文件是项目唯一 README。原先分散在前端、控制面、本地模型 worker、
-legacy evidence、retained material、Caddy 与 toolbox 目录下的 README 内容已合并到这里；
-后续只维护这一份入口文档，避免同一信息在多个目录里漂移。
+XiaoLouAI 是一个 Windows 原生 AI 创作平台，面向图片、视频、剧本、分镜、素材库、画布编排、Playground 调试和企业管理等内容生产场景。项目采用 React 前端、.NET Control API、PostgreSQL canonical 数据库、Windows Service workers 和对象存储组成一套可部署、可审计、可继续扩展的工程链路。
 
-## 产品概览
+当前仓库已经整理为 monorepo。前端生产形态是静态 Vite build，后端生产控制面是 `.NET 8 / ASP.NET Core`，异步任务通过 PostgreSQL 队列和 Windows worker 执行。历史 Jaaz、Node `core-api`、Linux/Docker/Celery/Redis 方案仅保留为迁移参考，不作为当前生产入口。
 
-XiaoLouAI 是面向内容创作团队的 AI 创作与资产协作平台。它把图片创作、
-视频创作、剧本与分镜工具、素材库、画布编排、Playground 调试和企业管理放在同一个
-Windows 原生部署里，让创作者可以从创意、提示词、素材、生成任务到项目资产沉淀走完闭环。
+> 说明：本仓库不包含真实生产密钥、真实 provider 账号、支付凭证、对象存储凭证、生产数据库 dump、运营证据或本地 runtime 数据。这些材料应保存在 `.runtime`、`deploy/local-secrets` 或运营方密钥/证据系统中，不能提交到 Git。
 
-当前产品功能按使用场景分为：
+## 项目功能
 
-- 首页和 AI 工具箱：提供能力入口与轻量任务流，包括剧本拆解、视频反推提示词、
-  25 格分镜、人物替换、动作迁移、高清修复和翻译等工具。
-- 图片创作：支持参考图上传、素材库引用、模型选择、任务创建、生成结果预览、
-  下载与同步到项目资产库。当前 Vertex Gemini 图片模型已接入真实出图链路。
-- 视频创作：支持视频/图片/音频参考素材、比例与时长参数、模型选择和任务队列。
-  Vertex/Veo 视频适配仍是后续工作，现阶段视频侧继续沿用既有任务框架。
-- Playground：用于原生 canonical 会话、消息、记忆偏好、模型配置和聊天任务验证；
-  前端体验按 ChuangJingAI 创意入口 composer、Skills、模型/模式菜单重做。
-- 原生画布与智能体画布：承载视觉素材、生成节点和项目化编排；智能体画布当前从
-  XiaoLou 主前端进入，历史 Jaaz 仅保留为非生产参考，不再作为默认生产控制面。
-- 资产与项目管理：按项目沉淀图片、视频、storyboard、dubbing、export 等资产，
-  并通过 Control API 与 PostgreSQL canonical tables 保持一致。
-- 账号、组织、钱包与管理后台：支持身份、组织成员、API-center 配置、价格规则、
-  订单读取、企业申请与权限控制。权限策略要求只有游客缺少创作权限。
+- 首页与 AI 工具箱：统一展示创作入口、项目导航、账号中心和轻量工具能力。
+- 图片创作：支持参考图、素材库引用、模型选择、任务创建、生成结果预览、下载和同步到项目资产库；Vertex Gemini 图片链路已接入真实出图路径。
+- 视频创作：支持视频、图片、音频参考素材、比例/时长参数、模型选择和任务队列；视频 provider 适配仍按独立 owner 推进。
+- 剧本与分镜工具：包含剧本拆解、视频反推提示词、25 格分镜、剧本广场和漫剧制作流程。
+- Playground：用于 canonical 会话、消息、模型配置、记忆偏好和聊天任务验证。
+- 原生画布与智能体画布：承载素材、生成节点、项目化编排和 Agent Canvas 调试入口。
+- 资产与项目管理：按项目沉淀图片、视频、storyboard、dubbing、export 等资产，并通过 Control API 与 PostgreSQL canonical tables 保持一致。
+- 账号、组织、钱包与管理后台：支持身份、组织成员、API-center 配置、钱包流水、价格规则、订单读取、企业申请和权限控制。
+- 公网访问硬化：包含对象存储本地 provider 公开契约、API 限流/并发/body cap、Home-to-Playground 预热预算、稳定 metadata 短缓存/压缩和容量核验脚本。
 
-从产品视角看，平台核心目标不是单点调用某个模型，而是把“工具箱能力、
-多模态创作器、项目资产库、画布和企业管理”统一成一个可部署、可审计、可继续扩展的生产系统。
+## 技术栈
 
-## 功能入口
+| 模块 | 技术 |
+| --- | --- |
+| 前端 | React 19、React Router 7、TypeScript、Vite 6、Tailwind CSS 4、lucide-react、motion、Three.js / React Three Fiber |
+| 控制面 | .NET 8、ASP.NET Core Minimal APIs、xUnit |
+| 数据库 | PostgreSQL，canonical tables、`FOR UPDATE SKIP LOCKED`、advisory locks、`LISTEN/NOTIFY` |
+| 异步执行 | Windows Service workers、ClosedApiWorker、LocalModelWorkerService |
+| AI / Provider | Vertex Gemini 图片生成链路、可扩展 closed API provider route、本地模型 sidecar 边界 |
+| 存储 | 对象存储抽象、本地 object-storage provider、签名上传/读取、HTTP range media read |
+| 部署 | Windows Service、Caddy/IIS 反向代理、PowerShell install/publish/register/preflight scripts |
+| 测试与门禁 | Vitest、Playwright synthetic E2E、GitHub Actions、PowerShell verification gates、`dotnet test` |
 
-| 模块 | 路径 | 当前说明 |
-| --- | --- | --- |
-| 首页 / AI 工具箱 | `/home`、`/` | 能力卡片、工具箱入口、项目导航和账号中心；Layout/nav shell 与 L2 拆出的账号中心 helper 位于 `XIAOLOU-main/src/features/home/nav-layout/`。 |
-| 图片创作 | `/create/image` | 前端位于 `XIAOLOU-main/src/features/create-image/image-create/`，支持参考图和素材库引用；Vertex 图片链路已接入真实 provider。 |
-| 视频创作 | `/create/video` | 前端位于 `XIAOLOU-main/src/features/create-video/video-create/`；L5 已拆出 videoCapabilities、videoResultHelpers、参考输入、结果网格、任务历史和多参考槽组件，provider/runtime 行为和任务轮询保持不变。 |
-| 剧本广场 | `/script-plaza` | 前端位于 `XIAOLOU-main/src/features/comic-production/script-plaza/`，用于从剧本模板创建漫剧项目。 |
-| 漫剧制作 | `/comic/*` | 前端位于 `XIAOLOU-main/src/features/comic-production/comic/`，包含全局设定、剧本、资产、分镜、视频、配音和预览。 |
-| 剧本拆解 | `/create/script-breakdown` | 前端位于 `XIAOLOU-main/src/features/toolbox/script-breakdown/`，通过 toolbox job API 排队。 |
-| 人物替换 | `/create/video-replace` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-replace/`，Python sidecar 位于 `backend/services/toolbox/video-replace-sidecar/`。 |
-| 视频反推提示词 | `/create/video-reverse` | 前端位于 `XIAOLOU-main/src/features/toolbox/video-reverse/`，通过 toolbox job API 排队。 |
-| 25 格分镜 | `/create/storyboard-25` | 前端位于 `XIAOLOU-main/src/features/toolbox/storyboard-25/`，通过 toolbox job API 排队。 |
-| 原生画布 | `/create/canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/canvas/`；L6 已确认实际 host shell 为 `CanvasCreate.tsx`、runtime 为 `runtime/App.tsx`，L7 已拆出 host shell helper/presentational 文件，L9/L10/L12/L14/L16 已抽出 generation、asset、project、save、project-load helpers，L18 已收口并建议停止继续拆 host shell，runtime 行为未改。 |
-| 智能体画布 | `/create/agent-canvas` | 前端宿主和 runtime 位于 `XIAOLOU-main/src/features/canvas-agent-canvas/agent-canvas/`；K3 已对齐 ChuangJingAI 风格加载/权限/空画布入口，L7 已拆出 host shell helper/presentational 文件，L9/L10/L12/L14/L16 已抽出 Agent Canvas generation、asset、project、save、project-load helpers，L18 已收口并建议停止继续拆 host shell；深层 local image edit、overlay、3D Director 与 runtime cleanup 后续单独 owner。 |
-| 资产管理 | `/assets` | 前端位于 `XIAOLOU-main/src/features/assets-media-projects/assets/`；L5 已拆出 assetDisplay、assetCache、侧栏、资产网格、画布项目区和表单/预览弹窗，资产/项目权限与 API wrapper 保持不变。 |
-| 企业控制台 | `/enterprise` | 前端位于 `XIAOLOU-main/src/features/account-admin-enterprise/enterprise-console/`；L4 已拆出 summary、成员创建/监管、账单和账号管理展示面板。 |
-| 账号 / 超级后台 | `/admin` | 超级管理员控制台位于 `XIAOLOU-main/src/features/account-admin-enterprise/super-admin-console/`；L4 已拆出用量、平台账单、订单审核和平台账号面板，注册页、充值审核页和 Google 登录按钮分别收口到同一 owner 下的 `register/`、`admin-orders/`、`auth/`。 |
-| Playground | `/playground` | 前端位于 `XIAOLOU-main/src/features/playground/`；K2 已按 ChuangJingAI 重做为创意入口 composer，L3 已拆出 composer、会话抽屉、记忆抽屉和 display helper。 |
-| 积分统计 | `/wallet/usage` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/credit-usage/`，用于个人或平台视角的积分消耗统计。 |
-| API 中心 | `/api-center` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/api-center/`，用于供应商模型、默认链路和 API Key 配置。 |
-| 钱包充值 | `/wallet/recharge` | 前端位于 `XIAOLOU-main/src/features/wallet-payments-api-center/wallet-recharge/`，用于钱包充值订单、支付方式、凭证上传和最近流水。 |
+## 系统架构
 
-## Technical Positioning
+```mermaid
+flowchart LR
+    User["用户 / 管理员"] --> Browser["React + Vite 静态前端"]
+    Browser --> Proxy["Caddy / IIS\n静态文件 + public API proxy"]
+    Proxy --> Api[".NET Control API\nASP.NET Core"]
+    Api --> Pg["PostgreSQL\ncanonical state + queues"]
+    Api --> Storage["Object Storage\nmedia primary storage"]
+    Api --> Payment["Payment callbacks\ncanonical ledger"]
+    Pg --> ClosedWorker["ClosedApiWorker\nprovider jobs"]
+    Pg --> LocalWorker["LocalModelWorkerService\nlocal model lane"]
+    ClosedWorker --> Provider["Closed API providers\nVertex / future routes"]
+    Provider --> Storage
+    LocalWorker --> Sidecar["Python local model sidecar\nexplicit adapter boundary"]
+    Sidecar --> Storage
+    Storage --> Browser
+```
 
-XiaoLouAI production is Windows-native and PostgreSQL-first. The long-term
-control plane is `.NET 8 / ASP.NET Core`; Python is reserved for local model
-adapters and inference runners.
+生产部署目标是 Windows 原生：静态前端由 Caddy/IIS 直接服务，API 请求转发到本机 `127.0.0.1:4100` 的 `.NET` Control API，Control API 和 workers 通过 PostgreSQL 与对象存储协作。生产流量不得路由到 Vite dev/preview server、Jaaz runtime、Node `core-api`、Docker、Linux、Kubernetes、Windows + Celery 或 Redis Open Source on Windows。
 
-## Production Architecture
+## 目录结构
 
 ```text
-XIAOLOU-main/dist                  frontend static site
-backend/dotnet/control-plane/              .NET 8 / ASP.NET Core control API
-PostgreSQL                         only source of truth
-Windows Service workers            local model + closed API execution
-object storage                     media primary storage
+XiaoLouAI/
+├── XIAOLOU-main/                       # React + Vite 前端；dist 为生产静态产物
+│   └── src/features/                   # 按产品域组织的前端功能代码
+├── backend/
+│   ├── dotnet/control-plane/           # .NET Control API、Domain、Postgres/Storage infra、workers、tests
+│   └── services/                       # 显式签过边界的 Python/local sidecar
+├── deploy/
+│   ├── caddy/                          # Caddy 静态站点 + API proxy 配置
+│   ├── windows/                        # Windows proxy 示例、ops runbook、IIS/Caddy 样例
+│   ├── records/                        # 本地阶段记录；默认被忽略，不 force-add
+│   └── retained/                       # 非密 retained evidence/material
+├── docs/                               # 架构、开发、部署、约束与运维说明
+├── scripts/windows/                    # Windows install、publish、service、backup、verification scripts
+├── XIAOLOU_REFACTOR_HANDOFF.md          # 当前短棒交接
+├── .gitignore
+└── README.md
 ```
 
-The production target does not use Linux hosts, Linux containers, Docker,
-Kubernetes, Windows + Celery, or Redis Open Source on Windows as critical
-runtime dependencies. First-stage async execution uses PostgreSQL advisory
-locks, `FOR UPDATE SKIP LOCKED`, and `LISTEN/NOTIFY`.
+`deploy/records/` 是本地长记录目录，默认不进入 Git；`XIAOLOU-main/dist/`、`.runtime/`、`deploy/local-secrets/` 和真实凭证/证据目录也不应提交。
 
-## Hard Constraints
+## 核心创作链路
 
-These constraints are canonical for future XiaoLouAI work. If they conflict
-with an older handoff note, follow this section and the current phase plan.
+用户在前端提交图片、视频、Playground 或 toolbox 任务时，前端只调用 Control API DTO/API wrappers。Control API 完成身份、账号范围、权限、body cap 和限流检查后，把 canonical 状态写入 PostgreSQL，再由 Windows workers 租约执行任务。生成媒体写入对象存储，最终通过稳定 media URL 或 signed read URL 返回给前端。
 
-### Software Design
+```mermaid
+sequenceDiagram
+    participant F as React 前端
+    participant A as .NET Control API
+    participant P as PostgreSQL
+    participant W as Windows Worker
+    participant V as Provider / Local Adapter
+    participant O as Object Storage
 
-- Prefer high cohesion and low coupling.
-- Keep each owner slice responsible for one clear reason to change.
-- Keep concerns separated: shell/navigation, data loading, API adapters, forms,
-  tables, dialogs, runtime orchestration and provider execution should not be
-  mixed without a documented reason.
-- Use dependency inversion at practical boundaries: UI should depend on feature
-  API wrappers and DTOs, not concrete backend/runtime implementation details.
-- Do not add abstractions just to look architecturally complete. Add them only
-  when they remove real duplication, isolate a real variation point, or make a
-  targeted split safer.
-- Do not broad-rewrite large files during unrelated feature or parity work.
-  Large files must be split through explicit owners with before/after
-  validation.
-- Avoid cross-layer reverse dependencies, circular dependencies and implicit
-  shared global state.
-- If temporary direct wiring is needed to land a narrow MVP behavior, keep it
-  inside a single adapter/gateway and record the debt in the task record.
-
-### Directory And Ownership
-
-- Active frontend product code belongs under
-  `XIAOLOU-main/src/features/<product-area>/`.
-- Group by route, product area or feature capability; do not scatter one
-  product capability across low-information directories.
-- Shared UI/layout primitives may live in an existing shared owner only when
-  they are genuinely reused. Do not create broad `common`, `misc`, `helpers` or
-  `utils` buckets for unrelated work.
-- Backend Control API work belongs under `backend/dotnet/control-plane/`.
-- Non-.NET runtime services belong under `backend/services/<product-area>/...`
-  only after an explicit owner signs the service boundary.
-- Deployment, retained evidence, operations notes and long-running records
-  belong under `deploy/`.
-- The root handoff must remain a short baton; long plans and task history
-  belong in `deploy/records`.
-
-### Runtime Boundaries
-
-- Frontend must communicate through `.NET Control API` DTO/API wrappers.
-- UI must not directly access databases, filesystem writes, Python scripts,
-  model SDKs, FFmpeg or provider credentials.
-- PostgreSQL remains canonical for account, organization, wallet/payment,
-  project, job, Playground memory/conversation and asset state.
-- Jobs are leased from PostgreSQL-backed queues; workers must not hold
-  canonical task state only in memory.
-- Python is reserved for explicitly signed local model/sidecar adapters.
-- Payment callbacks use canonical `/api/payments/callbacks/{provider}` routes
-  and idempotent ledger writes.
-- Real provider secrets, production dumps, payment captures, object-storage
-  credentials and retained local secrets must stay out of Git.
-
-### Forbidden Restorations
-
-- Do not restore Jaaz iframe/runtime as a default production path.
-- Do not restore Node `core-api` or make Node/Express a control plane.
-- Do not restore Node memory/vector stores.
-- Do not restore Node payment runtime or legacy payment aliases.
-- Do not restore `/api/tasks/stream` as a default live path.
-- Do not route production traffic to legacy Jaaz, legacy Node services, Vite
-  dev/preview servers, Docker, Linux, Kubernetes, Windows + Celery or Redis
-  Open Source on Windows.
-- Do not delete `agent-studio`; it remains retained for debug/reference until
-  an explicit owner decides otherwise.
-- Do not import ChuangJingAI monolith files wholesale. Use ChuangJingAI as a
-  reference and port behavior into XiaoLouAI owners.
-
-### Environment And Tooling
-
-- Do not edit `.env`, Vite proxy, Caddy, IIS, Windows service scripts or
-  deployment scripts unless the current owner explicitly covers that surface.
-- Do not create Python sidecars/adapters by default.
-- Dependencies, runtime data, logs, uploads, generated media and caches should
-  stay under the project directory or an explicitly approved D-drive tool path.
-- Do not intentionally write project dependencies, caches, runtime data or
-  generated assets to C drive. If a tool cannot avoid C-drive writes, stop and
-  ask for confirmation.
-- Keep verification scripts strict, but distinguish runtime dependencies from
-  test fixtures.
-
-### Documentation And Verification
-
-- Every code, script, config, runtime or README change must update the related
-  phase/task documentation before handoff closure.
-- Root handoff only records the current phase, immediate next owner, hard
-  boundaries and validation entry. It must not duplicate old phase history.
-- New phases must have a phase plan and task record in `deploy/records`.
-- Use UTF-8 Markdown that is readable with PowerShell `Get-Content` and
-  searchable with `Select-String`.
-- Prefer short lines, ordinary headings, ordinary lists and text code blocks.
-- Default frontend validation is:
-
-```powershell
-git status --short --branch
-npm --prefix .\XIAOLOU-main run lint
-npm --prefix .\XIAOLOU-main run test:unit
-npm --prefix .\XIAOLOU-main run build
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency
-git diff --check
+    F->>A: 创建生成任务 / 上传素材 / 查询任务
+    A->>A: client auth / account scope / rate limit / body cap
+    A->>P: 写入 jobs、toolbox_runs、media、project state
+    W->>P: lease job with SKIP LOCKED
+    W->>V: 调用 provider 或本地 adapter
+    V-->>W: 返回生成结果
+    W->>O: 写入生成媒体
+    W->>P: 写入 job result 和 canonical media state
+    F->>A: 查询任务/资产
+    A-->>F: 返回稳定结果 URL 与状态
 ```
 
-- If backend contracts are touched, also run:
+## 数据、密钥与隐私说明
 
-```powershell
-dotnet test .\backend\dotnet\control-plane\tests\XiaoLou.ControlApi.Tests\XiaoLou.ControlApi.Tests.csproj --no-restore -v:minimal
-```
+仓库只保留源码、配置模板、合成测试、非密 retained material 和运维脚本。以下内容不能提交：
 
-## Repository Layout
+- 真实生产数据库 dump、支付回放原文、provider 账号、对象存储密钥、CDN/WAF 凭证。
+- `.runtime` 下的运行日志、产物、备份、证据和本地服务状态。
+- `deploy/local-secrets` 下的真实 env、service-account、支付证书和运营材料。
+- 原始 legacy runtime 目录作为生产入口恢复后的代码或依赖。
 
-```text
-XIAOLOU-main/          React + Vite SPA; production output is dist/
-XIAOLOU-main/src/features/account-admin-enterprise/ account/admin/enterprise/auth frontend surfaces
-XIAOLOU-main/src/features/assets-media-projects/ assets route, reference picker, media UI, and project asset surfaces
-XIAOLOU-main/src/features/canvas-agent-canvas/ canvas and agent-canvas frontend runtimes plus shared hooks
-XIAOLOU-main/src/features/comic-production/ comic production frontend surfaces and script state
-XIAOLOU-main/src/features/create-workbench/ shared create workbench shell/layout
-XIAOLOU-main/src/features/create-image/ create image frontend surface
-XIAOLOU-main/src/features/create-video/ create video frontend surface
-XIAOLOU-main/src/features/home/     home product surface, nav/layout shell, and profile helpers
-XIAOLOU-main/src/features/playground/ Playground frontend surface and API wrapper
-XIAOLOU-main/src/features/wallet-payments-api-center/ wallet/payment/API-center frontend surfaces
-XIAOLOU-main/src/features/toolbox/  toolbox frontend surfaces grouped by capability
-backend/dotnet/control-plane/  .NET control plane and Windows worker projects
-backend/services/toolbox/video-replace-sidecar/ local Python sidecar for video replacement
-backend/services/model-runtime/local-model-worker-sidecar/ local model queue worker sidecar
-deploy/caddy/          Windows Caddy static site + API proxy config
-deploy/windows/        Windows reverse-proxy examples and operations runbooks
-scripts/windows/       Windows install, service, backup, and runtime scripts
-deploy/records/                  local handoff and Windows-native operations notes
-legacy/core-api/       historical Node compatibility path; source/root removed
-legacy/services-api/   historical legacy Python reference path; source/root removed
-legacy/jaaz/           historical upstream Jaaz path; source/root removed
-legacy/                archived legacy references; no live working-tree root
-deploy/retained/legacy-surface-evidence/ retained sanitized manifests for non-live legacy source gates
-deploy/retained/legacy-local-material/ non-secret retained legacy material for deployment handoff
-```
+更多边界见 [工程约束](./docs/engineering-constraints.md) 和 [运维与证据边界](./docs/operations-and-evidence.md)。
 
-Former tools-based sidecar locations have been retired after the toolbox layout
-pass. New frontend toolbox work belongs under
-`XIAOLOU-main/src/features/toolbox/`; backend/runtime sidecars belong under
-`backend/services/toolbox/` or the `.NET` control-plane toolbox module.
+## 本地开发
 
-Retained evidence/material directories and upstream-adjacent directories no
-longer keep separate README files. Their production boundary notes are folded
-into this root README. Mentions of Docker, Linux, Celery, Redis, RabbitMQ,
-container startup, Jaaz, or legacy source paths are migration/reference records,
-not production deployment guides. Production operations are defined by this
-README and `deploy/windows/ops-runbook.md`.
-G2b-2 has moved the former root legacy reference paths `core-api/` and
-`services/api/` to `legacy/core-api` and `legacy/services-api`; G7d-3 has moved
-the former root upstream Jaaz reference to `legacy/jaaz`. The archive paths
-remain migration references only: do not register them as production services,
-reverse-proxy backends, scheduled tasks, or control-plane working directories.
-G11k removed the reviewed git-tracked legacy source candidates from
-`legacy/core-api`, `legacy/services-api`, and `legacy/jaaz`. G11l moved
-operator-approved non-secret local material out of `legacy/` into
-`deploy/retained/legacy-local-material/`, moved real env/service-account files
-and secret-like demo SQLite state into ignored `deploy/local-secrets/legacy/`,
-removed logs/caches/empty directories, and removed the remaining tracked legacy
-`.gitignore` files after root ignore coverage existed. The retained non-secret
-final-surface and projection manifests under `deploy/retained/legacy-surface-evidence/` are now
-the explicit non-live verifier evidence. The cleanup dry-run and release
-candidate verifiers pass these manifests into their dependent sub-gates when
-live legacy roots are intentionally absent; reduced RC runs remain warning
-evidence, not full final acceptance.
-
-Final positioning anchors remain unchanged for verifier clarity: the historical
-`legacy/core-api` role was "Node compatibility layer and migration reference",
-`legacy/services-api` was "legacy Python API reference; not production control plane",
-and `legacy/` remains "archived legacy references" rather than a production
-runtime.
-
-## Development Setup
-
-Frontend:
+### 1. 前端
 
 ```powershell
 cd XIAOLOU-main
@@ -261,13 +121,20 @@ npm install
 npm run dev
 ```
 
-The legacy Node compatibility source is no longer part of the tracked working
-tree. Legacy-only launchers skip missing roots or generated dependencies by
-default. For a deliberate historical comparison, restore the needed legacy
-source from an earlier git commit into a separate local copy, restore
-dependencies there, and point `LEGACY_CORE_API_ROOT` at that copy.
+前端 dev server 默认运行在：
 
-.NET control plane:
+```text
+http://localhost:3000
+```
+
+常用环境变量：
+
+```text
+VITE_CORE_API_BASE_URL=http://127.0.0.1:4100
+VITE_CORE_API_PROXY_TARGET=http://127.0.0.1:4100
+```
+
+### 2. .NET Control API
 
 ```powershell
 cd backend/dotnet/control-plane
@@ -276,262 +143,29 @@ dotnet build
 dotnet run --project .\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj
 ```
 
-Install the .NET 8 SDK on developer machines before building the control plane.
-
-### Frontend Notes
-
-The frontend lives under `XIAOLOU-main/` and is a React + Vite SPA. Normal
-development depends on the frontend dev server plus the `.NET` Control API on
-port `4100`; legacy Jaaz or Node-era services are optional historical comparison
-targets only.
-
-Useful frontend environment variables:
+Control API 默认监听：
 
 ```text
-VITE_CORE_API_BASE_URL=http://127.0.0.1:4100
-VITE_CORE_API_PROXY_TARGET=http://127.0.0.1:4100
-VITE_JAAZ_AGENT_CANVAS_URL=/jaaz/?embed=xiaolou
-VITE_JAAZ_DEV_PROXY_TARGET=http://localhost:5174
-VITE_JAAZ_API_PROXY_TARGET=http://127.0.0.1:57988
+http://127.0.0.1:4100
 ```
 
-Current frontend canonical route batches call `.NET` source endpoints for
-projects, canvas projects, agent-canvas projects, create image/video lists,
-identity/config, project-adjacent assets/storyboards/videos/dubbings/exports,
-admin reads, Playground, capabilities, and Toolbox. Playground and Toolbox now
-live under feature-owned paths. New route-owned code should live under
-`XIAOLOU-main/src/features/<product-area>/`. During an active move, old
-page/lib/component paths may briefly remain as thin compatibility re-exports,
-but they should be deleted once import scans, route checks, build, and targeted
-tests prove no old-path callers remain. H17 completed that cleanup for the
-known H-stage page/component/lib wrappers.
-
-### ChuangJingAI Frontend Alignment
-
-ChuangJingAI is the frontend visual and interaction reference for the next
-alignment phase. This does not change XiaoLouAI's production architecture:
-frontend code still lives under `XIAOLOU-main/src/features/<product-area>/`,
-talks to the `.NET` Control API through DTOs, and must not restore Jaaz or Node
-`core-api` as live production control planes.
-
-Phase K tracks this work in:
-
-```text
-deploy\records\xiaolouai-chuangjing-frontend-alignment-phase-plan.md
-deploy\records\xiaolouai-chuangjing-frontend-alignment-task-record.md
-```
-
-Confirmed scope:
-
-- Playground: rebuild `/playground` as the ChuangJingAI creative entry with
-  composer, starter prompts, Skills, model menu and mode menu; preserve current
-  XiaoLouAI conversations and memory controls as sidebars or drawers.
-- Agent Canvas: first align `/create/agent-canvas` shell, loading/permission
-  states, top-bar/chat entry and visible navigation; deeper local image edit,
-  node overlay, annotation and 3D Director feature blocks are later owners.
-- Account and profile: use ChuangJingAI account-center styling while retaining
-  XiaoLouAI avatar/profile editing, password change and default organization
-  selection inside the account center.
-
-K1 shared shell/account center is complete: the primary nav now uses the
-ChuangJingAI-style shell entries, `记忆中心` points at the Playground memory
-drawer, wallet usage/recharge stay reachable from the account center, and
-`ProfileModal` now presents `个人主页` / `订阅` / `账单` while keeping XiaoLouAI
-profile editing, password change and default organization selection.
-
-K2 Playground creative entry is complete: `/playground` now opens on the
-ChuangJingAI-style central composer with starter prompts, Skills, mode menu,
-model menu and thinking toggle. XiaoLouAI canonical conversations, messages,
-chat jobs, memory preference and memories remain on the existing Control API,
-with history and memory moved into secondary drawers via Playground controls and
-`/playground?panel=history|memory`. Web search and attachments remain deferred
-until the signed Playground API contract exposes those inputs.
-
-K3 Agent Canvas shell entry is complete: `/create/agent-canvas` now uses the
-ChuangJingAI-aligned Agent Canvas loading and permission states, and signed
-creator accounts see an empty-canvas entry guide for project library, image
-node, video node, chat orchestration, text, workflow and asset-library actions.
-The current XiaoLouAI direct runtime, TopBar, CanvasToolbar, ChatPanel modules
-and `.NET` project/chat contracts remain in place; local image edit, overlays
-and 3D Director remain deferred owners.
-
-K4 verification and handoff refresh is complete: frontend `lint`, unit tests
-and build pass, and browser smoke covers the K1 shared shell/account center,
-K2 Playground memory/history drawers and K3 Agent Canvas entry states on
-desktop and mobile. The K owner sequence is complete; the remaining
-ChuangJingAI parity gaps are explicit deferred owners:
-Agent Canvas project hub parity review, local image edit wiring, image
-overlays, image annotation, 3D Director, required provider/runtime sidecars,
-and Playground web search/attachments after a signed XiaoLouAI Playground API
-contract exists.
-
-Post-K frontend correction and design-constraint audit is complete on
-2026-05-14. The primary shell keeps only one Playground/Memory entry in the
-main navigation and uses the ChuangJingAI brain-like entry icon for
-`/playground`; memory remains a Playground drawer/control rather than an
-independent primary route. `/create/canvas` remains compiled and routable for
-debug/reference, but it is not a primary nav entry; `/create/agent-canvas`
-remains the visible smart-canvas entry. The account center hides billing for
-platform and enterprise admins after billing and wallet ledger views were added
-to the appropriate admin consoles: super admin now has separate `账单与流水` and
-`订单审核` modules, and enterprise admin has a separate `账单与流水` module plus
-renamed `账号管理`. Personal users and enterprise members still use account
-center billing.
-
-The same audit re-checked the broader software-design constraints. External
-references used for calibration were Microsoft's class-coupling guidance and
-the high-cohesion/low-coupling/SRP summaries from TechTarget. Current XiaoLouAI
-still follows the project-level direction: feature code is grouped by product
-area, frontend runtime calls go through Control API DTO wrappers, and the
-latest changes did not add new root directories or cross into backend,
-env/proxy/Caddy, payment runtime, Node `core-api`, Jaaz runtime or Python
-sidecar ownership. L2 has split the shell/account-center surface under
-`home/nav-layout` into presentational/helper modules for route prefetch, nav
-metadata, sidebar, auth modal, profile, subscription, billing and wallet
-ledger UI while preserving route, permission and API-wrapper behavior. L3 has
-split the Playground composer, conversation drawer, memory drawer and display
-helpers while keeping signed Playground API inputs and deferred web
-search/attachments unchanged. L4 has split the enterprise and super-admin
-consoles into admin/enterprise presentational panels while keeping .NET
-Payments/Admin contracts, wallet/order/account permissions and API wrappers
-unchanged. `VideoCreate.tsx` and `Assets.tsx` completed the L5
-presentational/helper split. L6 then completed a read-only Canvas / Agent
-Canvas app-shell preflight and corrected the effective boundaries: the active
-host shell files are `CanvasCreate.tsx` and `AgentCanvasCreate.tsx`; runtime
-apps remain under each `runtime/App.tsx`. L7 completed a no-behavior host-shell
-helper split under both Canvas directories, extracting `canvasBridgeMedia`,
-`canvasAssetBridge`, `canvasProjectSession`, `canvasProjectSaveHelpers` and
-`CanvasProjectLoadOverlay` while keeping API wrappers, task polling, project
-save/load, session/URL project IDs, thumbnail upload and UI copy stable. L8
-completed a read-only host-shell service-builder preflight. L9 completed a
-no-behavior generation service split under both Canvas directories, extracting
-`canvasHostGenerationService` and `agentCanvasHostGenerationService` for
-generation, task polling, recovery, stray lookup and capabilities while keeping
-API wrappers, project resolver, Canvas model capability checks, Agent Canvas
-`resultUrls`, recovery error copy, UI copy and host-service registration timing
-stable. L10 completed a no-behavior asset service split under both Canvas
-directories, extracting `canvasHostAssetService` and
-`agentCanvasHostAssetService` for asset context, list/create/delete/upload,
-asset DTO normalization, sourceModule and media-kind mapping while keeping API
-wrappers, project resolver, permissions, upload kind, thumbnail/save callers,
-UI copy and host-service registration timing stable. L11 completed a read-only
-project/save service preflight, then L12 completed a no-behavior project
-service split under both Canvas directories, extracting
-`canvasHostProjectService` and `agentCanvasHostProjectService` for project
-list/load/delete/reset, Canvas-only project version adopt/get, and project DTO
-sanitize/normalization while keeping saveCanvas, thumbnail upload, pending
-URL/session load effects, UI copy and host-service registration timing stable.
-L13 completed a read-only save-service preflight, then L14 completed a
-no-behavior save service split under both Canvas directories, extracting
-`canvasHostSaveService` and `agentCanvasHostSaveService` for saveCanvas,
-thumbnail generation/upload, cloud-save sanitize, save request shaping,
-post-save refs/session, Agent URL writeback, Canvas conflict merge/merged
-notify and existing error handling while keeping pending URL/session load
-effects, UI copy and host-service registration timing stable. L15 completed a
-read-only pending project load preflight and confirmed that URL/session load
-effects, clear/notify project load, render guard/overlay state, session/URL
-writeback and conflict-unblock ref resets remain in the host shells for a
-separate owner. L16 completed that no-behavior project-load helper/hook split,
-extracting `canvasHostProjectLoad` and `agentCanvasHostProjectLoad` while
-preserving Canvas render blocking/save guards and Agent overlay/URL/agentContext
-semantics. L17 completed a read-only final host-shell preflight and recommends
-stopping the L-series host-shell split: the remaining composition,
-context-ready resolver, synchronous service registration, theme sync and render
-shell are small, cohesive and sensitive to runtime ordering. L18 closed the
-frontend-design-constraint-governance phase: stop this L-series host-shell
-split by default, keep future work as explicit single-owner slices, and do not
-continue runtime cleanup by default; any runtime or behavior-level cleanup must
-still wait for an explicit owner. M1 then completed the first post-L follow-up:
-frontend validation closeout passed lint, unit tests, build, the frontend
-legacy dependency gate, and `git diff --check`. M2 then completed a read-only
-Canvas/Agent runtime App preflight: Canvas runtime App is 3532 lines and Agent
-runtime App is 3854 lines. The safe runtime candidate is narrow pure-helper
-extraction only, such as mirroring Agent's `appOrchestration` pattern into
-Canvas; broad runtime work should not combine draft/project sync, generation/
-recovery, media import, pointer/selection/history or Agent action bridge in one
-owner. M3 then completed a read-only generation-service preflight: both Canvas
-and Agent host generation services are 533 lines. A later generation-service
-owner is reasonable only as a narrow task-lifecycle helper split covering
-polling, recovery, project-asset fallback, stray result lookup and task error
-description; keep capabilities and generate payload shaping out of that owner.
-M4 then completed docs-and-submit strategy confirmation. The later N queue
-consolidation moved follow-up choices into
-`deploy/records/xiaolouai-frontend-followup-task-record.md` so short sticks can
-read a single task record instead of repeating global checks. N2 storyboard
-prompt placeholder cleanup and N3 non-Canvas large-file preflight are complete;
-N8 ImageCreate pure-helper extraction and N9 ImageCreate preview-modal
-extraction are complete; the default next owner is N10 ImageCreate recent-tasks
-panel extraction. N1 docs-only submit is only valid when tracked changes are
-docs-only.
-
-The same pass fixed the frontend legacy dependency gate. The verifier now reads
-the actual guard implementation in `src/lib/api/control-api-client.ts` and
-`src/lib/api/route-policy.ts`, and it records legacy route literals under
-`__tests__` or `.test/.spec` files as guard fixtures instead of runtime
-dependencies. Runtime non-Control legacy route literals still remain review
-items until they are migrated, explicitly retired or accepted as read-only
-compatibility references.
-
-### Toolbox Frontend Layout
-
-Toolbox frontend capabilities are grouped together under
-`XIAOLOU-main/src/features/toolbox/` rather than scattered through page/lib
-roots:
-
-| Capability | Frontend route | Canonical frontend path | Execution |
-| --- | --- | --- | --- |
-| script-breakdown | `/create/script-breakdown` | `XIAOLOU-main/src/features/toolbox/script-breakdown/` | Control-plane toolbox job; no separate Python sidecar. |
-| video-replace | `/create/video-replace` | `XIAOLOU-main/src/features/toolbox/video-replace/` | Frontend page/presets; Python sidecar lives in `backend/services/toolbox/video-replace-sidecar/`. |
-| video-reverse | `/create/video-reverse` | `XIAOLOU-main/src/features/toolbox/video-reverse/` | Control-plane toolbox job; no separate Python sidecar. |
-| storyboard-25 | `/create/storyboard-25` | `XIAOLOU-main/src/features/toolbox/storyboard-25/` | Control-plane toolbox job; no separate Python sidecar. |
-
-The backend route family is `backend/dotnet/control-plane/src/XiaoLou.ControlApi/Modules/Toolbox`.
-Capabilities queue through `toolbox_capabilities`, `toolbox_runs`, and canonical
-`jobs`.
-
-Toolbox backend/runtime code should stay grouped separately from the frontend:
-
-- `.NET` route/API orchestration: `backend/dotnet/control-plane/src/XiaoLou.ControlApi/Modules/Toolbox`
-- Python video-replace sidecar: `backend/services/toolbox/video-replace-sidecar/`
-
-### Control Plane Surfaces
-
-The `.NET` control plane lives under `backend/dotnet/control-plane/`:
-
-```text
-src/XiaoLou.ControlApi                 ASP.NET Core API
-src/XiaoLou.ClosedApiWorker            Windows Worker Service for closed API calls
-src/XiaoLou.Domain                     shared request/response contracts
-src/XiaoLou.Infrastructure.Postgres    PostgreSQL queues, payments, outbox, health
-src/XiaoLou.Infrastructure.Storage     object-storage signing/local path abstraction
-db/migrations                          canonical PostgreSQL SQL
-```
-
-Implemented public surfaces include accounts, jobs, payment callbacks, wallet
-reads, media metadata/signing, projects, canvas/agent-canvas, create image/video,
-identity/config, project-adjacent assets, admin/system reads, enterprise
-applications, Playground, capabilities, and Toolbox. These surfaces are backed
-by PostgreSQL canonical tables and explicit client permissions.
-
-### Local Model Worker Boundary
-
-`backend/services/model-runtime/local-model-worker-sidecar/` is the only production architecture area that may
-supervise Python for local model adapters and inference runners. It talks back
-through the Control API internal jobs endpoint, while PostgreSQL remains the
-source of truth through Control API writes. It is currently a canonical queue
-skeleton unless a real adapter, model weights, endpoint, and media output path
-are explicitly attached.
-
-Single-run validation shape:
+### 3. 常用验证
 
 ```powershell
-cd backend\services\model-runtime\local-model-worker-sidecar
-.\.venv\Scripts\python -m app.worker --control-api http://127.0.0.1:4100 --lane account-media --provider-route local-model --run-once
+npm --prefix .\XIAOLOU-main run lint
+npm --prefix .\XIAOLOU-main run test:unit
+npm --prefix .\XIAOLOU-main run build
+dotnet test .\backend\dotnet\control-plane\XiaoLou.ControlPlane.sln --no-restore -v:minimal
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\verify-frontend-legacy-dependencies.ps1 -FailOnLegacyWriteDependency
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\verify-public-access-capacity.ps1
+git diff --check
 ```
 
-## Production Build
+更详细的开发说明见 [开发与验证](./docs/development.md)。
 
-Frontend production must be a static build:
+## 部署说明
+
+### 1. 构建前端静态产物
 
 ```powershell
 cd XIAOLOU-main
@@ -539,463 +173,86 @@ npm ci
 npm run build
 ```
 
-Publish the .NET services:
+生产静态文件输出到：
+
+```text
+XIAOLOU-main/dist
+```
+
+### 2. 发布 .NET 服务
+
+推荐使用 Windows 脚本发布、注册并启动服务：
 
 ```powershell
-cd backend/dotnet/control-plane
-dotnet publish .\src\XiaoLou.ControlApi\XiaoLou.ControlApi.csproj -c Release -o D:\code\XiaoLouAI\.runtime\app\publish\control-api
-dotnet publish .\src\XiaoLou.ClosedApiWorker\XiaoLou.ClosedApiWorker.csproj -c Release -o D:\code\XiaoLouAI\.runtime\app\publish\closed-api-worker
-dotnet publish .\src\XiaoLou.LocalModelWorkerService\XiaoLou.LocalModelWorkerService.csproj -c Release -o D:\code\XiaoLouAI\.runtime\app\publish\local-model-worker-service
+.\scripts\windows\install.ps1 -RegisterServices -UpdateExisting -AssertDDrive
 ```
 
-Use `scripts/windows/register-services.ps1` to register:
+核心服务：
 
 - `XiaoLou-ControlApi`
-- `XiaoLou-LocalModelWorker`
 - `XiaoLou-ClosedApiWorker`
+- `XiaoLou-LocalModelWorker`
 
-The registered services use service-aware `.NET` hosts with direct
-`dotnet.exe <published dll>` `binPath` values. `XiaoLou-LocalModelWorker` is a
-small `.NET` Windows Service wrapper that supervises the Python local model
-adapter process; Python remains limited to local model inference execution.
-Worker success payloads are explicit contracts. `XiaoLou-LocalModelWorker`
-remains a queue skeleton until real local adapters are attached. The
-`XiaoLou-ClosedApiWorker` now has a real Vertex Gemini image path for
-`create_image_generate`, `storyboard_image_generate`, and
-`asset_image_generate`: it can call Vertex, write generated image bytes to local
-object storage, and return `imageUrl` / `resultUrl` through `jobs.result`.
-Unsupported closed-API job types continue to complete through the compatibility
-stub with an explicit adapter status until their provider adapters are added.
+### 3. 反向代理与公网入口
 
-### Caddy / Reverse Proxy
+Caddy/IIS 应服务 `XIAOLOU-main/dist` 并只把已批准 public Control API routes 转发到 `127.0.0.1:4100`。生产入口必须阻断 `/api/internal/*`、`/api/schema/*`、`/api/providers/health`、`/metrics` 和未列入 public surface 的 legacy API。
 
-`deploy/caddy/` contains the same-host convenience Caddyfile used by
-`scripts\start_caddy.cmd`. The canonical production example remains
-`deploy/windows/Caddyfile.windows.example`; both should route API traffic to the
-`.NET` Control API Windows Service on port `4100` and serve `XIAOLOU-main/dist`
-as a static SPA. Do not route production traffic to `core-api/`, `services/api/`,
-legacy Jaaz, a Vite dev/preview server, Docker, Linux, Kubernetes, Windows +
-Celery, or Redis Open Source on Windows.
-
-Windows local start:
-
-```cmd
-scripts\start_caddy.cmd
-```
-
-Portable start after installing Caddy:
-
-```bash
-caddy run --config deploy/caddy/Caddyfile
-```
-
-The repository intentionally does not commit `caddy.exe`, downloaded archives,
-logs, or pid files. If the deployment domain is not `www.xiaolouai.cn`,
-`www.xiaolou.cn`, or `aitianmu.cn`, update the site blocks in
-`deploy/caddy/Caddyfile` before starting Caddy.
-
-Caddy or IIS should serve `XIAOLOU-main/dist` directly and reverse-proxy
-only the approved public Control API routes to `127.0.0.1:4100`:
-
-- `/healthz`
-- `/livez`
-- `/readyz`
-- `/api/windows-native/status`
-- `/api/accounts/ensure`
-- `/api/jobs*`
-- `/api/payments/callbacks/*`
-- `/api/media/upload-begin`
-- `/api/media/upload-complete`
-- `/api/media/move-temp-to-permanent`
-- `/api/media/signed-read-url`
-- `/api/media/object-content/*`
-- `/api/media/object-upload/*`
-- `/api/wallet`
-- `/api/wallets*`
-- `/api/auth*`
-- `/api/me`
-- `/api/organizations*`
-- `/api/api-center*`
-- `/api/admin*`
-- `/api/enterprise-applications*`
-- `/api/capabilities`
-- `/api/playground*`
-- `/api/toolbox*`
-- `/api/projects*`
-- `/api/canvas-projects*`
-- `/api/agent-canvas/projects*`
-- `/api/create/images*`
-- `/api/create/videos*`
-
-`/api/internal/*`, `/api/schema/*`, `/api/providers/health`, and unlisted
-legacy API paths must not be exposed through the public reverse proxy.
-Legacy `/api/payments/{provider}/notify` callback aliases are retired; expose
-only `/api/payments/callbacks/{provider}`.
-
-For `ObjectStorage:Provider=local`, public media uses the Control API object
-routes rather than legacy upload folders: browser uploads use signed
-`/api/media/object-upload/{bucket}/{objectKey}` URLs, and stable generated or
-frontend media reads use `/api/media/object-content/{bucket}/{objectKey}` with
-range support. Set `OBJECT_STORAGE_PUBLIC_BASE_URL` to the public site origin
-and set a non-placeholder `OBJECT_STORAGE_SIGNING_SECRET`; external object
-storage/CDN providers must keep frontend `urlPath` on the signed provider read
-URL instead of rewriting it to local object-content.
-
-Public abuse/concurrency protection is explicit at both layers. Caddy examples
-apply coarse body ceilings for auth JSON (`64KB`), public API JSON writes
-(`2MB`), and object uploads (`256MB`); IIS uses a matching `256MB` upload edge
-ceiling while the Control API applies tighter per-route body caps. The Control
-API `PublicAccessLimits` section controls in-process fixed-window and
-concurrency policies for auth/register, job creation, media signed URLs,
-object upload/download, and health probes. Keep
-`PublicAccessLimits__Enabled=true` for production and tune the per-policy
-permit/concurrency values in `.runtime\app\scripts\windows\.env.windows` only
-after recording capacity evidence.
-
-Home-to-Playground prewarm is budgeted for public access. `/home` no longer
-mounts a hidden Playground surface on a timer. Sidebar hover/focus and the Home
-composer's focus/input/attachment/send paths only prefetch the lazy route chunk;
-the Playground page's conversation/job/memory initialization remains gated to
-the actual `/playground` route.
-
-Dynamic API transfer policy is intentionally narrow. The Control API compresses
-only reviewed stable JSON metadata routes (`/api/capabilities`,
-`/api/toolbox`, `/api/toolbox/capabilities`, and `/api/playground/models`) and
-excludes SSE, range media, auth/payment/provider/operational endpoints, and
-account-scoped Playground or wallet reads. Those metadata responses carry a
-private browser short-cache (`max-age=30`) plus weak ETags, with `Vary` covering
-encoding and client-auth headers; do not add shared proxy caching for client
-API responses without a separate owner and auth-boundary review.
-
-Public capacity readiness is measured by
-`scripts\windows\verify-public-access-capacity.ps1`. The default run is
-non-secret and offline: it records PostgreSQL pool budget, worker lease
-throughput, Playground active-job polling interval, and public body-limit caps
-to `.runtime\xiaolou-logs\public-access-capacity-*.json`. Before opening or
-retuning public traffic, run the same script with `-RunHttp` and
-`-BaseUrl <public-origin>`, then pass `-ClientApiToken` plus an
-`-ObjectContentPath /api/media/object-content/<bucket>/<objectKey>` sample when
-available to verify static cache headers, stable metadata compression/ETag/304,
-range media reads, active-job polling p95, and optional auth 429 behavior.
-
-For production, set `INTERNAL_API_TOKEN` and protect public client routes with
-either a static `CLIENT_API_TOKEN` or provider-signed client assertions. The
-new provider path uses `CLIENT_API_AUTH_PROVIDER=hs256-jwt`,
-`CLIENT_API_AUTH_PROVIDER_SECRET`, and `CLIENT_API_REQUIRE_AUTH_PROVIDER=true`.
-The compatibility login layer signs `controlApiClientAssertion` on email/admin/
-Google login and personal/enterprise registration when the provider secret is
-configured. The frontend stores that assertion separately from the legacy
-`xiaolou-auth-token` and only sends it to Windows-native Control API client
-routes. Assertions must carry account or owner grants plus route permissions;
-`CLIENT_API_AUTH_PROVIDER_TTL_SECONDS` controls the issued `exp` window and
-defaults to 3600 seconds. Static tokens should additionally enable
-`CLIENT_API_REQUIRE_CONFIGURED_ACCOUNT_GRANT=true` and explicitly grant the
-intended accounts or owners. Provider cutover can use the same configured-grant
-flag as a non-wildcard gray-release upper bound. In both modes, keep
-`CLIENT_API_ALLOWED_PERMISSIONS` to the minimal public actions needed by the
-frontend. `/api/payments/callbacks/*` remains protected by provider callback
-signature verification.
-
-After publishing and editing `.runtime\app\scripts\windows\.env.windows`, run
-the strict production preflight:
+上线或调参前运行：
 
 ```powershell
 .\scripts\windows\rehearse-production-cutover.ps1 -StrictProduction
+.\scripts\windows\verify-public-access-capacity.ps1
 ```
 
-Strict mode blocks placeholder secrets, missing static-token or auth-provider
-client protection, wildcard client permissions or account grants, a configured
-grant flag without concrete grants, unsafe static-token grant settings, and any
-legacy `core-api` public allowlist wider than `GET /healthz;GET /api/windows-native/status`.
-
-Latest Windows rehearsal checkpoint: `scripts/windows/rehearse-production-cutover.ps1
--ExecutePublish -RegisterServices -UpdateExisting -StartServices -StrictProduction`
-completed to `D:\code\XiaoLouAI\.runtime\app` from an elevated PowerShell
-session. `XiaoLou-ControlApi`, `XiaoLou-LocalModelWorker`, and
-`XiaoLou-ClosedApiWorker` are registered as `Automatic` Windows services and
-are running with direct `dotnet.exe <dll>` service paths. The strict service P0
-passed with run `p0-4d788b349b6f4fe7aea06aa9fb99825e`; report:
-`D:\code\XiaoLouAI\.runtime\xiaolou-logs\p1-cutover-admin-services-20260502-101430.json`,
-P0 log:
-`D:\code\XiaoLouAI\.runtime\xiaolou-logs\p1-cutover-admin-p0-20260502-101430.out.log`.
-The P0 verifier now signs HS256 provider assertions when
-`CLIENT_API_REQUIRE_AUTH_PROVIDER=true`, so strict auth-provider service smoke
-does not fall back to the static client token. Operator-supplied final
-acceptance material is tracked in the dedicated evidence section below; missing
-real captures, dumps, or provider credentials do not block routine engineering
-cutover work.
-The P0/P1 risk scan also hardened cross-host deployment: publishing now preserves
-existing runtime env values, service registration refuses placeholder or
-smoke/test secrets by default, `rehearse -RunP0` imports runtime auth-provider
-env and picks a configured owner grant, and `StrictProduction` intentionally
-blocks the current local smoke env until real production secrets are installed.
-
-Current P2 runtime checkpoint: frontend legacy write route batches have been
-retired or migrated, and the remaining frontend review items are guarded
-non-live literals. The first `.NET` canonical real-surface batch for
-`/api/projects`, `/api/create/images|videos`, `/api/canvas-projects`, and
-`/api/agent-canvas/projects` is implemented, published to the running Windows
-services, and smoke-tested through `http://127.0.0.1:4100`. The second
-identity/config batch is also implemented and published for `/api/auth*`,
-`/api/me`, `/api/organizations/*/members`, and `/api/api-center*`; runtime
-smoke covered login, profile update, enterprise registration, organization
-member writes, and API-center defaults/key/test/model writes. The latest
-identity/config P0 report is
-`control-api-publish-restart-p0-identity-config-20260503-055717.json`, and
-runtime smoke is
-`control-api-identity-config-runtime-smoke-20260503-060647.json`. Publishing now
-also syncs the runtime env into Windows Machine env before restarting the
-direct `dotnet.exe <dll>` service so newly added client permissions reach the
-running Control API. The third project-adjacent batch for
-`/api/projects/{projectId}/assets*`, `/storyboards*`, `/videos`, `/dubbings`,
-and `/exports` has now passed elevated publish/restart/P0 plus a 4100 runtime
-smoke, so the running Windows service includes it. The admin/system canonical
-batch is also published: `/api/admin/pricing-rules`, `/api/admin/orders`, and
-`/api/enterprise-applications*` are backed by PostgreSQL canonical tables;
-manual admin recharge review remains retired with 410 because canonical payment
-callbacks and `wallet_ledger` are the only write path.
-
-The Playground canonical batch is also published:
-`/api/playground/config|models|conversations|chat-jobs|memories` stores
-conversations, messages, memory preferences, and memories in PostgreSQL while
-continuing to enqueue chat work through canonical `jobs`. Source build,
-frontend lint/build, the frontend legacy dependency gate, a temporary
-`http://127.0.0.1:4110` Control API P0 smoke, and elevated publish/restart/P0
-against the real `http://127.0.0.1:4100` Windows service all passed.
-
-The Toolbox canonical batch is also implemented and available through
-`/api/capabilities` and `/api/toolbox*`. The visible toolbox cards are backed by
-canonical `toolbox_capabilities`, runnable toolbox actions create
-`toolbox_runs`, and execution is queued through canonical `jobs` on the
-`account-control` lane. Source build, frontend build, the frontend legacy
-dependency gate, a temporary `http://127.0.0.1:4110` Control API P0 smoke, the
-strict legacy/canonical projection verifier, and a patched P0 smoke against the
-real `http://127.0.0.1:4100` Windows service passed. An earlier combined
-elevated publish/restart/P0 report failed only in the verifier after publish and
-service restart because background lease recovery won a race with the explicit
-P0 recovery call. `verify-control-plane-p0.ps1` now accepts that recovered state,
-and `complete-control-api-publish-restart-p0.ps1` streams P0 output live while
-suppressing the standalone registration hint, so the admin shell no longer sits
-quietly after the build step.
-
-## Legacy Evidence And Retained Material
-
-`deploy/retained/legacy-surface-evidence/` is a sanitized evidence directory for non-live legacy
-source-removal verification. It is not a runtime directory and must not contain
-secrets, uploads, operator-only production evidence, local database dumps, or
-deploy-retained local material. Its retained manifests are:
-
-- `final-legacy-surface-manifest-g11k.json`
-- `legacy-projection-manifest-g11k.json`
-
-`deploy/retained/legacy-local-material/` contains operator-approved, non-secret
-legacy local material moved out of `legacy/` so it can travel with deployment
-handoffs without restoring `legacy/` as a live workspace root. It includes
-retained canvas-library assets, legacy upload media, selected backup material,
-and approved Jaaz local user data. `MATERIALS.sha256` records hashes after local
-secret material was excluded.
-
-Excluded material belongs under ignored `deploy/local-secrets/legacy/` or an
-operator secret store: real env files, service-account files, secret-like demo
-SQLite state, and Jaaz config files with non-empty API-key fields. None of this
-material should be treated as production source or as a production runtime
-entrypoint.
-
-## Operator-Supplied Final Acceptance Evidence
-
-Some production materials are intentionally absent from the repository. They are
-final acceptance or cutover evidence, not routine engineering blockers. Handoff
-files should point to this section instead of repeating missing-material TODOs.
-
-Do not commit these materials:
-
-- Real production legacy dump/source, SQLite snapshots, old PostgreSQL
-  snapshots, or restore-drill outputs.
-- Real Alipay/WeChat Pay merchant accounts, private keys, certificates,
-  provider public keys, production secrets, and raw callback captures.
-- Real closed-API/vendor account credentials, API keys, provider routing
-  approvals, or production provider health evidence.
-- Real object-storage credentials, CDN/WAF credentials, production domain
-  secrets, and operator-only audit exports.
-
-Store collected evidence only under `.runtime` on the deployment host or in an
-operator-controlled evidence store. The repository may keep sanitized examples,
-dry-run reports, verifier code, synthetic fixtures, and operator-approved
-non-secret deployment handoff material under
-`deploy/retained/legacy-local-material/`, but not the real material. True local
-secrets for this checkout belong under ignored `deploy/local-secrets/` or the
-deployment host's own secret store, not in Git.
-
-Final acceptance evidence should include, when available:
-
-- 2026-05-04 admin Release Candidate evidence:
-  `D:\code\XiaoLouAI\.runtime\xiaolou-logs\release-candidate-s5-20260504-093456.json`.
-  The RC ran `verify-release-candidate.ps1 -PublishFrontend` from an
-  Administrator PowerShell, published to `.runtime\app`, restarted the three
-  XiaoLou Windows services, and finished with `blockers=0`. The top-level
-  status is `warning` because real legacy snapshot and real provider-health
-  evidence remain operator-supplied final acceptance items.
-- Strict P0 and 4100 runtime smoke reports from the real Windows services.
-- `verify-p2-cutover-audit.ps1` output with no blockers.
-- A real legacy dump restore/projection verification report from
-  `verify-legacy-dump-cutover.ps1`, if a historical legacy source exists.
-- Payment adapter/normalizer verification plus staging replay/audit reports for
-  reviewed real provider captures.
-- API-center/provider health evidence showing configured vendors are routable
-  before public real-vendor traffic is enabled.
-- PostgreSQL backup and restore-drill evidence for the intended production
-  database.
-
-When any of the real materials above are not yet available, keep the synthetic
-and staged gates green and continue the Windows-native refactor. Missing real
-material is tracked here as final acceptance evidence, not as a handoff blocker.
-
-## Payment Provider Onboarding
-
-Payment provider integration is prepared. Real merchant material and raw
-provider captures are tracked by the operator-supplied evidence module above,
-not as source-controlled project inputs.
-
-Current Windows-native Control API callbacks accept normalized canonical JSON
-signed with the configured HMAC secret
-(`Payments:{provider}:WebhookSecret` / `X-XiaoLou-Signature`). Native Alipay
-RSA2 and WeChat Pay v3 inputs are handled by the Windows adapter/normalizer
-tooling under `scripts/windows/`. Historical legacy payment route evidence is
-retained through `deploy/retained/legacy-surface-evidence/`; legacy source is not a production
-control-plane dependency.
-
-To connect a real provider account:
-
-1. Store key/certificate files under
-   `D:\code\XiaoLouAI\.runtime\app\credentials\payment\`.
-2. Store reviewed JSONL/NDJSON captures under
-   `D:\code\XiaoLouAI\.runtime\xiaolou-replay\`.
-3. Fill provider secrets and allowlists in
-   `D:\code\XiaoLouAI\.runtime\app\scripts\windows\.env.windows`; never commit
-   real values.
-4. Enable explicit canary intake before routing public callbacks:
-   `PAYMENT_CALLBACK_REQUIRE_ACCOUNT_GRANT=true` plus
-   `PAYMENT_CALLBACK_ALLOWED_ACCOUNT_IDS` or
-   `PAYMENT_CALLBACK_ALLOWED_ACCOUNT_OWNER_IDS` with non-wildcard grants.
-5. Run adapter/normalizer smoke before replaying raw native captures:
-   `verify-payment-provider-native-adapters.ps1` and
-   `verify-payment-provider-normalizers.ps1`.
-6. Run discovery, dry-run, then staging execute/idempotency:
+公网 smoke 可在有 public origin、client token 和对象样本时执行：
 
 ```powershell
-.\scripts\windows\stage-payment-provider-replay.ps1 -DiscoverOnly
-.\scripts\windows\stage-payment-provider-replay.ps1 `
-  -InputFile D:\code\XiaoLouAI\.runtime\xiaolou-replay\<capture>.jsonl
-.\scripts\windows\stage-payment-provider-replay.ps1 `
-  -InputFile D:\code\XiaoLouAI\.runtime\xiaolou-replay\<capture>.jsonl `
-  -Execute `
-  -StopOnFailure
+.\scripts\windows\verify-public-access-capacity.ps1 `
+  -RunHttp `
+  -BaseUrl "https://xiaolou.example.com" `
+  -ClientApiToken "<public client token or canary assertion>" `
+  -ObjectContentPath "/api/media/object-content/<bucket>/<objectKey>"
 ```
 
-When real material is unavailable, keep the synthetic provider
-adapter/normalizer smoke, provider boundary smoke, P0/canary, wallet ledger
-audit, and non-payment P1 cutover gates green; continue the Windows-native
-refactor toward P2.
+完整 Windows 部署说明见 [Windows 部署与公网访问](./docs/deployment-windows.md) 和 [Windows ops runbook](./deploy/windows/ops-runbook.md)。
 
-## Deferred CI/Test Gate Follow-Up
+## 公网访问硬化状态
 
-G13 has finished the currently actionable CI/static-gate work: the required
-GitHub Actions build/static gate exists, frontend typecheck lint is in CI,
-conditional `.NET` test detection is hardened, synthetic browser E2E is now a
-required check, security/coverage plans are documented, and the frontend service
-harness has a non-required advisory coverage script. The remaining CI/test gates
-still need fixtures, baselines, owner signoff, or stable runtime budget before
-they can move forward. Treat them like operator-supplied payment/provider
-material: they are follow-up readiness items, not routine handoff blockers.
+O 队列已收口：
 
-```text
-Status: required gate ratchet complete for synthetic browser E2E. `main` now requires both `Build and static gates` and `Synthetic browser E2E advisory`.
-Current PR gate: `main` branch protection requires GitHub Actions `Build and static gates` plus `Synthetic browser E2E advisory`, both from app id 15368.
-Do not require yet: coverage thresholds, CodeQL, npm audit failure, dotnet vulnerability failure, or standalone test checks outside the existing `Build and static gates` workflow.
-Do not read or upload: .runtime, deploy/local-secrets, real env/provider/payment/object-storage/operator material, production dumps/snapshots, restore drills, or real payment replay captures.
-```
+- O2：本地 object-storage provider 通过 `/api/media/object-upload/*` 签名上传，通过 `/api/media/object-content/*` 稳定读取并支持 range。
+- O3：Control API 和 Caddy/IIS 都有显式 public body cap、固定窗口和并发保护。
+- O4：`/home` 不再隐藏挂载 Playground；只在焦点、输入、附件和发送等交互中预取 lazy route chunk。
+- O5：只对稳定 JSON metadata routes 启用动态压缩、private `max-age=30` 和 weak ETag；SSE、range media、auth/payment/provider/operational 和账号态 reads 不进入该策略。
+- O6：新增 `scripts/windows/verify-public-access-capacity.ps1`，默认离线核算 PostgreSQL pool、worker lease 吞吐、active-job polling 和 body caps；`-RunHttp` 可验证公网入口 cache/compression/range/p95/429。
 
-Deferred queue:
+## 项目亮点
 
-```text
-G13-post-1 branch-protection-enable: done after first green GitHub Actions run. At that stage, `main` branch protection required only the GitHub Actions `Build and static gates` check; coverage, E2E, CodeQL, npm audit failure, dotnet vulnerability failure, deployment, and operator evidence remained non-required/deferred until later owner signoff.
-G13-post-2 security-baseline-nonblocking-execution: completed a manual non-blocking baseline after allowlist/noise policy and secret boundary confirmation. The follow-up G13-post-2b package remediation updated the Vite/PostCSS lockfile/install resolution to Vite 6.4.2 and PostCSS 8.5.14; `npm audit --json` now reports 0 vulnerabilities. `dotnet list package --vulnerable --include-transitive` found no vulnerable packages across the solution/test projects, and CodeQL was not run because the local `codeql` CLI is unavailable. This remains advisory/non-required; no npm audit failure gate, workflow change, branch protection, or CI required security check has been added.
-G13-post-3 backend-test-harness-and-coverage-advisory: backend xUnit harness now exists under `backend/dotnet/control-plane/tests/XiaoLou.ControlApi.Tests`. The 2026-05-06 backend-advisory-coverage-expansion first pass added synthetic/no-secret route+method metadata coverage for Payments, Projects/canvas/create, Media, Toolbox, Playground, Jobs/outbox, plus account-scope/auth-provider grant edge tests. The later response-shape pass added synthetic route-delegate coverage for media/job/toolbox account-scope 403 short-circuits and payment callback invalid-JSON/provider-boundary envelopes before any store, ledger, signature verifier, DB, provider, payment, or object-storage access. Latest local backend xUnit passed 190/190. Any deeper backend advisory coverage should use mocks or isolated synthetic fixtures only and must not use a real DB fixture, provider material, object storage, payment capture, or production dump.
-G13-post-4 frontend-test-harness-and-coverage-advisory: done for the first service-harness advisory baseline. The 2026-05-06 frontend-advisory-coverage-expansion first pass added synthetic browser fetch/download/service-worker/cache boundary tests for `guessMediaFilename`, `downloadMediaFile`, and `retireStaticBuildServiceWorkers`; the later auth-account pass added synthetic API-center vendor/model scoped-route and organization-wallet error-boundary tests. Latest local frontend validation passed lint, test:unit 59/59, test:coverage:advisory 59/59 with All files statements/lines 98.01%, functions 97.94%, branches 72.92%, build, and frontend legacy dependency gate status=ok with blockers 0/warnings 0. Coverage remains advisory/non-required with no thresholds; deeper fetch/timer/service boundaries and any required coverage gate remain deferred until stable baselines and owner signoff exist.
-G13-post-5 synthetic-e2e-smoke-harness: foundation plus interaction flows added a Playwright synthetic browser smoke script using synthetic auth/localStorage, intercepted synthetic Control API fixtures, fake storage/job mocks, production preview on port 3100, and no real material. It now covers static route smoke, API-center client navigation, Playground synthetic requests, email login, personal registration, image create submit/job polling, asset fake PUT upload, and toolbox synthetic route/job polling. First local runtime baseline on May 5, 2026: 3 consecutive `test:e2e:synthetic` runs passed 13/13, Playwright reported 29.7-30.0s, and outer PowerShell timing was 31.07-31.88s. Flake policy: keep retries=0 and workers=1, investigate any failure or any single run above 60s, and do not count an immediate rerun as a green baseline. G13-post-6 later promoted this synthetic E2E check to required.
-G13-post-5d synthetic-browser-e2e-advisory-green-accumulation: done. Effective greens 5/5 recorded: May 5, 2026 21:22 +08 local manual `npm --prefix .\XIAOLOU-main run test:e2e:synthetic`, 13/13 passed, outer runtime 31.13s, no flake/timeout, counted; May 5, 2026 21:30 +08 local manual same entry, 13/13 passed, Playwright reported 29.4s, outer runtime 30.89s, no flake/timeout, counted; May 5, 2026 21:36 +08 local manual same entry, 13/13 passed, Playwright reported 29.6s, outer runtime 31.06s, no flake/timeout, counted; May 5, 2026 21:45 +08 local manual same entry, 13/13 passed, Playwright reported 32.5s, outer runtime 34.05s, no flake/timeout, counted; May 5, 2026 21:55 +08 local manual same entry, 13/13 passed, Playwright reported 29.5s, outer runtime 31.05s, no flake/timeout, counted. G13-post-5c's three-run burst remains seed/baseline evidence only. No E2E harness, fixture, Vite config, auth/session, create/upload/toolbox, polling code, workflow, CI required check, or branch protection changed.
-G13-post-6-preflight required-gate-ratchet-plan-owner-signoff-record: done. Initial preflight kept synthetic E2E advisory/non-required, then later owner signoffs approved remote evidence and required promotion. Rollback for the ratchet is to restore branch protection to the single `Build and static gates` required check, remove `Synthetic browser E2E advisory` from the required list, rerun CI/protection readback, and update README plus handoffs.
-G13-post-6 required-gate-ratchet: done. Added GitHub Actions workflow `.github/workflows/synthetic-e2e-advisory.yml` with check context `Synthetic browser E2E advisory`; it runs `npm --prefix .\XIAOLOU-main run test:e2e:synthetic` on windows-latest/Node 22/Chrome and uploads no artifacts. Remote evidence before promotion: run 25381961070 on commit 2e7c553 succeeded with 13 passed in 55.7s, and run 25382399392 on commit 116b4c8 succeeded with 13 passed in 39.8s; required CI run 25382399379 on the same head also succeeded. Required promotion executed on May 5, 2026 22:36 +08 by updating only `required_status_checks`: branch protection now requires `Build and static gates` and `Synthetic browser E2E advisory`, both app id 15368, strict=false, enforce_admins=false, required PR reviews=false, restrictions=false, force pushes=false, deletions=false.
-G13-post-6a required-synthetic-e2e-stability-monitor: latest monitor passes on May 6, 2026 kept branch protection unchanged after live readback showed both required checks still green on commit 6229031. The first local sample exposed one email-login timeout caused by Playwright waiting for the animated auth modal button to become stable; the harness now force-clicks that already-targeted synthetic login button and then passed targeted login plus full `test:e2e:synthetic` 13/13 in 30.5s reported by Playwright and 32.30s outer PowerShell time. The second local sample at 09:55 +08 passed full `test:e2e:synthetic` 13/13 with Playwright 32.4s and 34.27s outer PowerShell time; frontend legacy dependency gate stayed `status=ok` with blockers 0 and warnings 0. No rollback condition was met.
-G13-post-7 coverage-threshold-preflight: completed as plan/preflight only. At that preflight, frontend advisory coverage evidence was 11 files/57 tests with All files lines/statements 96.41%, functions 95.89%, branches 72.34%; later G13-post-12 raised the current frontend advisory totals to 59 tests, All files statements/lines 98.01%, functions 97.94%, branches 72.92%, and `auth-account.ts` 100%. Backend xUnit was 184/184 at the preflight and is 190/190 after G13-post-11, but the backend test project still has no coverlet/coverage collector or backend coverage baseline. Recommendation remains: no global or required coverage gate yet. Future work must be a separate signed owner: first a non-required frontend aggregate advisory floor or backend coverage collector baseline, then remote non-required evidence, then required promotion only with explicit branch-protection before/after and rollback.
-G13-post-8 security-required-gate-preflight: completed as plan/preflight only. Current evidence on May 6, 2026 10:09 +08: `npm --prefix .\XIAOLOU-main audit --json` exited 0 with 0 vulnerabilities; `dotnet list .\backend\dotnet\control-plane\XiaoLou.ControlPlane.sln package --vulnerable --include-transitive` found no vulnerable packages across the control-plane projects; local `codeql` CLI is unavailable; frontend legacy dependency gate stayed `status=ok`; latest main commit 5fac8ca had CI run 25412556135 success and Synthetic E2E Advisory run 25412556150 success. Branch protection still requires only `Build and static gates` and `Synthetic browser E2E advisory`, both app id 15368, strict=false, enforce_admins=false, required PR reviews=false, restrictions=false, force pushes=false, deletions=false. Recommendation: do not add npm audit, dotnet vulnerable, or CodeQL as required gates yet. Future security-gate work must start as a separate non-required advisory owner with noise policy, allowlist, exact check contexts, remote runner/check-run source, branch-protection before/after, rollback owner/action, baseline-reset conditions, and explicit owner signoff.
-G13-post-9 branch-protection-hardening-review: completed as policy review/preflight only. Current readback on May 6, 2026 10:18 +08: `main` still requires only `Build and static gates` and `Synthetic browser E2E advisory`, both GitHub Actions app id 15368; latest commit 5fac8ca had both check-runs success; strict up-to-date branches=false, enforce admins=false, required PR reviews=null, restrictions=null, required conversation resolution=false, required signatures=false, required linear history=false, force pushes=false, deletions=false, block creations=false, lock branch=false. No CODEOWNERS file was found, and the workflow inventory remains `.github/workflows/ci.yml` plus `.github/workflows/synthetic-e2e-advisory.yml`. Recommendation: no immediate branch-protection hardening mutation. Future hardening must be a separate explicit owner with PR workflow readiness, exact before/after, rollback owner/action, test PR or equivalent remote evidence, stable required-check evidence, and baseline-reset conditions for workflow/check context, GitHub Actions app/source, CODEOWNERS/permissions, or direct-push policy changes.
-G13-post-10 required-synthetic-e2e-stability-monitor: completed a new-push monitor pass for main commit 5fac8ca on May 6, 2026 10:24 +08. Remote readback stayed green: CI run 25412556135 and Synthetic E2E Advisory run 25412556150 succeeded, with check-runs `Build and static gates` and `Synthetic browser E2E advisory` from GitHub Actions app id 15368. Branch protection still requires only those two contexts, strict=false, enforce_admins=false, required PR reviews=false, restrictions=false, force pushes=false, deletions=false. Local monitor sample `npm --prefix .\XIAOLOU-main run test:e2e:synthetic` passed 13/13, Playwright reported 37.3s, outer PowerShell time was 39.48s, below the 60s investigation threshold. Frontend legacy dependency gate stayed `status=ok` with blockers 0/warnings 0. No rollback condition was met, and no workflow, required check, branch protection, DTO/route/status/response/auth/exported-name/polling/transport/DB behavior, real material, api.ts wrapper, or legacy/deploy evidence changed.
-G13-post-11 backend-advisory-coverage-expansion: completed a backend-only synthetic response-shape pass on May 6, 2026 10:38 +08. Added `BackendAdvisoryEndpointResponseShapeTests` for mapped Minimal API route delegates: media upload-begin, jobs create, and toolbox translate-text return the stable 403 account-scope envelope before synthetic stores; payment callbacks return stable invalid-JSON, provider-mismatch, and disabled-provider envelopes before ledger/signature processing. The harness uses a synthetic unreachable Npgsql data source and throw-on-use storage signer/payment verifier, so no real DB fixture, provider material, object storage, payment capture, or production dump was read. Backend xUnit passed 190/190, solution build passed with 0 warnings/0 errors, frontend legacy dependency gate stayed `status=ok`, and current CI/branch-protection readback remained unchanged.
-G13-post-12 frontend-advisory-coverage-expansion: completed a frontend-only synthetic auth-account service pass on May 6, 2026 10:52 +08. Added tests for API-center vendor api-key/test/model encoded scoped routes, stable JSON request bodies, organization wallet success, and non-not-found wallet error propagation. No implementation, exported API name, route/status/response/auth/account-scope behavior, real provider material, object storage, payment capture, production dump, real backend fixture, workflow, required check, or branch protection changed. Local validation passed target auth-account 8/8, frontend unit 59/59, coverage advisory 59/59 with `auth-account.ts` at 100%, frontend lint/build, frontend legacy dependency gate, trailing-whitespace scan, and `git diff --check` with CRLF warnings only. Next default owner is required-synthetic-e2e-stability-monitor only after these local advisory changes are pushed/opened as a PR, if a required check becomes unstable, or before required-gate/branch-protection mutation.
-```
+- Windows-native production-first：前端静态站点、`.NET` Control API、Windows Service workers 和 PostgreSQL canonical state 的生产链路明确。
+- 多模态创作闭环：图片、视频、剧本、分镜、素材库、Playground、画布和企业管理放在同一个产品域体系内。
+- 公网可控边界：public routes、body limits、rate/concurrency guard、metadata cache/compression、object media route 和 capacity smoke 均有明确脚本或配置。
+- 数据一致性清晰：账号、组织、钱包、项目、资产、Playground、Toolbox 和 jobs 都以 PostgreSQL canonical tables 为准。
+- 存储边界清晰：媒体主存储是 object storage，本地 Windows 文件夹只做 cache/temp。
+- 历史系统隔离：Jaaz、Node `core-api`、legacy payment/runtime 等路径保留为迁移参考，不再是默认生产控制面。
+- 测试门禁明确：前端 lint/unit/build、后端 xUnit/Release build、legacy dependency gate、synthetic E2E 和 public capacity gate 都有可执行入口。
 
-PowerShell reading shortcut:
+## 文档导航
 
-```powershell
-Select-String -Path .\README.md -Pattern 'Deferred CI/Test Gate Follow-Up' -Context 0,40
-Select-String -Path .\deploy\records\xiaolouai-finalization-handoff.md -Pattern 'Post-G13 deferred execution queue' -Context 0,12
-```
+- [总体架构](./docs/architecture.md)
+- [开发与验证](./docs/development.md)
+- [Windows 部署与公网访问](./docs/deployment-windows.md)
+- [工程约束](./docs/engineering-constraints.md)
+- [运维与证据边界](./docs/operations-and-evidence.md)
+- [Windows ops runbook](./deploy/windows/ops-runbook.md)
+- [短棒交接](./XIAOLOU_REFACTOR_HANDOFF.md)
 
-## Runtime Rules
+## 后续可改进方向
 
-- PostgreSQL is canonical for accounts, organizations, identity/profile
-  context, API-center config, admin pricing/order reads, enterprise
-  applications, jobs, payments, wallet ledger, media metadata, project/canvas/
-  create surfaces, project-adjacent assets/storyboards/videos/dubbings/exports,
-  and Playground conversations/messages/memory preferences,
-  Toolbox capabilities/runs,
-  outbox, and provider health.
-- Payment callbacks must be idempotent, signature-checked, and written through
-  immutable `wallet_ledger` entries in the `account-finance` lane.
-- Jobs are leased from PostgreSQL with `FOR UPDATE SKIP LOCKED`; workers do not
-  keep canonical task state in memory.
-- Media primary storage is object storage. Windows local folders are cache/temp
-  only.
-- Tracked legacy source was removed in G11k after manifest gates and deletion
-  readiness passed. The former root paths `core-api/` and `services/api/` are
-  not production control-plane locations, and new control-plane work belongs in
-  `backend/dotnet/control-plane/`. If a temporary historical compatibility process is
-  restored from an earlier commit, set `CORE_API_COMPAT_READ_ONLY=1`; legacy
-  public GET routes must remain closed by default except `GET /healthz` and
-  `GET /api/windows-native/status`.
-
-## Handoff
-
-Read these first before continuing current work:
-
-- `XIAOLOU_REFACTOR_HANDOFF.md`
-- `deploy/records/xiaolouai-frontend-design-constraint-phase-plan.md`
-- `deploy/records/xiaolouai-frontend-design-constraint-task-record.md`
-- `deploy/records/xiaolouai-frontend-followup-phase-plan.md`
-- `deploy/records/xiaolouai-frontend-followup-task-record.md`
-- `deploy/records/xiaolouai-public-access-hardening-phase-plan.md`
-- `deploy/records/xiaolouai-public-access-hardening-task-record.md`
-- Historical only: `deploy/records/xiaolouai-root-handoff-stage-task-archive.md`
-
-The root handoff is a short PowerShell-readable baton. It keeps only the current
-phase, next owner, boundaries and verification entrypoints. Old phase task
-details belong in `deploy/records`, not in the short handoff.
-
-After every code, script, config, reverse-proxy, runtime, or README change,
-update the root handoff plus the active phase plan/task record before closing
-the work. If a prior "next execution" note is superseded, move it to the
-appropriate historical record under `deploy/records` instead of leaving two
-competing instructions.
-
-## README Policy
-
-Keep a single project README at the repository root. Do not add small README
-files under feature, service, deployment, evidence, or tooling directories just
-to repeat route/path notes; fold those notes into this file or the appropriate
-long-form document under `deploy/records/`. External dependency README files under ignored
-or generated directories such as `node_modules`, `.venv`, and `.runtime` are not
-project documentation.
+- 补充公开演示截图、核心页面录屏和 provider/mock 运行示例。
+- 为视频 provider、Playground web search/attachments、本地模型真实 adapter 分别创建独立 owner。
+- 将真实生产域名、provider、支付和对象存储证据接入运营方密钥/证据系统，而不是写入仓库。
+- 在已有 synthetic E2E 和 xUnit 基础上，继续评估非必需的覆盖率、安全扫描和性能基线门槛。
+- 按需把 `deploy/records` 中已收口的阶段记录整理成发布说明或 CHANGELOG。
 
 ## License
 
