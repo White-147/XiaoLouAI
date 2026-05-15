@@ -11,11 +11,15 @@ const signedFrontendObjectUrl =
 
 const stableFrontendObjectUrl =
   '/api/media/object-content/xiaolou-staging/media/frontend/synthetic-actor/reference.png';
+const signedControlApiObjectUrl =
+  `${stableFrontendObjectUrl}?xiaolou_purpose=read&expires=1&signature=synthetic`;
 
 describe('canvasPersistence media URL sanitising', () => {
   it('rewrites local object-storage signed read URLs to stable object-content URLs', () => {
     expect(toStableLocalObjectContentUrl(signedFrontendObjectUrl)).toBe(stableFrontendObjectUrl);
+    expect(toStableLocalObjectContentUrl(signedControlApiObjectUrl)).toBe(stableFrontendObjectUrl);
     expect(sanitizePersistedCanvasString(signedFrontendObjectUrl)).toBe(stableFrontendObjectUrl);
+    expect(sanitizePersistedCanvasString(signedControlApiObjectUrl)).toBe(stableFrontendObjectUrl);
   });
 
   it('keeps image nodes successful when only the persisted URL shape changes', () => {

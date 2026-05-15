@@ -84,6 +84,13 @@ public sealed class PostgresMediaStore(
         var signed = signer.SignUpload(bucket, objectKey, expiresAt - DateTimeOffset.UtcNow);
         row["upload_url"] = signed.Url;
         row["upload_url_expires_at"] = signed.ExpiresAt;
+        row["object_storage_provider"] = signed.Provider;
+        if (!string.IsNullOrWhiteSpace(signed.LocalObjectContentPath)
+            && LocalObjectStorageUrlPolicy.IsStablePublicReadKey(objectKey))
+        {
+            row["local_object_content_path"] = signed.LocalObjectContentPath;
+        }
+
         return row;
     }
 
@@ -160,12 +167,20 @@ public sealed class PostgresMediaStore(
             return null;
         }
 
+        var readObjectKey = media["permanent_object_key"]?.ToString() ?? media["object_key"]?.ToString() ?? "";
         var signed = signer.SignRead(
             media["bucket"]?.ToString() ?? "",
-            media["permanent_object_key"]?.ToString() ?? media["object_key"]?.ToString() ?? "",
+            readObjectKey,
             TimeSpan.FromSeconds(Math.Clamp(request.ExpiresInSeconds, 60, 3600)));
         media["signed_read_url"] = signed.Url;
         media["signed_read_url_expires_at"] = signed.ExpiresAt;
+        media["object_storage_provider"] = signed.Provider;
+        if (!string.IsNullOrWhiteSpace(signed.LocalObjectContentPath)
+            && LocalObjectStorageUrlPolicy.IsStablePublicReadKey(readObjectKey))
+        {
+            media["local_object_content_path"] = signed.LocalObjectContentPath;
+        }
+
         return media;
     }
 

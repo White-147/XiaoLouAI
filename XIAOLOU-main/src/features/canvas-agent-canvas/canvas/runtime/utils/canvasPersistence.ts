@@ -117,7 +117,10 @@ export function toStableLocalObjectContentUrl(value: string): string | null {
       return null;
     }
 
-    const pathParts = parsed.pathname.split('/').filter(Boolean);
+    const objectContentPrefix = '/api/media/object-content/';
+    const pathParts = parsed.pathname.startsWith(objectContentPrefix)
+      ? parsed.pathname.slice(objectContentPrefix.length).split('/').filter(Boolean)
+      : parsed.pathname.split('/').filter(Boolean);
     if (pathParts.length < 2) return null;
 
     const bucket = safeDecodeURIComponent(pathParts[0]).trim();

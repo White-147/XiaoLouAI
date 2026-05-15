@@ -1133,6 +1133,7 @@ export default function Home() {
     const files = Array.from(input.files ?? []);
     input.value = "";
     if (files.length) {
+      preloadPlaygroundPage();
       const batchId = Date.now();
       const nextAttachments = await Promise.all(
         files.map(async (file, index): Promise<HomeAttachment> => {
@@ -1161,6 +1162,11 @@ export default function Home() {
       );
       setHomeAttachments((current) => [...current, ...nextAttachments]);
     }
+  };
+
+  const handlePromptChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    preloadPlaygroundPage();
+    setPrompt(event.currentTarget.value);
   };
 
   const handlePromptSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1553,7 +1559,8 @@ export default function Home() {
               ) : null}
               <textarea
                 value={prompt}
-                onChange={(event) => setPrompt(event.currentTarget.value)}
+                onChange={handlePromptChange}
+                onFocus={preloadPlaygroundPage}
                 disabled={promptSending}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {

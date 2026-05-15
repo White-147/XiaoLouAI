@@ -23,6 +23,18 @@ if ($env:POSTGRES_APPLY_SCHEMA_ON_STARTUP) {
 $env:ObjectStorage__Provider = $env:OBJECT_STORAGE_PROVIDER
 $env:ObjectStorage__Bucket = $env:OBJECT_STORAGE_BUCKET
 $env:ObjectStorage__PublicBaseUrl = $env:OBJECT_STORAGE_PUBLIC_BASE_URL
+if ($env:OBJECT_STORAGE_TEMP_PREFIX) {
+  $env:ObjectStorage__TempPrefix = $env:OBJECT_STORAGE_TEMP_PREFIX
+}
+if ($env:OBJECT_STORAGE_PERMANENT_PREFIX) {
+  $env:ObjectStorage__PermanentPrefix = $env:OBJECT_STORAGE_PERMANENT_PREFIX
+}
+if ($env:OBJECT_STORAGE_SIGNING_SECRET) {
+  $env:ObjectStorage__SigningSecret = $env:OBJECT_STORAGE_SIGNING_SECRET
+}
+if ($env:OBJECT_STORAGE_LOCAL_ROOT) {
+  $env:ObjectStorage__LocalRootPath = $env:OBJECT_STORAGE_LOCAL_ROOT
+}
 $env:Payments__WebhookSecret = $env:PAYMENT_WEBHOOK_SECRET
 if ($env:PAYMENT_CALLBACK_ALLOWED_PROVIDERS) {
   $env:Payments__AllowedProviders = $env:PAYMENT_CALLBACK_ALLOWED_PROVIDERS

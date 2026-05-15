@@ -7,4 +7,8 @@ public interface IObjectStorageSigner
     SignedObjectUrl SignRead(string bucket, string objectKey, TimeSpan expiresIn);
 }
 
-public sealed record SignedObjectUrl(string Url, DateTimeOffset ExpiresAt);
+public sealed record SignedObjectUrl(
+    string Url,
+    DateTimeOffset ExpiresAt,
+    string Provider = "",
+    string? LocalObjectContentPath = null);

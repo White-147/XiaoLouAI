@@ -1314,8 +1314,8 @@ public sealed class PostgresProjectSurfaceStore(NpgsqlDataSource dataSource, Pos
         var payload = JsonDict(row, "payload_json");
         var result = JsonDict(row, "result_json");
         var url = FirstText(result, kind == "video"
-            ? new[] { "videoUrl", "video_url", "resultUrl", "url" }
-            : new[] { "imageUrl", "image_url", "resultUrl", "url" });
+            ? new[] { "urlPath", "url_path", "videoUrl", "video_url", "resultUrl", "url" }
+            : new[] { "urlPath", "url_path", "imageUrl", "image_url", "resultUrl", "url" });
         if (string.IsNullOrWhiteSpace(url))
         {
             return new Dictionary<string, object?>();

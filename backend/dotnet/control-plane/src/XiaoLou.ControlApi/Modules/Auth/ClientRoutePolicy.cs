@@ -11,6 +11,11 @@ internal static class ClientRoutePolicy
             return false;
         }
 
+        if (path.StartsWithSegments("/api/media/object-upload"))
+        {
+            return false;
+        }
+
         return path.StartsWithSegments("/api/accounts/ensure")
             || path.StartsWithSegments("/api/auth")
             || string.Equals(path.Value, "/api/me", StringComparison.OrdinalIgnoreCase)

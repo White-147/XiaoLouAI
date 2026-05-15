@@ -24,7 +24,7 @@
           <action type="Rewrite" url="http://127.0.0.1:4100/{R:0}" />
         </rule>
         <rule name="XiaoLou Public API Reverse Proxy" stopProcessing="true">
-          <match url="^api/(windows-native/status|capabilities|accounts/ensure|auth(/.*)?|me|organizations(/.*)?|api-center(/.*)?|admin(/.*)?|enterprise-applications(/.*)?|playground(/.*)?|toolbox(/.*)?|jobs(/.*)?|wallet|wallet/usage-stats|wallets(/.*)?|projects(/.*)?|canvas-projects(/.*)?|agent-canvas/projects(/.*)?|create/(images|videos)(/.*)?|payments/callbacks/[^/]+|media/(upload-begin|upload-complete|move-temp-to-permanent|signed-read-url))$" />
+          <match url="^api/(windows-native/status|capabilities|accounts/ensure|auth(/.*)?|me|organizations(/.*)?|api-center(/.*)?|admin(/.*)?|enterprise-applications(/.*)?|playground(/.*)?|toolbox(/.*)?|jobs(/.*)?|wallet|wallet/usage-stats|wallets(/.*)?|projects(/.*)?|canvas-projects(/.*)?|agent-canvas/projects(/.*)?|create/(images|videos)(/.*)?|payments/callbacks/[^/]+|media/(upload-begin|upload-complete|move-temp-to-permanent|signed-read-url|object-content/.+|object-upload/.+))$" />
           <action type="Rewrite" url="http://127.0.0.1:4100/{R:0}" />
         </rule>
         <rule name="Block Unlisted XiaoLou API" stopProcessing="true">
@@ -41,6 +41,13 @@
         </rule>
       </rules>
     </rewrite>
+    <security>
+      <requestFiltering>
+        <!-- Edge ceiling for public uploads. Control API applies smaller per-route
+             JSON/auth caps and concurrency/rate policies before handlers run. -->
+        <requestLimits maxAllowedContentLength="268435456" />
+      </requestFiltering>
+    </security>
     <urlCompression doStaticCompression="true" doDynamicCompression="false" />
     <staticContent>
       <!-- Keep the SPA shell and non-hashed root files revalidated. API routes are rewritten above. -->

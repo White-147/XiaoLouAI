@@ -25,11 +25,19 @@ type ControlMediaBeginResponse = {
   objectKey?: string;
   upload_url?: string;
   uploadUrl?: string;
+  object_storage_provider?: string;
+  objectStorageProvider?: string;
+  local_object_content_path?: string;
+  localObjectContentPath?: string;
 };
 
 type ControlMediaReadResponse = {
   signed_read_url?: string;
   signedReadUrl?: string;
+  object_storage_provider?: string;
+  objectStorageProvider?: string;
+  local_object_content_path?: string;
+  localObjectContentPath?: string;
 };
 
 export type MediaServiceDeps = {
@@ -106,6 +114,22 @@ function buildStableLocalObjectContentPath(bucket: string, objectKey: string) {
   return `/api/media/object-content/${encodeURIComponent(normalizedBucket)}/${normalizedObjectKey}`;
 }
 
+function isLocalObjectStorageProvider(value: string) {
+  return value.trim().toLowerCase() === "local";
+}
+
+function readObjectStorageProvider(
+  value: Pick<ControlMediaBeginResponse, "object_storage_provider" | "objectStorageProvider">,
+) {
+  return String(value.object_storage_provider || value.objectStorageProvider || "");
+}
+
+function readLocalObjectContentPath(
+  value: Pick<ControlMediaBeginResponse, "local_object_content_path" | "localObjectContentPath">,
+) {
+  return String(value.local_object_content_path || value.localObjectContentPath || "");
+}
+
 export function createMediaService({
   controlApiJsonRequest,
   getCurrentActorId,
@@ -146,7 +170,11 @@ export function createMediaService({
     const uploadSessionId = String(begin.upload_session_id || begin.uploadSessionId || "");
     const uploadUrl = String(begin.upload_url || begin.uploadUrl || "");
     const bucket = String(begin.bucket || "");
-    const stableReadPath = buildStableLocalObjectContentPath(bucket, objectKey);
+    const beginProvider = readObjectStorageProvider(begin);
+    const beginLocalReadPath = readLocalObjectContentPath(begin);
+    const stableReadPath = isLocalObjectStorageProvider(beginProvider)
+      ? beginLocalReadPath || buildStableLocalObjectContentPath(bucket, objectKey)
+      : "";
     if (!mediaObjectId || !uploadSessionId || !uploadUrl) {
       throw createApiRequestError("Control API did not return a usable media upload session", {
         code: "MEDIA_UPLOAD_SESSION_INVALID",
@@ -197,6 +225,10 @@ export function createMediaService({
       }),
     });
     const signedReadUrl = String(read.signed_read_url || read.signedReadUrl || uploadUrl);
+    const readProvider = readObjectStorageProvider(read) || beginProvider;
+    const localReadPath = isLocalObjectStorageProvider(readProvider)
+      ? readLocalObjectContentPath(read) || stableReadPath
+      : "";
 
     return {
       id: mediaObjectId,
@@ -206,7 +238,7 @@ export function createMediaService({
       sizeBytes: file.size,
       contentType,
       url: signedReadUrl,
-      urlPath: stableReadPath || signedReadUrl,
+      urlPath: localReadPath || signedReadUrl,
       mediaObjectId,
       objectKey,
       signedReadUrl,

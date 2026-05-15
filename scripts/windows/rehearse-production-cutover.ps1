@@ -318,7 +318,8 @@ if (Test-Path -LiteralPath $runtimeEnv) {
     "INTERNAL_API_TOKEN",
     "OBJECT_STORAGE_PROVIDER",
     "OBJECT_STORAGE_BUCKET",
-    "OBJECT_STORAGE_PUBLIC_BASE_URL"
+    "OBJECT_STORAGE_PUBLIC_BASE_URL",
+    "OBJECT_STORAGE_SIGNING_SECRET"
   )) {
     $value = Get-EnvFileValue $runtimeEnv $name
     if (Test-PlaceholderValue $value) {
@@ -441,6 +442,38 @@ if (Test-Path -LiteralPath $runtimeEnv) {
     Add-Item $checks "client-api-permissions" "ok" $clientApiPermissions
   }
 
+  $publicAccessEnabled = Get-EnvFileValue $runtimeEnv "PublicAccessLimits__Enabled"
+  if (-not (Test-TruthyEnvValue $publicAccessEnabled)) {
+    Add-ProductionFinding "public-access-limits" "warning" "Set PublicAccessLimits__Enabled=true before production cutover."
+  } else {
+    Add-Item $checks "public-access-limits" "ok" "PublicAccessLimits__Enabled=$publicAccessEnabled"
+  }
+
+  foreach ($name in @(
+    "PublicAccessLimits__WindowSeconds",
+    "PublicAccessLimits__AuthPermitLimit",
+    "PublicAccessLimits__AuthConcurrencyLimit",
+    "PublicAccessLimits__JobCreatePermitLimit",
+    "PublicAccessLimits__JobCreateConcurrencyLimit",
+    "PublicAccessLimits__MediaSignedUrlPermitLimit",
+    "PublicAccessLimits__MediaSignedUrlConcurrencyLimit",
+    "PublicAccessLimits__MediaUploadPermitLimit",
+    "PublicAccessLimits__MediaUploadConcurrencyLimit",
+    "PublicAccessLimits__MediaReadPermitLimit",
+    "PublicAccessLimits__MediaReadConcurrencyLimit",
+    "PublicAccessLimits__HealthPermitLimit",
+    "PublicAccessLimits__HealthConcurrencyLimit",
+    "PublicAccessLimits__AuthRequestBodyBytes",
+    "PublicAccessLimits__JsonRequestBodyBytes",
+    "PublicAccessLimits__MediaUploadBodyBytes"
+  )) {
+    $rawLimit = Get-EnvFileValue $runtimeEnv $name
+    $parsedLimit = [long]0
+    if (-not [long]::TryParse($rawLimit, [ref]$parsedLimit) -or $parsedLimit -le 0) {
+      Add-ProductionFinding "public-access-limit-value" "warning" "$name should be a positive integer in $runtimeEnv"
+    }
+  }
+
   $coreApiCompatReadOnly = Get-EnvFileValue $runtimeEnv "CORE_API_COMPAT_READ_ONLY"
   if (-not (Test-TruthyEnvValue $coreApiCompatReadOnly)) {
     Add-ProductionFinding "core-api-read-only" "warning" "Set CORE_API_COMPAT_READ_ONLY=1 for any legacy core-api compatibility process."
@@ -464,12 +497,24 @@ if ($caddyText -match "/api/internal/\*" -and $caddyText -match "/api/\* \{\s*re
 } else {
   Add-Item $blockers "caddy-public-surface" "failed" "Caddy example must block /api/internal/* and deny unlisted /api/*"
 }
+if ($caddyText -match "XIAOLOU_AUTH_BODY_MAX_SIZE:64KB" `
+    -and $caddyText -match "XIAOLOU_API_JSON_BODY_MAX_SIZE:2MB" `
+    -and $caddyText -match "XIAOLOU_MEDIA_UPLOAD_BODY_MAX_SIZE:256MB") {
+  Add-Item $checks "caddy-public-body-limits" "ok" "Caddy example has auth, JSON, and media upload request-body ceilings."
+} else {
+  Add-Item $blockers "caddy-public-body-limits" "failed" "Caddy example must keep public request-body ceilings for auth, JSON, and media upload routes."
+}
 
 $iisText = Get-Content -LiteralPath "$SourceRoot\deploy\windows\iis-web.config.example" -Raw
 if ($iisText -match "Block XiaoLou Internal API" -and $iisText -match "Block Unlisted XiaoLou API") {
   Add-Item $checks "iis-public-surface" "ok" "internal and unlisted API block rules are present"
 } else {
   Add-Item $blockers "iis-public-surface" "failed" "IIS example must block internal and unlisted API routes"
+}
+if ($iisText -match '<requestLimits\s+maxAllowedContentLength="268435456"') {
+  Add-Item $checks "iis-public-body-limits" "ok" "IIS example has the 256 MiB public upload edge ceiling."
+} else {
+  Add-Item $blockers "iis-public-body-limits" "failed" "IIS example must define maxAllowedContentLength=268435456 for the public upload edge ceiling."
 }
 
 $serviceNames = @("XiaoLou-ControlApi", "XiaoLou-LocalModelWorker", "XiaoLou-ClosedApiWorker")

@@ -46,7 +46,7 @@ import { AuthModal, type AuthRegisterMode, type AuthTab, type ResetStep } from "
 import { demoActors, navItems, type NavItem } from "./navItems";
 import { SidebarShell, type CollapsedNavFlyout } from "./SidebarShell";
 import { ProfileModal } from "./ProfileModal";
-import { loadPlaygroundPage, preloadPlaygroundPage } from "./routePrefetch";
+import { loadPlaygroundPage } from "./routePrefetch";
 
 // Lazy-load the canvas shells so users who never open them pay no parse cost.
 const Playground = lazy(loadPlaygroundPage);
@@ -78,7 +78,6 @@ export default function Layout() {
   const actorId = useActorId();
   const location = useLocation();
   const navigate = useNavigate();
-  const isHomeRoute = location.pathname === "/home";
   const isPlaygroundRoute = location.pathname === "/playground" || location.pathname.startsWith("/playground/");
   const isCanvasRoute = location.pathname === "/create/canvas";
   const isAgentCanvasRoute = location.pathname === "/create/agent-canvas";
@@ -105,6 +104,7 @@ export default function Layout() {
   const [showPassword, setShowPassword] = useState(false);
   const [knownActorsVer, setKnownActorsVer] = useState(0);
   const [hasMountedPlayground, setHasMountedPlayground] = useState(isPlaygroundRoute);
+  const shouldMountPlayground = hasMountedPlayground || isPlaygroundRoute;
   const hasMountedCanvas = isCanvasRoute;
   const hasMountedAgentCanvas = isAgentCanvasRoute;
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -156,20 +156,8 @@ export default function Layout() {
   useEffect(() => {
     if (isPlaygroundRoute) {
       setHasMountedPlayground(true);
-      return;
     }
-
-    if (!isHomeRoute || typeof window === "undefined") return;
-
-    preloadPlaygroundPage();
-    const timeoutId = window.setTimeout(() => {
-      setHasMountedPlayground(true);
-    }, 160);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [isHomeRoute, isPlaygroundRoute]);
+  }, [isPlaygroundRoute]);
 
   useEffect(() => {
     let active = true;
@@ -703,7 +691,7 @@ export default function Layout() {
       <main className="relative flex h-full flex-1 flex-col overflow-hidden bg-background">
         {!isPlaygroundRoute && !isCanvasRoute && !isAgentCanvasRoute ? <Outlet /> : null}
 
-        {hasMountedPlayground ? (
+        {shouldMountPlayground ? (
           <div
             className={cn(
               "absolute inset-0 bg-background",

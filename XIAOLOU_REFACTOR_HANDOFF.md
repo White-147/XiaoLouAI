@@ -1,6 +1,6 @@
 # XiaoLouAI 短棒交接
 
-更新时间：2026-05-14 +08
+更新时间：2026-05-15 +08
 工作目录：`D:\code\XiaoLouAI`
 
 本文件只保留当前接棒必须知道的上下文。旧阶段任务细节不写在短棒内；需要追溯时查 README 和 `deploy\records`。
@@ -8,11 +8,15 @@
 ## 当前接棒
 
 ```text
-Phase: N frontend-followup-owner-queue
-Owner: N11 playground-backend-contract-owner completed
-Status: Playground frontend/backend contract now carries current chat options and completes via stable .NET contract stub when no provider route is configured
-Goal: preserve L/M closeout context and do not reopen Canvas/Agent host-shell,
-runtime/generation or provider-adapter work without an explicit new owner.
+Phase: O public-access-hardening-owner-queue
+Owner: O6 capacity-and-load-verification-owner completed
+Status: Public access capacity/readiness is now measurable through
+scripts/windows/verify-public-access-capacity.ps1. Default mode is offline and
+non-secret; -RunHttp verifies public-origin static cache, metadata
+compression/cache/ETag, object range reads, active-job polling p95, and optional
+auth 429 behavior.
+Goal: close media storage, edge/API protection, prewarm budget, API cache/
+compression and capacity-verification gaps without broad runtime rewrites.
 ```
 
 ## 开始前先读
@@ -25,6 +29,8 @@ Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-phase-plan.md 
 Get-Content .\deploy\records\xiaolouai-frontend-design-constraint-task-record.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-frontend-followup-phase-plan.md -Encoding UTF8
 Get-Content .\deploy\records\xiaolouai-frontend-followup-task-record.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-public-access-hardening-phase-plan.md -Encoding UTF8
+Get-Content .\deploy\records\xiaolouai-public-access-hardening-task-record.md -Encoding UTF8
 ```
 
 ## 阶段归档
@@ -41,29 +47,53 @@ deploy\records\xiaolouai-frontend-followup-task-record.md
 N 队列已拆入：
 deploy\records\xiaolouai-frontend-followup-task-record.md
 
-短棒不要重复做 L/M 全局体检；先读任务记录的
-"N Candidate Queue And Short-Stick Rules"，再按用户选择进入单一 owner。
+O 公网访问硬化队列已拆入：
+deploy\records\xiaolouai-public-access-hardening-phase-plan.md
+deploy\records\xiaolouai-public-access-hardening-task-record.md
+
+短棒不要重复做 L/M/N 全局体检；先读当前任务记录的
+"O Candidate Queue And Short-Stick Rules"，再按用户选择进入单一 owner。
 ```
 
 ## 下一步
 
 ```text
 建议下一棒：
-先读 deploy\records\xiaolouai-frontend-followup-task-record.md 的
-"N Candidate Queue And Short-Stick Rules"。
+先读 deploy\records\xiaolouai-public-access-hardening-task-record.md 的
+"O Candidate Queue And Short-Stick Rules"。
 N2 storyboard-prompt-placeholder-owner 已完成。
 N3 non-canvas-large-file-preflight 已完成。
 N8 image-create-pure-helper-owner 已完成。
 N9 image-create-preview-modal-owner 已完成。
 N10 image-create-recent-tasks-panel-owner 已完成。
 N11 playground-backend-contract-owner 已完成。
-默认下一棒建议：若要提交当前 N2/N8/N9/N10/N11 变更，先做提交准备 owner，确认
-tracked diff 包含 README.md、XIAOLOU_REFACTOR_HANDOFF.md、两个 N2 提示词文件、
-ImageCreate.tsx、新增 imageCreateHelpers.ts 和 imageCreateHelpers.test.ts、
-新增 ImageCreatePreviewModal.tsx 与 ImageCreateRecentTasksPanel.tsx，以及
-Playground/后端 contract-stub 相关文件，且不要 force-add deploy/records。
-若继续代码 owner，则只进入一个明确 owner。
-不要重复 M2/M3/M4 的全局检查，不要开启多个 owner。
+O1 public-access-constraints-preflight 已完成，本轮没有业务代码修改。
+O2 media-object-storage-public-contract-owner 已完成：本地 provider 上传走
+签名 `/api/media/object-upload/*`，稳定读走 `/api/media/object-content/*`；
+前端不再把外部对象存储/CDN URL 改写成稳定本地 urlPath；ClosedApiWorker
+generated media 结果带 objectStorageProvider/urlPath；Caddy/IIS 示例已放行
+本地对象路由。
+O3 edge-and-api-rate-limit-owner 已完成：Control API 已有可配置
+PublicAccessLimits 固定窗口/并发保护和 auth/json/upload 请求体上限；
+Caddy/IIS 示例已有公网 body ceiling；Windows env/publish/register/preflight
+脚本已携带并校验对应配置。
+O4 home-playground-prewarm-budget-owner 已完成：/home 不再定时隐藏挂载
+Playground；Home composer focus/input/attachment/send 与侧边栏 hover/focus
+只预取 lazy route chunk，Playground conversation/job/memory 初始化仍只在
+实际 /playground 路由发生。
+O5 api-compression-cache-contract-owner 已完成：Control API 仅对已审查的
+稳定 JSON metadata 路由（capabilities/toolbox/playground models）启用动态压缩
+和 private max-age=30 weak-ETag 短缓存；SSE、range media、auth/payment/provider/
+operational、账号态 Playground 与 wallet reads 不进入该策略。
+O6 capacity-and-load-verification-owner 已完成：新增
+`scripts/windows/verify-public-access-capacity.ps1`，默认离线核算 PostgreSQL
+连接池、worker lease 吞吐、Playground active-job 轮询和公网 body caps；
+`-RunHttp` 可在公网入口上验证静态缓存、metadata 压缩/ETag/304、object range
+read、active-job p95 和可选 auth 429。
+O 队列已收口。若只想提交当前代码/文档，先做提交准备 owner，确认 tracked diff
+只包含预期代码/文档；deploy/records 仍然不要 force-add。
+不要同时开启新的未命名 owner。
+不要恢复 Jaaz/Node core-api/Vite dev 生产入口。
 ```
 
 ## 硬性约束指针

@@ -86,6 +86,28 @@ smoke/test/staging/sample secrets, unsafe static-token grants, wildcard client
 permissions/account grants, and a legacy `core-api` allowlist wider than
 `GET /healthz;GET /api/windows-native/status`.
 
+Run the public-access capacity verifier before opening or retuning public
+traffic. The default mode is non-secret and does not call the public endpoint:
+
+```powershell
+D:\code\XiaoLouAI\scripts\windows\verify-public-access-capacity.ps1
+```
+
+After the reverse proxy and client auth are in place, run the HTTP smoke against
+the public origin. Provide a stable object-content sample when media range reads
+are part of the cutover:
+
+```powershell
+D:\code\XiaoLouAI\scripts\windows\verify-public-access-capacity.ps1 `
+  -RunHttp `
+  -BaseUrl "https://xiaolou.example.com" `
+  -ClientApiToken "<public client token or canary assertion>" `
+  -ObjectContentPath "/api/media/object-content/<bucket>/<objectKey>"
+```
+
+Add `-RunRateLimitProbe` only during an approved canary window; it intentionally
+spends the anonymous auth fixed-window budget to confirm HTTP 429.
+
 ## Internal API Boundary
 
 - `/api/internal/*` is worker-only. Public reverse proxies must block it before general `/api/*` forwarding.
@@ -97,6 +119,14 @@ permissions/account grants, and a legacy `core-api` allowlist wider than
 - `deploy/windows/Caddyfile.windows.example` and `deploy/windows/iis-web.config.example` include the public block rules.
 - `INTERNAL_API_TOKEN` should be set in production. Workers send it as `X-XiaoLou-Internal-Token`.
 - If the token is absent, the Control API only allows internal endpoints from loopback requests with no external forwarding headers. This is for local verification only, not production.
+- Keep `PublicAccessLimits__Enabled=true` for production. The Control API
+  applies fixed-window and concurrency policies to auth/register, job creation,
+  media signed URLs, object upload/download, and health probes before endpoint
+  handlers run.
+- Caddy examples enforce coarse request-body ceilings before proxying:
+  `64KB` for auth/account bootstrap, `2MB` for public JSON writes, and `256MB`
+  for local object uploads. IIS uses `maxAllowedContentLength=268435456` as the
+  upload edge ceiling, while the Control API applies tighter per-route caps.
 
 ## Static Frontend Cache Boundary
 

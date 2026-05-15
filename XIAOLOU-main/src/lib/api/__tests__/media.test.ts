@@ -98,6 +98,7 @@ describe("createMediaService", () => {
             bucket: "xiaolou-staging",
             upload_session_id: "synthetic-upload-session",
             upload_url: "https://synthetic-storage.example/upload/media-object",
+            object_storage_provider: "local",
           };
         }
         if (path === "/api/media/signed-read-url") {
@@ -186,6 +187,42 @@ describe("createMediaService", () => {
     expect(fetchCalls[0].init?.body).toBeInstanceOf(File);
     expect(clientIdPrefixes).toEqual(["media"]);
     expect(ownerScopeCalls).toEqual([createSyntheticOwnerScope("synthetic actor@example")]);
+  });
+
+  it("keeps external object storage read URLs instead of preferring local object-content paths", async () => {
+    const signedReadUrl = "https://cdn-storage.example/read/media-object";
+    const { service } = createServiceHarness({
+      handler: (path) => {
+        if (path === "/api/media/upload-begin") {
+          return {
+            media_object_id: "synthetic-external-media",
+            bucket: "xiaolou-prod",
+            upload_session_id: "synthetic-external-session",
+            upload_url: "https://cdn-storage.example/upload/media-object",
+            object_storage_provider: "s3-compatible",
+          };
+        }
+        if (path === "/api/media/signed-read-url") {
+          return {
+            signed_read_url: signedReadUrl,
+            object_storage_provider: "s3-compatible",
+          };
+        }
+
+        return { ok: true };
+      },
+    });
+    installSyntheticFetch(() => ({
+      ok: true,
+      status: 200,
+    }));
+
+    await expect(service.uploadFile(createUploadFile(), "image")).resolves.toMatchObject({
+      id: "synthetic-external-media",
+      url: signedReadUrl,
+      urlPath: signedReadUrl,
+      signedReadUrl,
+    });
   });
 
   it("propagates organization owner scope through the media upload lifecycle", async () => {

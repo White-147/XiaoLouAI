@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using XiaoLou.ControlApi.Modules.Auth;
+using XiaoLou.ControlApi.Modules.PublicAccess;
 using XiaoLou.Domain;
 using XiaoLou.Infrastructure.Postgres;
 using static XiaoLou.ControlApi.Modules.Auth.AuthHelpers;
@@ -35,7 +36,7 @@ internal static class PlaygroundEndpoints
 
         endpoints.MapGet("/api/playground/models", (PostgresPlaygroundStore playground) =>
         {
-            return Results.Ok(playground.ListModels());
+            return PublicResponsePolicy.StableJson(playground.ListModels());
         });
 
         endpoints.MapGet("/api/playground/conversations", async (

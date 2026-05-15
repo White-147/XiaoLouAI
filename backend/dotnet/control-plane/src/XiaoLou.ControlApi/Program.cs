@@ -1,4 +1,6 @@
+using System.IO.Compression;
 using System.Net;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
 using XiaoLou.ControlApi.Modules.Accounts;
@@ -12,6 +14,7 @@ using XiaoLou.ControlApi.Modules.Operational;
 using XiaoLou.ControlApi.Modules.Payments;
 using XiaoLou.ControlApi.Modules.Playground;
 using XiaoLou.ControlApi.Modules.Projects;
+using XiaoLou.ControlApi.Modules.PublicAccess;
 using XiaoLou.ControlApi.Modules.Toolbox;
 using XiaoLou.Domain;
 using XiaoLou.Infrastructure.Postgres;
@@ -26,6 +29,26 @@ builder.Services.Configure<ObjectStorageOptions>(builder.Configuration.GetSectio
 builder.Services.Configure<InternalApiOptions>(builder.Configuration.GetSection("InternalApi"));
 builder.Services.Configure<ClientApiOptions>(builder.Configuration.GetSection("ClientApi"));
 builder.Services.Configure<PaymentCallbackOptions>(builder.Configuration.GetSection("Payments"));
+builder.Services.AddXiaoLouPublicAccessGuard(builder.Configuration);
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = new[]
+    {
+        "application/json",
+        "application/problem+json",
+    };
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
 builder.Services.AddSingleton<IObjectStorageSigner, ObjectStorageSigner>();
 builder.Services.AddSingleton<IPaymentSignatureVerifier, HmacPaymentSignatureVerifier>();
 builder.Services.AddHostedService<LeaseRecoveryService>();
@@ -38,6 +61,8 @@ if (postgresOptions.ApplySchemaOnStartup)
     await app.Services.GetRequiredService<PostgresSchemaMigrator>()
         .ApplyAsync(app.Lifetime.ApplicationStopping);
 }
+
+app.UseXiaoLouPublicAccessGuard();
 
 app.Use(async (context, next) =>
 {
@@ -89,6 +114,11 @@ app.Use(async (context, next) =>
     }
 
     await next();
+});
+
+app.UseWhen(PublicResponsePolicy.IsStableMetadataRequest, branch =>
+{
+    branch.UseResponseCompression();
 });
 
 app.MapHealthMetricsEndpoints();

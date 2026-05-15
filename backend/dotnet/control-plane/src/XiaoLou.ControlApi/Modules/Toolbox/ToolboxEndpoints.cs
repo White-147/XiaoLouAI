@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using XiaoLou.ControlApi.Modules.Auth;
+using XiaoLou.ControlApi.Modules.PublicAccess;
 using XiaoLou.Domain;
 using XiaoLou.Infrastructure.Postgres;
 using static XiaoLou.ControlApi.Modules.Auth.AuthHelpers;
@@ -17,21 +18,21 @@ internal static class ToolboxEndpoints
             PostgresToolboxStore toolbox,
             CancellationToken ct) =>
         {
-            return Results.Ok(await toolbox.GetSystemCapabilitiesAsync(ct));
+            return PublicResponsePolicy.StableJson(await toolbox.GetSystemCapabilitiesAsync(ct));
         });
 
         endpoints.MapGet("/api/toolbox", async (
             PostgresToolboxStore toolbox,
             CancellationToken ct) =>
         {
-            return Results.Ok(await toolbox.GetCapabilitiesAsync(ct));
+            return PublicResponsePolicy.StableJson(await toolbox.GetCapabilitiesAsync(ct));
         });
 
         endpoints.MapGet("/api/toolbox/capabilities", async (
             PostgresToolboxStore toolbox,
             CancellationToken ct) =>
         {
-            return Results.Ok(await toolbox.GetCapabilitiesAsync(ct));
+            return PublicResponsePolicy.StableJson(await toolbox.GetCapabilitiesAsync(ct));
         });
 
         endpoints.MapPost("/api/toolbox/character-replace", async (

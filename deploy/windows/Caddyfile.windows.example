@@ -1,3 +1,23 @@
+# API rate/concurrency policies live in the Control API; Caddy enforces the
+# coarse public request-body ceiling before proxying uploads or JSON writes.
+(xiaolou_auth_body_limit) {
+	request_body {
+		max_size {$XIAOLOU_AUTH_BODY_MAX_SIZE:64KB}
+	}
+}
+
+(xiaolou_json_body_limit) {
+	request_body {
+		max_size {$XIAOLOU_API_JSON_BODY_MAX_SIZE:2MB}
+	}
+}
+
+(xiaolou_media_upload_body_limit) {
+	request_body {
+		max_size {$XIAOLOU_MEDIA_UPLOAD_BODY_MAX_SIZE:256MB}
+	}
+}
+
 www.example.com {
 	root * D:/code/XiaoLouAI/.runtime/app/XIAOLOU-main/dist
 
@@ -38,10 +58,12 @@ www.example.com {
 	}
 
 	handle /api/accounts/ensure {
+		import xiaolou_auth_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
 	handle /api/auth* {
+		import xiaolou_auth_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
@@ -66,14 +88,17 @@ www.example.com {
 	}
 
 	handle /api/playground* {
+		import xiaolou_json_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
 	handle /api/toolbox* {
+		import xiaolou_json_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
 	handle /api/jobs* {
+		import xiaolou_json_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
@@ -94,22 +119,36 @@ www.example.com {
 	}
 
 	handle /api/payments/callbacks/* {
+		import xiaolou_json_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
 	handle /api/media/upload-begin {
+		import xiaolou_json_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
 	handle /api/media/upload-complete {
+		import xiaolou_json_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
 	handle /api/media/move-temp-to-permanent {
+		import xiaolou_json_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 
 	handle /api/media/signed-read-url {
+		import xiaolou_json_body_limit
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/media/object-content/* {
+		reverse_proxy 127.0.0.1:4100
+	}
+
+	handle /api/media/object-upload/* {
+		import xiaolou_media_upload_body_limit
 		reverse_proxy 127.0.0.1:4100
 	}
 

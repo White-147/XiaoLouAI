@@ -356,6 +356,30 @@ $postgresTimeoutSeconds = Resolve-EnvValue -Text $envText -Name "Postgres__Timeo
 $postgresCommandTimeoutSeconds = Resolve-EnvValue -Text $envText -Name "Postgres__CommandTimeoutSeconds" -DefaultValue "30"
 $postgresKeepAliveSeconds = Resolve-EnvValue -Text $envText -Name "Postgres__KeepAliveSeconds" -DefaultValue "30"
 $pgBin = Resolve-EnvValue -Text $envText -Name "PG_BIN" -DefaultValue "D:\soft\program\PostgreSQL\18\bin"
+$objectStorageProvider = Resolve-EnvValue -Text $envText -Name "OBJECT_STORAGE_PROVIDER" -DefaultValue "local"
+$objectStorageBucket = Resolve-EnvValue -Text $envText -Name "OBJECT_STORAGE_BUCKET" -DefaultValue "xiaolou-staging"
+$objectStoragePublicBaseUrl = Resolve-EnvValue -Text $envText -Name "OBJECT_STORAGE_PUBLIC_BASE_URL" -DefaultValue "http://127.0.0.1:4100"
+$objectStorageTempPrefix = Resolve-EnvValue -Text $envText -Name "OBJECT_STORAGE_TEMP_PREFIX" -DefaultValue "temp"
+$objectStoragePermanentPrefix = Resolve-EnvValue -Text $envText -Name "OBJECT_STORAGE_PERMANENT_PREFIX" -DefaultValue "media"
+$objectStorageLocalRoot = Resolve-EnvValue -Text $envText -Name "OBJECT_STORAGE_LOCAL_ROOT" -DefaultValue "$cacheRoot\object-storage"
+$objectStorageSigningSecret = Resolve-EnvValue -Text $envText -Name "OBJECT_STORAGE_SIGNING_SECRET" -DefaultValue "change-me-object-storage-signing-secret"
+$publicAccessEnabled = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__Enabled" -DefaultValue "true"
+$publicAccessWindowSeconds = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__WindowSeconds" -DefaultValue "60"
+$publicAccessAuthPermitLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__AuthPermitLimit" -DefaultValue "20"
+$publicAccessAuthConcurrencyLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__AuthConcurrencyLimit" -DefaultValue "4"
+$publicAccessJobCreatePermitLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__JobCreatePermitLimit" -DefaultValue "30"
+$publicAccessJobCreateConcurrencyLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__JobCreateConcurrencyLimit" -DefaultValue "6"
+$publicAccessMediaSignedUrlPermitLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__MediaSignedUrlPermitLimit" -DefaultValue "60"
+$publicAccessMediaSignedUrlConcurrencyLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__MediaSignedUrlConcurrencyLimit" -DefaultValue "8"
+$publicAccessMediaUploadPermitLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__MediaUploadPermitLimit" -DefaultValue "20"
+$publicAccessMediaUploadConcurrencyLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__MediaUploadConcurrencyLimit" -DefaultValue "3"
+$publicAccessMediaReadPermitLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__MediaReadPermitLimit" -DefaultValue "600"
+$publicAccessMediaReadConcurrencyLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__MediaReadConcurrencyLimit" -DefaultValue "32"
+$publicAccessHealthPermitLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__HealthPermitLimit" -DefaultValue "120"
+$publicAccessHealthConcurrencyLimit = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__HealthConcurrencyLimit" -DefaultValue "8"
+$publicAccessAuthRequestBodyBytes = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__AuthRequestBodyBytes" -DefaultValue "65536"
+$publicAccessJsonRequestBodyBytes = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__JsonRequestBodyBytes" -DefaultValue "2097152"
+$publicAccessMediaUploadBodyBytes = Resolve-EnvValue -Text $envText -Name "PublicAccessLimits__MediaUploadBodyBytes" -DefaultValue "268435456"
 $coreApiPgPoolMax = Resolve-EnvValue -Text $envText -Name "PGPOOL_MAX" -DefaultValue "2"
 $clientApiToken = Resolve-EnvValue -Text $envText -Name "CLIENT_API_TOKEN" -DefaultValue "change-me-client-token"
 $clientApiTokenHeader = Resolve-EnvValue -Text $envText -Name "CLIENT_API_TOKEN_HEADER" -DefaultValue "X-XiaoLou-Client-Token"
@@ -455,6 +479,37 @@ $envValues = [ordered]@{
   Postgres__KeepAliveSeconds = $postgresKeepAliveSeconds
   PG_BIN = $pgBin
   PGPOOL_MAX = $coreApiPgPoolMax
+  OBJECT_STORAGE_PROVIDER = $objectStorageProvider
+  OBJECT_STORAGE_BUCKET = $objectStorageBucket
+  OBJECT_STORAGE_PUBLIC_BASE_URL = $objectStoragePublicBaseUrl
+  OBJECT_STORAGE_SIGNING_SECRET = $objectStorageSigningSecret
+  OBJECT_STORAGE_TEMP_PREFIX = $objectStorageTempPrefix
+  OBJECT_STORAGE_PERMANENT_PREFIX = $objectStoragePermanentPrefix
+  OBJECT_STORAGE_LOCAL_ROOT = $objectStorageLocalRoot
+  ObjectStorage__Provider = $objectStorageProvider
+  ObjectStorage__Bucket = $objectStorageBucket
+  ObjectStorage__PublicBaseUrl = $objectStoragePublicBaseUrl
+  ObjectStorage__SigningSecret = $objectStorageSigningSecret
+  ObjectStorage__TempPrefix = $objectStorageTempPrefix
+  ObjectStorage__PermanentPrefix = $objectStoragePermanentPrefix
+  ObjectStorage__LocalRootPath = $objectStorageLocalRoot
+  PublicAccessLimits__Enabled = $publicAccessEnabled
+  PublicAccessLimits__WindowSeconds = $publicAccessWindowSeconds
+  PublicAccessLimits__AuthPermitLimit = $publicAccessAuthPermitLimit
+  PublicAccessLimits__AuthConcurrencyLimit = $publicAccessAuthConcurrencyLimit
+  PublicAccessLimits__JobCreatePermitLimit = $publicAccessJobCreatePermitLimit
+  PublicAccessLimits__JobCreateConcurrencyLimit = $publicAccessJobCreateConcurrencyLimit
+  PublicAccessLimits__MediaSignedUrlPermitLimit = $publicAccessMediaSignedUrlPermitLimit
+  PublicAccessLimits__MediaSignedUrlConcurrencyLimit = $publicAccessMediaSignedUrlConcurrencyLimit
+  PublicAccessLimits__MediaUploadPermitLimit = $publicAccessMediaUploadPermitLimit
+  PublicAccessLimits__MediaUploadConcurrencyLimit = $publicAccessMediaUploadConcurrencyLimit
+  PublicAccessLimits__MediaReadPermitLimit = $publicAccessMediaReadPermitLimit
+  PublicAccessLimits__MediaReadConcurrencyLimit = $publicAccessMediaReadConcurrencyLimit
+  PublicAccessLimits__HealthPermitLimit = $publicAccessHealthPermitLimit
+  PublicAccessLimits__HealthConcurrencyLimit = $publicAccessHealthConcurrencyLimit
+  PublicAccessLimits__AuthRequestBodyBytes = $publicAccessAuthRequestBodyBytes
+  PublicAccessLimits__JsonRequestBodyBytes = $publicAccessJsonRequestBodyBytes
+  PublicAccessLimits__MediaUploadBodyBytes = $publicAccessMediaUploadBodyBytes
   CORE_API_COMPAT_READ_ONLY = $coreApiCompatReadOnly
   CORE_API_COMPAT_PUBLIC_ROUTE_ALLOWLIST = $coreApiCompatPublicRouteAllowlist
   CORE_API_COMPAT_DISABLE_TASKS_STREAM = $coreApiCompatDisableTasksStream
@@ -493,6 +548,8 @@ foreach ($name in @(
   "OBJECT_STORAGE_PROVIDER",
   "OBJECT_STORAGE_BUCKET",
   "OBJECT_STORAGE_PUBLIC_BASE_URL",
+  "OBJECT_STORAGE_SIGNING_SECRET",
+  "OBJECT_STORAGE_LOCAL_ROOT",
   "OBJECT_STORAGE_TEMP_PREFIX",
   "OBJECT_STORAGE_PERMANENT_PREFIX"
 )) {

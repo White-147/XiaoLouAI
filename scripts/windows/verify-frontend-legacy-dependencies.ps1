@@ -64,6 +64,7 @@ function Test-ControlApiPublicPath {
     -or $Path -match "^/api/wallets($|[/?#])" `
     -or $Path -match "^/api/wallets/" `
     -or $Path -match "^/api/media/(upload-begin|upload-complete|move-temp-to-permanent|signed-read-url)($|[/?#])" `
+    -or $Path -match "^/api/media/(object-content|object-upload)/" `
     -or $Path -match "^/api/projects($|[/?#])" `
     -or $Path -match "^/api/projects/" `
     -or $Path -match "^/api/canvas-projects($|[/?#])" `
@@ -174,6 +175,8 @@ if (Test-Path -LiteralPath $caddyPath) {
     -and $caddyText -match "handle\s+/api/payments/callbacks/\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/media/upload-begin\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/media/signed-read-url\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/media/object-content/\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
+    -and $caddyText -match "handle\s+/api/media/object-upload/\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/projects\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/canvas-projects\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
     -and $caddyText -match "handle\s+/api/agent-canvas/projects\*\s*\{[\s\S]*?reverse_proxy\s+127\.0\.0\.1:4100" `
@@ -196,6 +199,15 @@ if (Test-Path -LiteralPath $caddyPath) {
   } else {
     Add-Item $blockers "caddy-static-cache-policy" "failed" "Caddy must cache only /assets/* with immutable static headers, keep the SPA shell revalidated, and avoid Cache-Control headers inside /api handlers."
   }
+
+  $hasCaddyBodyLimits = $caddyText -match "XIAOLOU_AUTH_BODY_MAX_SIZE:64KB" `
+    -and $caddyText -match "XIAOLOU_API_JSON_BODY_MAX_SIZE:2MB" `
+    -and $caddyText -match "XIAOLOU_MEDIA_UPLOAD_BODY_MAX_SIZE:256MB"
+  if ($hasCaddyBodyLimits) {
+    Add-Item $checks "caddy-public-body-limits" "ok" "Caddy keeps coarse request-body ceilings before proxying public API writes and uploads."
+  } else {
+    Add-Item $blockers "caddy-public-body-limits" "failed" "Caddy must define auth, JSON, and media upload request-body ceilings for public routes."
+  }
 }
 
 if (Test-Path -LiteralPath $iisPath) {
@@ -204,7 +216,7 @@ if (Test-Path -LiteralPath $iisPath) {
   $hasOperationalBlock = $iisText -match '\^\(metrics\|api/\(schema\.\*\|providers/health\.\*\)\)\$'
   $hasUnlistedBlock = $iisText -match 'Block Unlisted XiaoLou API'
   $hasHealthProxy = $iisText -match '\^\(healthz\|livez\|readyz\)\$'
-  $hasPublicProxy = $iisText -match 'windows-native/status\|capabilities\|accounts/ensure\|auth\(/.\*\)\?\|me\|organizations\(/.\*\)\?\|api-center\(/.\*\)\?\|admin\(/.\*\)\?\|enterprise-applications\(/.\*\)\?\|playground\(/.\*\)\?\|toolbox\(/.\*\)\?\|jobs\(/.\*\)\?\|wallet\|wallet/usage-stats\|wallets\(/.\*\)\?\|projects\(/.\*\)\?\|canvas-projects\(/.\*\)\?\|agent-canvas/projects\(/.\*\)\?\|create/\(images\|videos\)\(/.\*\)\?\|payments/callbacks/\[\^/\]\+\|media/\(upload-begin\|upload-complete\|move-temp-to-permanent\|signed-read-url\)'
+  $hasPublicProxy = $iisText -match 'windows-native/status\|capabilities\|accounts/ensure\|auth\(/.\*\)\?\|me\|organizations\(/.\*\)\?\|api-center\(/.\*\)\?\|admin\(/.\*\)\?\|enterprise-applications\(/.\*\)\?\|playground\(/.\*\)\?\|toolbox\(/.\*\)\?\|jobs\(/.\*\)\?\|wallet\|wallet/usage-stats\|wallets\(/.\*\)\?\|projects\(/.\*\)\?\|canvas-projects\(/.\*\)\?\|agent-canvas/projects\(/.\*\)\?\|create/\(images\|videos\)\(/.\*\)\?\|payments/callbacks/\[\^/\]\+\|media/\(upload-begin\|upload-complete\|move-temp-to-permanent\|signed-read-url\|object-content/.\+\|object-upload/.\+\)'
   if ($hasInternalBlock -and $hasOperationalBlock -and $hasUnlistedBlock -and $hasHealthProxy -and $hasPublicProxy) {
     Add-Item $checks "iis-public-surface" "ok" "IIS routes only explicit Control API public paths and blocks unlisted legacy surfaces."
   } else {
@@ -217,6 +229,12 @@ if (Test-Path -LiteralPath $iisPath) {
     Add-Item $checks "iis-static-cache-policy" "ok" "IIS caches only the Vite assets directory and keeps SPA shell/non-hashed static files revalidated; API routes are rewritten before static content."
   } else {
     Add-Item $blockers "iis-static-cache-policy" "failed" "IIS must apply long cache only under assets and keep the SPA shell/non-hashed static files revalidated."
+  }
+
+  if ($iisText -match '<requestLimits\s+maxAllowedContentLength="268435456"') {
+    Add-Item $checks "iis-public-body-limits" "ok" "IIS has the 256 MiB public upload edge ceiling; Control API applies tighter per-route limits."
+  } else {
+    Add-Item $blockers "iis-public-body-limits" "failed" "IIS must define requestLimits maxAllowedContentLength=268435456 for the public upload edge ceiling."
   }
 }
 

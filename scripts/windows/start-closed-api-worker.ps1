@@ -19,6 +19,15 @@ if (-not $env:CLOSED_API_WORKER_DLL) {
 $env:ObjectStorage__Provider = if ($env:OBJECT_STORAGE_PROVIDER) { $env:OBJECT_STORAGE_PROVIDER } else { "local" }
 $env:ObjectStorage__Bucket = if ($env:OBJECT_STORAGE_BUCKET) { $env:OBJECT_STORAGE_BUCKET } else { "xiaolou-staging" }
 $env:ObjectStorage__PublicBaseUrl = if ($env:OBJECT_STORAGE_PUBLIC_BASE_URL) { $env:OBJECT_STORAGE_PUBLIC_BASE_URL } else { "http://127.0.0.1:4100" }
+if ($env:OBJECT_STORAGE_TEMP_PREFIX) {
+  $env:ObjectStorage__TempPrefix = $env:OBJECT_STORAGE_TEMP_PREFIX
+}
+if ($env:OBJECT_STORAGE_PERMANENT_PREFIX) {
+  $env:ObjectStorage__PermanentPrefix = $env:OBJECT_STORAGE_PERMANENT_PREFIX
+}
+if ($env:OBJECT_STORAGE_SIGNING_SECRET) {
+  $env:ObjectStorage__SigningSecret = $env:OBJECT_STORAGE_SIGNING_SECRET
+}
 if ($env:OBJECT_STORAGE_LOCAL_ROOT) {
   $env:ObjectStorage__LocalRootPath = $env:OBJECT_STORAGE_LOCAL_ROOT
 }

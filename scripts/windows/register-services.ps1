@@ -184,7 +184,27 @@ $pgBin = if ($env:PG_BIN) { $env:PG_BIN } else { "D:\soft\program\PostgreSQL\18\
 $objectStorageProvider = if ($env:OBJECT_STORAGE_PROVIDER) { $env:OBJECT_STORAGE_PROVIDER } else { "local" }
 $objectStorageBucket = if ($env:OBJECT_STORAGE_BUCKET) { $env:OBJECT_STORAGE_BUCKET } else { "xiaolou-staging" }
 $objectStoragePublicBaseUrl = if ($env:OBJECT_STORAGE_PUBLIC_BASE_URL) { $env:OBJECT_STORAGE_PUBLIC_BASE_URL } else { "http://127.0.0.1:4100" }
+$objectStorageTempPrefix = if ($env:OBJECT_STORAGE_TEMP_PREFIX) { $env:OBJECT_STORAGE_TEMP_PREFIX } else { "temp" }
+$objectStoragePermanentPrefix = if ($env:OBJECT_STORAGE_PERMANENT_PREFIX) { $env:OBJECT_STORAGE_PERMANENT_PREFIX } else { "media" }
 $objectStorageLocalRoot = if ($env:OBJECT_STORAGE_LOCAL_ROOT) { $env:OBJECT_STORAGE_LOCAL_ROOT } else { Join-Path $cacheRoot "object-storage" }
+$objectStorageSigningSecret = if ($env:OBJECT_STORAGE_SIGNING_SECRET) { $env:OBJECT_STORAGE_SIGNING_SECRET } elseif ($env:ObjectStorage__SigningSecret) { $env:ObjectStorage__SigningSecret } else { "change-me-object-storage-signing-secret" }
+$publicAccessEnabled = if ($env:PublicAccessLimits__Enabled) { $env:PublicAccessLimits__Enabled } else { "true" }
+$publicAccessWindowSeconds = if ($env:PublicAccessLimits__WindowSeconds) { $env:PublicAccessLimits__WindowSeconds } else { "60" }
+$publicAccessAuthPermitLimit = if ($env:PublicAccessLimits__AuthPermitLimit) { $env:PublicAccessLimits__AuthPermitLimit } else { "20" }
+$publicAccessAuthConcurrencyLimit = if ($env:PublicAccessLimits__AuthConcurrencyLimit) { $env:PublicAccessLimits__AuthConcurrencyLimit } else { "4" }
+$publicAccessJobCreatePermitLimit = if ($env:PublicAccessLimits__JobCreatePermitLimit) { $env:PublicAccessLimits__JobCreatePermitLimit } else { "30" }
+$publicAccessJobCreateConcurrencyLimit = if ($env:PublicAccessLimits__JobCreateConcurrencyLimit) { $env:PublicAccessLimits__JobCreateConcurrencyLimit } else { "6" }
+$publicAccessMediaSignedUrlPermitLimit = if ($env:PublicAccessLimits__MediaSignedUrlPermitLimit) { $env:PublicAccessLimits__MediaSignedUrlPermitLimit } else { "60" }
+$publicAccessMediaSignedUrlConcurrencyLimit = if ($env:PublicAccessLimits__MediaSignedUrlConcurrencyLimit) { $env:PublicAccessLimits__MediaSignedUrlConcurrencyLimit } else { "8" }
+$publicAccessMediaUploadPermitLimit = if ($env:PublicAccessLimits__MediaUploadPermitLimit) { $env:PublicAccessLimits__MediaUploadPermitLimit } else { "20" }
+$publicAccessMediaUploadConcurrencyLimit = if ($env:PublicAccessLimits__MediaUploadConcurrencyLimit) { $env:PublicAccessLimits__MediaUploadConcurrencyLimit } else { "3" }
+$publicAccessMediaReadPermitLimit = if ($env:PublicAccessLimits__MediaReadPermitLimit) { $env:PublicAccessLimits__MediaReadPermitLimit } else { "600" }
+$publicAccessMediaReadConcurrencyLimit = if ($env:PublicAccessLimits__MediaReadConcurrencyLimit) { $env:PublicAccessLimits__MediaReadConcurrencyLimit } else { "32" }
+$publicAccessHealthPermitLimit = if ($env:PublicAccessLimits__HealthPermitLimit) { $env:PublicAccessLimits__HealthPermitLimit } else { "120" }
+$publicAccessHealthConcurrencyLimit = if ($env:PublicAccessLimits__HealthConcurrencyLimit) { $env:PublicAccessLimits__HealthConcurrencyLimit } else { "8" }
+$publicAccessAuthRequestBodyBytes = if ($env:PublicAccessLimits__AuthRequestBodyBytes) { $env:PublicAccessLimits__AuthRequestBodyBytes } else { "65536" }
+$publicAccessJsonRequestBodyBytes = if ($env:PublicAccessLimits__JsonRequestBodyBytes) { $env:PublicAccessLimits__JsonRequestBodyBytes } else { "2097152" }
+$publicAccessMediaUploadBodyBytes = if ($env:PublicAccessLimits__MediaUploadBodyBytes) { $env:PublicAccessLimits__MediaUploadBodyBytes } else { "268435456" }
 $vertexProjectId = if ($env:VERTEX_PROJECT_ID) { $env:VERTEX_PROJECT_ID } elseif ($env:GOOGLE_CLOUD_PROJECT) { $env:GOOGLE_CLOUD_PROJECT } else { "" }
 $vertexGeminiLocation = if ($env:VERTEX_GEMINI_LOCATION) { $env:VERTEX_GEMINI_LOCATION } elseif ($env:GOOGLE_CLOUD_LOCATION) { $env:GOOGLE_CLOUD_LOCATION } else { "global" }
 $vertexCredentialsPath = if ($env:GOOGLE_APPLICATION_CREDENTIALS) { $env:GOOGLE_APPLICATION_CREDENTIALS } else { "" }
@@ -233,6 +253,9 @@ Assert-ProductionEnvValue "PAYMENT_WEBHOOK_SECRET" $paymentWebhookSecret
 Assert-ProductionPaymentProviderBoundary $paymentCallbackAllowedProviders $paymentCallbackRequireAllowedProvider
 Assert-ProductionPaymentGrayGate $paymentCallbackRequireAccountGrant $paymentCallbackAllowedAccountIds $paymentCallbackAllowedAccountOwnerIds
 Assert-ProductionEnvValue "INTERNAL_API_TOKEN" $internalApiToken
+if ($objectStorageProvider -match "^local$") {
+  Assert-ProductionEnvValue "OBJECT_STORAGE_SIGNING_SECRET" $objectStorageSigningSecret
+}
 if ($clientApiRequireAuthProvider -match "^(1|true|yes|on)$") {
   Assert-ProductionEnvValue "CLIENT_API_AUTH_PROVIDER_SECRET" $clientApiAuthProviderSecret
 } else {
@@ -265,10 +288,37 @@ $machineEnv = [ordered]@{
   Postgres__CommandTimeoutSeconds = $postgresCommandTimeoutSeconds
   Postgres__KeepAliveSeconds = $postgresKeepAliveSeconds
   PG_BIN = $pgBin
+  OBJECT_STORAGE_PROVIDER = $objectStorageProvider
+  OBJECT_STORAGE_BUCKET = $objectStorageBucket
+  OBJECT_STORAGE_PUBLIC_BASE_URL = $objectStoragePublicBaseUrl
+  OBJECT_STORAGE_SIGNING_SECRET = $objectStorageSigningSecret
+  OBJECT_STORAGE_TEMP_PREFIX = $objectStorageTempPrefix
+  OBJECT_STORAGE_PERMANENT_PREFIX = $objectStoragePermanentPrefix
+  OBJECT_STORAGE_LOCAL_ROOT = $objectStorageLocalRoot
   ObjectStorage__Provider = $objectStorageProvider
   ObjectStorage__Bucket = $objectStorageBucket
   ObjectStorage__PublicBaseUrl = $objectStoragePublicBaseUrl
+  ObjectStorage__SigningSecret = $objectStorageSigningSecret
+  ObjectStorage__TempPrefix = $objectStorageTempPrefix
+  ObjectStorage__PermanentPrefix = $objectStoragePermanentPrefix
   ObjectStorage__LocalRootPath = $objectStorageLocalRoot
+  PublicAccessLimits__Enabled = $publicAccessEnabled
+  PublicAccessLimits__WindowSeconds = $publicAccessWindowSeconds
+  PublicAccessLimits__AuthPermitLimit = $publicAccessAuthPermitLimit
+  PublicAccessLimits__AuthConcurrencyLimit = $publicAccessAuthConcurrencyLimit
+  PublicAccessLimits__JobCreatePermitLimit = $publicAccessJobCreatePermitLimit
+  PublicAccessLimits__JobCreateConcurrencyLimit = $publicAccessJobCreateConcurrencyLimit
+  PublicAccessLimits__MediaSignedUrlPermitLimit = $publicAccessMediaSignedUrlPermitLimit
+  PublicAccessLimits__MediaSignedUrlConcurrencyLimit = $publicAccessMediaSignedUrlConcurrencyLimit
+  PublicAccessLimits__MediaUploadPermitLimit = $publicAccessMediaUploadPermitLimit
+  PublicAccessLimits__MediaUploadConcurrencyLimit = $publicAccessMediaUploadConcurrencyLimit
+  PublicAccessLimits__MediaReadPermitLimit = $publicAccessMediaReadPermitLimit
+  PublicAccessLimits__MediaReadConcurrencyLimit = $publicAccessMediaReadConcurrencyLimit
+  PublicAccessLimits__HealthPermitLimit = $publicAccessHealthPermitLimit
+  PublicAccessLimits__HealthConcurrencyLimit = $publicAccessHealthConcurrencyLimit
+  PublicAccessLimits__AuthRequestBodyBytes = $publicAccessAuthRequestBodyBytes
+  PublicAccessLimits__JsonRequestBodyBytes = $publicAccessJsonRequestBodyBytes
+  PublicAccessLimits__MediaUploadBodyBytes = $publicAccessMediaUploadBodyBytes
   Payments__WebhookSecret = $paymentWebhookSecret
   Payments__AllowedProviders = $paymentCallbackAllowedProviders
   Payments__RequireAllowedProvider = $paymentCallbackRequireAllowedProvider

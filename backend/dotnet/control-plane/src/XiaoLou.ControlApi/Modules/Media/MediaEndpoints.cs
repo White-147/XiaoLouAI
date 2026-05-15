@@ -82,30 +82,22 @@ internal static class MediaEndpoints
             string? objectKey,
             HttpContext httpContext,
             IOptions<ObjectStorageOptions> storage) =>
-        {
-            var normalizedBucket = DecodeRouteValue(bucket).Trim();
-            var normalizedObjectKey = DecodeRouteValue(objectKey ?? "").TrimStart('/').Replace('\\', '/');
-            if (!IsStableMediaObjectKeyAllowed(normalizedObjectKey))
-            {
-                return Results.NotFound();
-            }
+            ServeLocalObjectContent(bucket, objectKey, httpContext, storage.Value, allowStablePublicRead: true));
 
-            if (!TryResolveLocalObjectPath(storage.Value, normalizedBucket, normalizedObjectKey, out var filePath))
-            {
-                return Results.NotFound();
-            }
+        endpoints.MapMethods("/api/media/object-upload/{bucket}/{**objectKey}", ["OPTIONS"], (
+            string bucket,
+            string? objectKey,
+            HttpContext httpContext,
+            IOptions<ObjectStorageOptions> storage) =>
+            HandleLocalObjectOptions(bucket, objectKey, httpContext, storage.Value));
 
-            ApplyLocalObjectCors(httpContext);
-            if (!File.Exists(filePath))
-            {
-                return Results.NotFound();
-            }
-
-            return Results.File(
-                File.OpenRead(filePath),
-                GetContentType(filePath),
-                enableRangeProcessing: true);
-        });
+        endpoints.MapPut("/api/media/object-upload/{bucket}/{**objectKey}", (
+            string bucket,
+            string? objectKey,
+            HttpContext httpContext,
+            IOptions<ObjectStorageOptions> storage,
+            CancellationToken ct) =>
+            WriteLocalObjectContentAsync(bucket, objectKey, httpContext, storage.Value, ct));
 
         endpoints.MapMethods("/{bucket}/{**objectKey}", ["OPTIONS"], (
             string bucket,
@@ -113,13 +105,7 @@ internal static class MediaEndpoints
             HttpContext httpContext,
             IOptions<ObjectStorageOptions> storage) =>
         {
-            if (!CanHandleLocalObjectRequest(storage.Value, bucket, objectKey))
-            {
-                return Results.NotFound();
-            }
-
-            ApplyLocalObjectCors(httpContext);
-            return Results.NoContent();
+            return HandleLocalObjectOptions(bucket, objectKey, httpContext, storage.Value);
         });
 
         endpoints.MapPut("/{bucket}/{**objectKey}", async (
@@ -129,26 +115,7 @@ internal static class MediaEndpoints
             IOptions<ObjectStorageOptions> storage,
             CancellationToken ct) =>
         {
-            if (!TryResolveLocalObjectPath(storage.Value, bucket, objectKey, out var filePath))
-            {
-                return Results.NotFound();
-            }
-
-            ApplyLocalObjectCors(httpContext);
-            if (!IsSignedObjectRequestValid(httpContext, "upload"))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var directory = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            await using var stream = File.Create(filePath);
-            await httpContext.Request.Body.CopyToAsync(stream, ct);
-            return Results.Ok(new { uploaded = true });
+            return await WriteLocalObjectContentAsync(bucket, objectKey, httpContext, storage.Value, ct);
         });
 
         endpoints.MapGet("/{bucket}/{**objectKey}", (
@@ -157,26 +124,7 @@ internal static class MediaEndpoints
             HttpContext httpContext,
             IOptions<ObjectStorageOptions> storage) =>
         {
-            if (!TryResolveLocalObjectPath(storage.Value, bucket, objectKey, out var filePath))
-            {
-                return Results.NotFound();
-            }
-
-            ApplyLocalObjectCors(httpContext);
-            if (!IsSignedObjectRequestValid(httpContext, "read"))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            if (!File.Exists(filePath))
-            {
-                return Results.NotFound();
-            }
-
-            return Results.File(
-                File.OpenRead(filePath),
-                GetContentType(filePath),
-                enableRangeProcessing: true);
+            return ServeLocalObjectContent(bucket, objectKey, httpContext, storage.Value, allowStablePublicRead: false);
         });
 
         return endpoints;
@@ -194,10 +142,87 @@ internal static class MediaEndpoints
         }
     }
 
-    private static bool IsStableMediaObjectKeyAllowed(string objectKey)
+    private static IResult HandleLocalObjectOptions(
+        string bucket,
+        string? objectKey,
+        HttpContext httpContext,
+        ObjectStorageOptions storage)
     {
-        return objectKey.StartsWith("media/frontend/", StringComparison.Ordinal)
-            || objectKey.StartsWith("media/generated/", StringComparison.Ordinal);
+        var normalizedBucket = DecodeRouteValue(bucket).Trim();
+        var normalizedObjectKey = LocalObjectStorageUrlPolicy.NormalizeObjectKey(DecodeRouteValue(objectKey ?? ""));
+        if (!CanHandleLocalObjectRequest(storage, normalizedBucket, normalizedObjectKey))
+        {
+            return Results.NotFound();
+        }
+
+        ApplyLocalObjectCors(httpContext);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> WriteLocalObjectContentAsync(
+        string bucket,
+        string? objectKey,
+        HttpContext httpContext,
+        ObjectStorageOptions storage,
+        CancellationToken ct)
+    {
+        var normalizedBucket = DecodeRouteValue(bucket).Trim();
+        var normalizedObjectKey = LocalObjectStorageUrlPolicy.NormalizeObjectKey(DecodeRouteValue(objectKey ?? ""));
+        if (!TryResolveLocalObjectPath(storage, normalizedBucket, normalizedObjectKey, out var filePath))
+        {
+            return Results.NotFound();
+        }
+
+        ApplyLocalObjectCors(httpContext);
+        if (!IsSignedObjectRequestValid(storage, normalizedBucket, normalizedObjectKey, httpContext, "upload"))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await using var stream = File.Create(filePath);
+        await httpContext.Request.Body.CopyToAsync(stream, ct);
+        return Results.Ok(new { uploaded = true });
+    }
+
+    private static IResult ServeLocalObjectContent(
+        string bucket,
+        string? objectKey,
+        HttpContext httpContext,
+        ObjectStorageOptions storage,
+        bool allowStablePublicRead)
+    {
+        var normalizedBucket = DecodeRouteValue(bucket).Trim();
+        var normalizedObjectKey = LocalObjectStorageUrlPolicy.NormalizeObjectKey(DecodeRouteValue(objectKey ?? ""));
+        if (!TryResolveLocalObjectPath(storage, normalizedBucket, normalizedObjectKey, out var filePath))
+        {
+            return Results.NotFound();
+        }
+
+        var isStablePublicRead = allowStablePublicRead
+            && LocalObjectStorageUrlPolicy.IsStablePublicReadKey(normalizedObjectKey);
+        if (!isStablePublicRead
+            && !IsSignedObjectRequestValid(storage, normalizedBucket, normalizedObjectKey, httpContext, "read"))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        ApplyLocalObjectCors(httpContext);
+        ApplyLocalObjectCacheHeaders(httpContext, isStablePublicRead);
+        if (!File.Exists(filePath))
+        {
+            return Results.NotFound();
+        }
+
+        return Results.File(
+            File.OpenRead(filePath),
+            GetContentType(filePath),
+            enableRangeProcessing: true);
     }
 
     private static bool CanHandleLocalObjectRequest(ObjectStorageOptions options, string bucket, string? objectKey)
@@ -223,17 +248,31 @@ internal static class MediaEndpoints
         httpContext.Response.Headers.AccessControlExposeHeaders = "Accept-Ranges,Content-Length,Content-Range";
     }
 
-    private static bool IsSignedObjectRequestValid(HttpContext httpContext, string expectedPurpose)
+    private static bool IsSignedObjectRequestValid(
+        ObjectStorageOptions options,
+        string bucket,
+        string objectKey,
+        HttpContext httpContext,
+        string expectedPurpose)
     {
         var purpose = httpContext.Request.Query["xiaolou_purpose"].FirstOrDefault();
-        if (!string.Equals(purpose, expectedPurpose, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
         var expiresRaw = httpContext.Request.Query["expires"].FirstOrDefault();
-        return long.TryParse(expiresRaw, out var expires)
-            && DateTimeOffset.UtcNow <= DateTimeOffset.FromUnixTimeSeconds(expires);
+        var signature = httpContext.Request.Query["signature"].FirstOrDefault();
+        return LocalObjectStorageUrlPolicy.IsSignedRequestValid(
+            options,
+            expectedPurpose,
+            bucket,
+            objectKey,
+            purpose,
+            expiresRaw,
+            signature);
+    }
+
+    private static void ApplyLocalObjectCacheHeaders(HttpContext httpContext, bool stablePublicRead)
+    {
+        httpContext.Response.Headers.CacheControl = stablePublicRead
+            ? "public, max-age=86400, immutable"
+            : "private, max-age=300";
     }
 
     private static string GetContentType(string filePath)

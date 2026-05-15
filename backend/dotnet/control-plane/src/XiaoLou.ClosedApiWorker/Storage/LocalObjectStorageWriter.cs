@@ -8,6 +8,8 @@ internal sealed record StoredObject(
     string Bucket,
     string ObjectKey,
     string Url,
+    string? UrlPath,
+    string Provider,
     DateTimeOffset ExpiresAt,
     string MimeType);
 
@@ -49,7 +51,14 @@ internal sealed class LocalObjectStorageWriter(
 
         await File.WriteAllBytesAsync(filePath, bytes, cancellationToken);
         var signed = signer.SignRead(bucket, objectKey, TimeSpan.FromDays(7));
-        return new StoredObject(bucket, objectKey, signed.Url, signed.ExpiresAt, normalizedMime);
+        return new StoredObject(
+            bucket,
+            objectKey,
+            signed.Url,
+            signed.LocalObjectContentPath,
+            signed.Provider,
+            signed.ExpiresAt,
+            normalizedMime);
     }
 
     private string BuildObjectKey(Guid jobId, string model, string mimeType)

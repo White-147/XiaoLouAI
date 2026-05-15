@@ -108,6 +108,9 @@ public sealed class BackendAdvisoryEndpointRoutesTests : IAsyncDisposable
         yield return Route(HttpMethods.Post, "/api/media/upload-complete");
         yield return Route(HttpMethods.Post, "/api/media/signed-read-url");
         yield return Route(HttpMethods.Post, "/api/media/move-temp-to-permanent");
+        yield return Route(HttpMethods.Get, "/api/media/object-content/{bucket}/{**objectKey}");
+        yield return Route(HttpMethods.Options, "/api/media/object-upload/{bucket}/{**objectKey}");
+        yield return Route(HttpMethods.Put, "/api/media/object-upload/{bucket}/{**objectKey}");
 
         yield return Route(HttpMethods.Post, "/api/jobs");
         yield return Route(HttpMethods.Get, "/api/jobs");

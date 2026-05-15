@@ -1,4 +1,4 @@
-type RoutePrefetchEntry = {
+export type RoutePrefetchEntry = {
   matches: (path: string) => boolean;
   loaders: Array<() => Promise<unknown>>;
 };
@@ -71,17 +71,26 @@ const routePrefetchEntries: RoutePrefetchEntry[] = [
   { matches: (path) => pathMatches(path, "/assets"), loaders: [() => import("../../assets-media-projects/assets/Assets")] },
 ];
 
-const prefetchedRouteModules = new Set<string>();
-
-export function prefetchRouteModule(path: string) {
-  if (typeof window === "undefined") return;
-
-  const pathname = path.split(/[?#]/, 1)[0] || "/";
-  const entry = routePrefetchEntries.find((candidate) => candidate.matches(pathname));
-  if (!entry || prefetchedRouteModules.has(pathname)) return;
-
-  prefetchedRouteModules.add(pathname);
-  void Promise.all(entry.loaders.map((load) => load())).catch(() => {
-    prefetchedRouteModules.delete(pathname);
-  });
+export function normalizeRoutePrefetchPath(path: string) {
+  return path.split(/[?#]/, 1)[0] || "/";
 }
+
+export function createRouteModulePrefetcher(entries: RoutePrefetchEntry[]) {
+  const prefetchedRouteModules = new Set<string>();
+
+  return function prefetchRouteModule(path: string) {
+    if (typeof window === "undefined") return;
+
+    const pathname = normalizeRoutePrefetchPath(path);
+    const entry = entries.find((candidate) => candidate.matches(pathname));
+    if (!entry || prefetchedRouteModules.has(pathname)) return;
+
+    prefetchedRouteModules.add(pathname);
+    const loadPromises = entry.loaders.map((load) => Promise.resolve().then(load));
+    void Promise.all(loadPromises).catch(() => {
+      prefetchedRouteModules.delete(pathname);
+    });
+  };
+}
+
+export const prefetchRouteModule = createRouteModulePrefetcher(routePrefetchEntries);

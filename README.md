@@ -598,6 +598,9 @@ Caddy or IIS should serve `XIAOLOU-main/dist` directly and reverse-proxy
 only the approved public Control API routes to `127.0.0.1:4100`:
 
 - `/healthz`
+- `/livez`
+- `/readyz`
+- `/api/windows-native/status`
 - `/api/accounts/ensure`
 - `/api/jobs*`
 - `/api/payments/callbacks/*`
@@ -605,6 +608,8 @@ only the approved public Control API routes to `127.0.0.1:4100`:
 - `/api/media/upload-complete`
 - `/api/media/move-temp-to-permanent`
 - `/api/media/signed-read-url`
+- `/api/media/object-content/*`
+- `/api/media/object-upload/*`
 - `/api/wallet`
 - `/api/wallets*`
 - `/api/auth*`
@@ -626,6 +631,52 @@ only the approved public Control API routes to `127.0.0.1:4100`:
 legacy API paths must not be exposed through the public reverse proxy.
 Legacy `/api/payments/{provider}/notify` callback aliases are retired; expose
 only `/api/payments/callbacks/{provider}`.
+
+For `ObjectStorage:Provider=local`, public media uses the Control API object
+routes rather than legacy upload folders: browser uploads use signed
+`/api/media/object-upload/{bucket}/{objectKey}` URLs, and stable generated or
+frontend media reads use `/api/media/object-content/{bucket}/{objectKey}` with
+range support. Set `OBJECT_STORAGE_PUBLIC_BASE_URL` to the public site origin
+and set a non-placeholder `OBJECT_STORAGE_SIGNING_SECRET`; external object
+storage/CDN providers must keep frontend `urlPath` on the signed provider read
+URL instead of rewriting it to local object-content.
+
+Public abuse/concurrency protection is explicit at both layers. Caddy examples
+apply coarse body ceilings for auth JSON (`64KB`), public API JSON writes
+(`2MB`), and object uploads (`256MB`); IIS uses a matching `256MB` upload edge
+ceiling while the Control API applies tighter per-route body caps. The Control
+API `PublicAccessLimits` section controls in-process fixed-window and
+concurrency policies for auth/register, job creation, media signed URLs,
+object upload/download, and health probes. Keep
+`PublicAccessLimits__Enabled=true` for production and tune the per-policy
+permit/concurrency values in `.runtime\app\scripts\windows\.env.windows` only
+after recording capacity evidence.
+
+Home-to-Playground prewarm is budgeted for public access. `/home` no longer
+mounts a hidden Playground surface on a timer. Sidebar hover/focus and the Home
+composer's focus/input/attachment/send paths only prefetch the lazy route chunk;
+the Playground page's conversation/job/memory initialization remains gated to
+the actual `/playground` route.
+
+Dynamic API transfer policy is intentionally narrow. The Control API compresses
+only reviewed stable JSON metadata routes (`/api/capabilities`,
+`/api/toolbox`, `/api/toolbox/capabilities`, and `/api/playground/models`) and
+excludes SSE, range media, auth/payment/provider/operational endpoints, and
+account-scoped Playground or wallet reads. Those metadata responses carry a
+private browser short-cache (`max-age=30`) plus weak ETags, with `Vary` covering
+encoding and client-auth headers; do not add shared proxy caching for client
+API responses without a separate owner and auth-boundary review.
+
+Public capacity readiness is measured by
+`scripts\windows\verify-public-access-capacity.ps1`. The default run is
+non-secret and offline: it records PostgreSQL pool budget, worker lease
+throughput, Playground active-job polling interval, and public body-limit caps
+to `.runtime\xiaolou-logs\public-access-capacity-*.json`. Before opening or
+retuning public traffic, run the same script with `-RunHttp` and
+`-BaseUrl <public-origin>`, then pass `-ClientApiToken` plus an
+`-ObjectContentPath /api/media/object-content/<bucket>/<objectKey>` sample when
+available to verify static cache headers, stable metadata compression/ETag/304,
+range media reads, active-job polling p95, and optional auth 429 behavior.
 
 For production, set `INTERNAL_API_TOKEN` and protect public client routes with
 either a static `CLIENT_API_TOKEN` or provider-signed client assertions. The
@@ -923,6 +974,8 @@ Read these first before continuing current work:
 - `deploy/records/xiaolouai-frontend-design-constraint-task-record.md`
 - `deploy/records/xiaolouai-frontend-followup-phase-plan.md`
 - `deploy/records/xiaolouai-frontend-followup-task-record.md`
+- `deploy/records/xiaolouai-public-access-hardening-phase-plan.md`
+- `deploy/records/xiaolouai-public-access-hardening-task-record.md`
 - Historical only: `deploy/records/xiaolouai-root-handoff-stage-task-archive.md`
 
 The root handoff is a short PowerShell-readable baton. It keeps only the current
