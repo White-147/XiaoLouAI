@@ -10,7 +10,6 @@ const VideoReplace = lazy(() => import("./features/toolbox/video-replace/VideoRe
 const ScriptBreakdown = lazy(() => import("./features/toolbox/script-breakdown/ScriptBreakdown"));
 const VideoReverse = lazy(() => import("./features/toolbox/video-reverse/VideoReverse"));
 const StoryboardGrid25 = lazy(() => import("./features/toolbox/storyboard-25/StoryboardGrid25"));
-const Playground = lazy(() => import("./features/playground/Playground"));
 const CreditUsage = lazy(() => import("./features/wallet-payments-api-center/credit-usage/CreditUsage"));
 const ComicShell = lazy(() => import("./features/comic-production/comic/ComicShell"));
 const GlobalSettings = lazy(() => import("./features/comic-production/comic/GlobalSettings"));
@@ -34,6 +33,7 @@ const Placeholder = ({ title }: { title: string }) => (
 
 const CanvasRoutePlaceholder = () => null;
 const AgentCanvasRoutePlaceholder = () => null;
+const PlaygroundRoutePlaceholder = () => null;
 
 function DeferredRoute(props: { children: ReactNode }) {
   return (
@@ -56,14 +56,7 @@ export default function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/home" replace />} />
           <Route path="home" element={<Home />} />
-          <Route
-            path="playground/*"
-            element={
-              <DeferredRoute>
-                <Playground />
-              </DeferredRoute>
-            }
-          />
+          <Route path="playground/*" element={<PlaygroundRoutePlaceholder />} />
           <Route
             path="enterprise"
             element={

@@ -11,6 +11,7 @@ namespace XiaoLou.ClosedApiWorker;
 
 internal sealed class ClosedApiWorkerService(
     PostgresJobQueue jobs,
+    PostgresPlaygroundStore playground,
     PostgresJobNotificationListener listener,
     IOptions<ClosedApiWorkerOptions> options,
     VertexGeminiImageClient vertexImages,
@@ -113,6 +114,12 @@ internal sealed class ClosedApiWorkerService(
                 return;
             }
 
+            if (ClosedApiJobPayload.TryReadPlaygroundChatJob(job, out var playgroundRequest))
+            {
+                await CompletePlaygroundChatStubAsync(jobId, worker, playgroundRequest, cancellationToken);
+                return;
+            }
+
             await CompleteCompatibilityStubAsync(jobId, worker, job, cancellationToken);
         }
         catch (VertexProviderException ex)
@@ -176,6 +183,77 @@ internal sealed class ClosedApiWorkerService(
                 completedAt = DateTimeOffset.UtcNow,
             }),
             cancellationToken);
+    }
+
+    private async Task CompletePlaygroundChatStubAsync(
+        Guid jobId,
+        ClosedApiWorkerOptions worker,
+        ClosedApiPlaygroundChatJobRequest request,
+        CancellationToken cancellationToken)
+    {
+        var assistantContent = BuildPlaygroundAssistantContent(request);
+        var completedAt = DateTimeOffset.UtcNow;
+        var result = new
+        {
+            worker = worker.WorkerId,
+            kind = "closed-api",
+            provider = "contract-stub",
+            providerRoute = worker.ProviderRoute,
+            status = "succeeded",
+            executionMode = ClosedApiWorkerOptions.ExecutionMode,
+            runtimeBoundary = ClosedApiWorkerOptions.RuntimeBoundary,
+            adapterStatus = "playground_chat_contract_stub",
+            isStubbed = true,
+            isSimulated = true,
+            jobType = "playground_chat",
+            model = request.Model,
+            thinkingMode = request.ThinkingMode,
+            webSearch = request.WebSearch,
+            mode = request.Mode,
+            contextReceived = !string.IsNullOrWhiteSpace(request.Context),
+            preferredImageToolId = request.PreferredImageToolId,
+            allowedImageToolIds = request.AllowedImageToolIds,
+            preferredImageAspectRatio = request.PreferredImageAspectRatio,
+            attachments = BuildPlaygroundAttachmentMetadata(request),
+            assistantContent,
+            outputSummary = "Playground chat contract stub completed.",
+            contract = "The .NET Control API accepted the Playground chat request and preserved frontend options. Real provider execution is not configured in this worker yet.",
+            completedAt,
+        };
+
+        await jobs.SucceedAsync(jobId, JsonSerializer.Serialize(result), cancellationToken);
+
+        try
+        {
+            await playground.CompleteChatJobMessageAsync(
+                jobId,
+                assistantContent,
+                new Dictionary<string, object?>
+                {
+                    ["jobId"] = jobId.ToString("D"),
+                    ["jobStatus"] = "succeeded",
+                    ["provider"] = "contract-stub",
+                    ["model"] = request.Model,
+                    ["thinkingMode"] = request.ThinkingMode,
+                    ["webSearch"] = request.WebSearch,
+                    ["mode"] = request.Mode,
+                    ["contextReceived"] = !string.IsNullOrWhiteSpace(request.Context),
+                    ["preferredImageToolId"] = request.PreferredImageToolId,
+                    ["allowedImageToolIds"] = request.AllowedImageToolIds,
+                    ["preferredImageAspectRatio"] = request.PreferredImageAspectRatio,
+                    ["attachments"] = BuildPlaygroundAttachmentMetadata(request),
+                    ["stubReason"] = "playground_provider_not_configured",
+                },
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to complete Playground assistant message for job {JobId}.", jobId);
+        }
     }
 
     private async Task CompleteVertexVideoJobAsync(
@@ -287,5 +365,58 @@ internal sealed class ClosedApiWorkerService(
                 completedAt = DateTimeOffset.UtcNow,
             }),
             cancellationToken);
+    }
+
+    private static string BuildPlaygroundAssistantContent(ClosedApiPlaygroundChatJobRequest request)
+    {
+        var lines = new List<string>
+        {
+            "Playground request accepted by the XiaoLou .NET Control API.",
+            "",
+            "This environment is currently using the Playground contract stub, so no external text provider was called. The request was stored and the assistant message was completed to keep the frontend flow usable.",
+            "",
+            "Received request:",
+            $"- Model: {request.Model}",
+            $"- Mode: {FirstNonBlank(request.Mode) ?? "agent"}",
+            $"- Thinking mode: {(request.ThinkingMode ? "enabled" : "disabled")}",
+            $"- Web search: {(request.WebSearch ? "requested" : "disabled")}",
+            $"- Attachments: {request.Attachments.Count}",
+        };
+
+        if (!string.IsNullOrWhiteSpace(request.Context))
+        {
+            lines.Add("- Skill/context prompt: received");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.PreferredImageToolId))
+        {
+            lines.Add($"- Preferred image tool: {request.PreferredImageToolId}");
+        }
+
+        if (request.AllowedImageToolIds.Count > 0)
+        {
+            lines.Add($"- Allowed image tools: {string.Join(", ", request.AllowedImageToolIds)}");
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    private static IReadOnlyList<Dictionary<string, object?>> BuildPlaygroundAttachmentMetadata(
+        ClosedApiPlaygroundChatJobRequest request)
+    {
+        return request.Attachments
+            .Select(attachment => new Dictionary<string, object?>
+            {
+                ["name"] = attachment.Name,
+                ["type"] = attachment.Type,
+                ["size"] = attachment.Size,
+                ["contentTruncated"] = attachment.ContentTruncated,
+            })
+            .ToArray();
+    }
+
+    private static string? FirstNonBlank(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 }

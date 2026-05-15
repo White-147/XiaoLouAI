@@ -33,6 +33,24 @@ internal sealed record ClosedApiVideoJobRequest(
     IReadOnlyList<string> ReferenceVideoUrls,
     IReadOnlyList<string> ReferenceAudioUrls);
 
+internal sealed record ClosedApiPlaygroundAttachment(
+    string Name,
+    string? Type,
+    long? Size,
+    bool ContentTruncated);
+
+internal sealed record ClosedApiPlaygroundChatJobRequest(
+    string Message,
+    string Model,
+    bool ThinkingMode,
+    bool WebSearch,
+    string? Context,
+    string? Mode,
+    string? PreferredImageToolId,
+    IReadOnlyList<string> AllowedImageToolIds,
+    string? PreferredImageAspectRatio,
+    IReadOnlyList<ClosedApiPlaygroundAttachment> Attachments);
+
 internal static class ClosedApiJobPayload
 {
     private static readonly HashSet<string> ImageJobTypes = new(StringComparer.Ordinal)
@@ -172,6 +190,61 @@ internal static class ClosedApiJobPayload
         return false;
     }
 
+    public static bool TryReadPlaygroundChatJob(
+        Dictionary<string, object?> job,
+        out ClosedApiPlaygroundChatJobRequest request)
+    {
+        request = new ClosedApiPlaygroundChatJobRequest(
+            "",
+            "",
+            false,
+            false,
+            null,
+            null,
+            null,
+            Array.Empty<string>(),
+            null,
+            Array.Empty<ClosedApiPlaygroundAttachment>());
+
+        var jobType = job.TryGetValue("job_type", out var jobTypeValue)
+            ? jobTypeValue?.ToString()?.Trim() ?? ""
+            : "";
+        if (!string.Equals(jobType, "playground_chat", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ClosedApiPlaygroundChatJobRequest? parsedRequest = null;
+        var parsed = WithPayload(job, element =>
+        {
+            var message = FirstText(element, "message", "inputSummary", "text");
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return false;
+            }
+
+            parsedRequest = new ClosedApiPlaygroundChatJobRequest(
+                message,
+                FirstText(element, "model") ?? "qwen-plus",
+                FirstBool(element, "thinkingMode", "thinking_mode") ?? false,
+                FirstBool(element, "webSearch", "web_search") ?? false,
+                FirstText(element, "context"),
+                FirstText(element, "mode"),
+                FirstText(element, "preferredImageToolId", "preferred_image_tool_id"),
+                ReadStringArray(element, "allowedImageToolIds", "allowed_image_tool_ids"),
+                FirstText(element, "preferredImageAspectRatio", "preferred_image_aspect_ratio"),
+                ReadPlaygroundAttachments(element));
+            return true;
+        });
+        if (parsed && parsedRequest is not null)
+        {
+            request = parsedRequest;
+            return true;
+        }
+
+        return false;
+    }
+
     private static bool IsSingleReferenceVideoMode(string? videoMode)
     {
         var mode = videoMode?.Trim().Replace("-", "_").ToLowerInvariant();
@@ -253,6 +326,34 @@ internal static class ClosedApiJobPayload
         }
 
         references.Add(normalized);
+    }
+
+    private static IReadOnlyList<ClosedApiPlaygroundAttachment> ReadPlaygroundAttachments(JsonElement element)
+    {
+        var attachments = new List<ClosedApiPlaygroundAttachment>();
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty("attachments", out var property)
+            || property.ValueKind != JsonValueKind.Array)
+        {
+            return attachments;
+        }
+
+        foreach (var item in property.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var index = attachments.Count + 1;
+            attachments.Add(new ClosedApiPlaygroundAttachment(
+                FirstText(item, "name") ?? $"attachment-{index}",
+                FirstText(item, "type"),
+                FirstLong(item, "size"),
+                FirstBool(item, "contentTruncated", "content_truncated") ?? false));
+        }
+
+        return attachments;
     }
 
     public static bool PayloadRequestsFailure(Dictionary<string, object?> job)
@@ -378,6 +479,35 @@ internal static class ClosedApiJobPayload
 
             if (value.ValueKind == JsonValueKind.String
                 && bool.TryParse(value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private static long? FirstLong(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number))
+            {
+                return number;
+            }
+
+            if (value.ValueKind == JsonValueKind.String
+                && long.TryParse(value.GetString(), out var parsed))
             {
                 return parsed;
             }

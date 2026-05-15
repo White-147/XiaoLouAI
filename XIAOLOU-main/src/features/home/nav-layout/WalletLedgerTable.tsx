@@ -131,7 +131,7 @@ function renderLedgerRows({
     return (
       <tr>
         <td colSpan={4} className="h-32 text-center">
-          <span className="inline-flex items-center gap-2 text-sm text-neutral-500">
+          <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
             <LoaderCircle className="h-4 w-4 animate-spin" />
             正在加载积分记录
           </span>
@@ -143,7 +143,7 @@ function renderLedgerRows({
   if (walletError) {
     return (
       <tr>
-        <td colSpan={4} className="h-32 text-center text-sm text-red-500">
+        <td colSpan={4} className="h-32 text-center text-sm text-destructive">
           {walletError}
         </td>
       </tr>
@@ -153,7 +153,7 @@ function renderLedgerRows({
   if (!activeWallet) {
     return (
       <tr>
-        <td colSpan={4} className="h-32 text-center text-sm text-neutral-500">
+        <td colSpan={4} className="h-32 text-center text-sm text-muted-foreground">
           暂无可用钱包
         </td>
       </tr>
@@ -163,7 +163,7 @@ function renderLedgerRows({
   if (!entries.length) {
     return (
       <tr>
-        <td colSpan={4} className="h-32 text-center text-sm text-neutral-500">
+        <td colSpan={4} className="h-32 text-center text-sm text-muted-foreground">
           {emptyText}
         </td>
       </tr>
@@ -171,18 +171,18 @@ function renderLedgerRows({
   }
 
   return entries.map((entry) => (
-    <tr key={entry.id} className="border-t border-neutral-100">
-      <td className="max-w-[250px] truncate px-3 py-4 text-sm text-neutral-800" title={getLedgerTitle(entry)}>
+    <tr key={entry.id} className="border-t border-border">
+      <td className="max-w-[250px] truncate px-3 py-4 text-sm text-foreground" title={getLedgerTitle(entry)}>
         {getLedgerTitle(entry)}
       </td>
-      <td className="px-3 py-4 text-sm text-neutral-700">{getLedgerStatus(entry)}</td>
-      <td className="whitespace-nowrap px-3 py-4 text-sm text-neutral-700">
+      <td className="px-3 py-4 text-sm text-muted-foreground">{getLedgerStatus(entry)}</td>
+      <td className="whitespace-nowrap px-3 py-4 text-sm text-muted-foreground">
         {formatLedgerDate(entry.createdAt)}
       </td>
       <td
         className={cn(
           "whitespace-nowrap px-3 py-4 text-sm font-medium tabular-nums",
-          entry.amount < 0 ? "text-neutral-950" : "text-emerald-600",
+          entry.amount < 0 ? "text-foreground" : "text-emerald-600 dark:text-emerald-300",
         )}
       >
         {entry.amount > 0 ? "+" : ""}
@@ -195,8 +195,8 @@ function renderLedgerRows({
 export function WalletLedgerTable(props: WalletLedgerTableProps) {
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-neutral-100">
-        <thead className="bg-neutral-50 text-left text-xs font-medium text-neutral-500">
+      <table className="min-w-full divide-y divide-border">
+        <thead className="bg-muted text-left text-xs font-medium text-muted-foreground">
           <tr>
             <th className="px-3 py-3">项目</th>
             <th className="px-3 py-3">状态</th>
@@ -204,7 +204,7 @@ export function WalletLedgerTable(props: WalletLedgerTableProps) {
             <th className="px-3 py-3">积分</th>
           </tr>
         </thead>
-        <tbody className="bg-white">{renderLedgerRows(props)}</tbody>
+        <tbody className="bg-card">{renderLedgerRows(props)}</tbody>
       </table>
     </div>
   );

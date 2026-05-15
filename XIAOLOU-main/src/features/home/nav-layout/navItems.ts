@@ -2,7 +2,6 @@ import {
   BookOpen,
   Brain,
   Film,
-  FlaskConical,
   FolderOpen,
   House,
   Image as ImageIcon,
@@ -36,9 +35,7 @@ export type DemoActor = {
 
 export const navItems: NavItem[] = [
   { name: "首页", path: "/home", icon: House },
-  { name: "创意入口", path: "/playground", icon: FlaskConical },
-  { name: "记忆中心", path: "/playground?panel=memory", icon: Brain },
-  { name: "创境天幕", path: "/create/canvas", icon: LayoutTemplate },
+  { name: "创意入口", path: "/playground", icon: Brain },
   {
     name: "通用创作",
     icon: ImageIcon,

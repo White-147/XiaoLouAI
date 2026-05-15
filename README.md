@@ -454,10 +454,15 @@ and Agent host generation services are 533 lines. A later generation-service
 owner is reasonable only as a narrow task-lifecycle helper split covering
 polling, recovery, project-asset fallback, stray result lookup and task error
 description; keep capabilities and generate payload shaping out of that owner.
-M4 then completed docs-and-submit strategy confirmation: current tracked
-changes are documentation only, deploy/records remains ignored/local, and no
-additional code validation is required unless new business-code changes appear.
-The next recommended owner is docs-only submit preparation.
+M4 then completed docs-and-submit strategy confirmation. The later N queue
+consolidation moved follow-up choices into
+`deploy/records/xiaolouai-frontend-followup-task-record.md` so short sticks can
+read a single task record instead of repeating global checks. N2 storyboard
+prompt placeholder cleanup and N3 non-Canvas large-file preflight are complete;
+N8 ImageCreate pure-helper extraction and N9 ImageCreate preview-modal
+extraction are complete; the default next owner is N10 ImageCreate recent-tasks
+panel extraction. N1 docs-only submit is only valid when tracked changes are
+docs-only.
 
 The same pass fixed the frontend legacy dependency gate. The verifier now reads
 the actual guard implementation in `src/lib/api/control-api-client.ts` and

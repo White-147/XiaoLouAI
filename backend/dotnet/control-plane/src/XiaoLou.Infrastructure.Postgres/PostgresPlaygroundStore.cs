@@ -13,6 +13,9 @@ public sealed class PostgresPlaygroundStore(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string DefaultModelId = "qwen-plus";
+    private const int MaxChatContextLength = 24_000;
+    private const int MaxChatAttachmentCount = 12;
+    private const int MaxChatAttachmentContentLength = 12_000;
 
     private static readonly IReadOnlyList<Dictionary<string, object?>> DefaultModels =
     [
@@ -266,6 +269,7 @@ public sealed class PostgresPlaygroundStore(
         var conversationId = NormalizeId(request.ConversationId) ?? CreateId("playground-conversation");
         var userMessageId = CreateId("playground-message");
         var assistantMessageId = CreateId("playground-message");
+        var requestMetadata = BuildChatRequestMetadata(request);
         Dictionary<string, object?> conversation;
         Dictionary<string, object?> userMessage;
         Dictionary<string, object?> assistantMessage;
@@ -303,7 +307,11 @@ public sealed class PostgresPlaygroundStore(
                 message,
                 model,
                 "succeeded",
-                new Dictionary<string, object?> { ["source"] = "control_api_canonical" },
+                new Dictionary<string, object?>
+                {
+                    ["source"] = "control_api_canonical",
+                    ["request"] = requestMetadata,
+                },
                 now,
                 cancellationToken);
 
@@ -341,6 +349,10 @@ public sealed class PostgresPlaygroundStore(
             ["actionCode"] = "playground_chat",
             ["inputSummary"] = message,
         };
+        foreach (var item in requestMetadata)
+        {
+            payload[item.Key] = item.Value;
+        }
         var job = await jobs.CreateJobAsync(new CreateJobRequest
         {
             AccountOwnerType = scope.AccountOwnerType,
@@ -367,6 +379,79 @@ public sealed class PostgresPlaygroundStore(
             ["userMessage"] = userMessage,
             ["assistantMessage"] = assistantMessage,
         };
+    }
+
+    public async Task<Dictionary<string, object?>?> CompleteChatJobMessageAsync(
+        Guid jobId,
+        string content,
+        Dictionary<string, object?> metadata,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var select = new NpgsqlCommand(
+            """
+            SELECT account_id, payload::text AS payload_json
+            FROM jobs
+            WHERE id = @jobId
+              AND job_type = 'playground_chat'
+            FOR UPDATE
+            """,
+            connection,
+            transaction);
+        select.Parameters.AddWithValue("jobId", NpgsqlDbType.Uuid, jobId);
+
+        var jobRow = await PostgresRows.ReadSingleAsync(select, cancellationToken);
+        if (jobRow is null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
+        }
+
+        var accountId = (Guid)jobRow["account_id"]!;
+        var payload = ParseJsonObject(AsString(jobRow, "payload_json"));
+        var conversationId = ReadJsonString(payload, "conversationId");
+        var assistantMessageId = ReadJsonString(payload, "assistantMessageId");
+        if (conversationId is null || assistantMessageId is null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        await using var update = new NpgsqlCommand(
+            """
+            UPDATE playground_messages
+            SET content = @content,
+                status = 'succeeded',
+                metadata = metadata || @metadata::jsonb,
+                data = data || @metadata::jsonb,
+                updated_at = @now
+            WHERE account_id = @accountId
+              AND conversation_id = @conversationId
+              AND id = @messageId
+              AND role = 'assistant'
+            RETURNING *, metadata::text AS metadata_json
+            """,
+            connection,
+            transaction);
+        update.Parameters.AddWithValue("content", NpgsqlDbType.Text, NormalizeBlank(content) ?? "");
+        update.Parameters.AddWithValue("metadata", NpgsqlDbType.Jsonb, JsonSerializer.Serialize(metadata, JsonOptions));
+        update.Parameters.AddWithValue("now", NpgsqlDbType.TimestampTz, now);
+        update.Parameters.AddWithValue("accountId", NpgsqlDbType.Uuid, accountId);
+        update.Parameters.AddWithValue("conversationId", NpgsqlDbType.Text, conversationId);
+        update.Parameters.AddWithValue("messageId", NpgsqlDbType.Text, assistantMessageId);
+
+        var message = await PostgresRows.ReadSingleAsync(update, cancellationToken);
+        if (message is null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
+        }
+
+        await UpdateConversationCountersAsync(connection, transaction, accountId, conversationId, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return MapMessage(message);
     }
 
     public async Task<IReadOnlyList<Dictionary<string, object?>>> ListChatJobsAsync(
@@ -1081,6 +1166,89 @@ public sealed class PostgresPlaygroundStore(
             "leased" => 35,
             "retry_waiting" => 20,
             _ => 0,
+        };
+    }
+
+    private static Dictionary<string, object?> BuildChatRequestMetadata(PlaygroundChatRequest request)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["webSearch"] = request.WebSearch == true,
+            ["thinkingMode"] = request.ThinkingMode == true,
+            ["context"] = NormalizeBoundedText(request.Context, MaxChatContextLength),
+            ["mode"] = NormalizeBoundedText(request.Mode, 64),
+            ["preferredImageToolId"] = NormalizeToolId(request.PreferredImageToolId),
+            ["allowedImageToolIds"] = NormalizeToolIds(request.AllowedImageToolIds),
+            ["preferredImageAspectRatio"] = NormalizePreferredImageAspectRatio(request.PreferredImageAspectRatio),
+            ["attachments"] = NormalizeChatAttachments(request.Attachments),
+        };
+    }
+
+    private static string? NormalizeBoundedText(string? value, int maxLength)
+    {
+        var normalized = NormalizeBlank(value);
+        return normalized is null ? null : normalized[..Math.Min(normalized.Length, maxLength)];
+    }
+
+    private static string? NormalizeToolId(string? value)
+    {
+        return NormalizeBoundedText(value, 120);
+    }
+
+    private static IReadOnlyList<string> NormalizeToolIds(IReadOnlyList<string>? values)
+    {
+        if (values is null || values.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        return values
+            .Select(NormalizeToolId)
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .Distinct(StringComparer.Ordinal)
+            .Take(20)
+            .ToArray();
+    }
+
+    private static string? NormalizePreferredImageAspectRatio(string? value)
+    {
+        var normalized = NormalizeBoundedText(value, 16);
+        return normalized is "1:1" or "16:9" or "9:16" or "4:3" or "3:4" or "21:9"
+            ? normalized
+            : null;
+    }
+
+    private static IReadOnlyList<Dictionary<string, object?>> NormalizeChatAttachments(
+        IReadOnlyList<PlaygroundChatAttachment>? attachments)
+    {
+        if (attachments is null || attachments.Count == 0)
+        {
+            return Array.Empty<Dictionary<string, object?>>();
+        }
+
+        return attachments
+            .Take(MaxChatAttachmentCount)
+            .Select((attachment, index) => NormalizeChatAttachment(attachment, index))
+            .ToArray();
+    }
+
+    private static Dictionary<string, object?> NormalizeChatAttachment(
+        PlaygroundChatAttachment attachment,
+        int index)
+    {
+        var content = NormalizeBoundedText(attachment.Content, MaxChatAttachmentContentLength);
+        var originalContentLength = attachment.Content?.Length ?? 0;
+        var contentTruncated = attachment.ContentTruncated == true ||
+            originalContentLength > MaxChatAttachmentContentLength;
+
+        return new Dictionary<string, object?>
+        {
+            ["name"] = NormalizeBoundedText(attachment.Name, 240) ?? $"attachment-{index + 1}",
+            ["size"] = attachment.Size is >= 0 ? attachment.Size : null,
+            ["type"] = NormalizeBoundedText(attachment.Type, 160),
+            ["content"] = content,
+            ["contentTruncated"] = contentTruncated,
         };
     }
 

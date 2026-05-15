@@ -317,7 +317,7 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
         <select
           value={activeWalletId}
           onChange={(event) => setActiveWalletId(event.currentTarget.value)}
-          className="h-9 appearance-none rounded-lg border border-neutral-200 bg-white py-0 pl-3 pr-8 text-sm font-medium text-neutral-800 outline-none transition hover:bg-neutral-50 focus:border-neutral-400 focus:ring-2 focus:ring-neutral-200"
+          className="h-9 appearance-none rounded-lg border border-input bg-background py-0 pl-3 pr-8 text-sm font-medium text-foreground outline-none transition hover:bg-accent focus:border-ring focus:ring-2 focus:ring-ring/20"
         >
           {wallets.map((wallet) => (
             <option key={wallet.id || wallet.ownerId} value={wallet.id || ""}>
@@ -325,7 +325,7 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
             </option>
           ))}
         </select>
-        <ChevronDown className="pointer-events-none absolute right-2.5 h-4 w-4 text-neutral-400" />
+        <ChevronDown className="pointer-events-none absolute right-2.5 h-4 w-4 text-muted-foreground" />
       </label>
     );
   };
@@ -333,20 +333,20 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
   const walletSwitcher = renderWalletSwitcher();
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 text-neutral-950 backdrop-blur-sm">
-      <section className="relative flex h-[min(720px,calc(100vh-32px))] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-[0_32px_120px_rgba(15,23,42,0.28)]">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 text-foreground backdrop-blur-sm">
+      <section className="relative flex h-[min(720px,calc(100vh-32px))] w-full max-w-5xl overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_32px_120px_rgba(15,23,42,0.28)]">
         <button
           type="button"
           aria-label="关闭账号中心"
           onClick={onClose}
-          className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-950"
+          className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         >
           <X className="h-5 w-5" />
         </button>
 
-        <aside className="hidden w-64 shrink-0 border-r border-neutral-200 bg-neutral-50/90 p-5 md:block">
+        <aside className="hidden w-64 shrink-0 border-r border-border bg-muted/50 p-5 md:block">
           <div className="flex items-center gap-3">
-            <div className="relative flex h-12 w-12 overflow-hidden rounded-full bg-neutral-200 text-neutral-700">
+            <div className="relative flex h-12 w-12 overflow-hidden rounded-full bg-muted text-muted-foreground">
               {avatar ? (
                 <img src={avatar} alt="Avatar" className="h-full w-full object-cover" />
               ) : (
@@ -356,10 +356,10 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
               )}
             </div>
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-neutral-950">
+              <div className="truncate text-sm font-semibold text-foreground">
                 {context.actor.displayName || context.actor.id}
               </div>
-              <div className="mt-0.5 text-xs text-neutral-500">{roleLabel}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{roleLabel}</div>
             </div>
           </div>
 
@@ -373,10 +373,10 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
                   type="button"
                   onClick={() => setActivePanel(item.id)}
                   className={cn(
-                    "flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300",
+                    "flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
                     active
-                      ? "bg-neutral-200/80 font-medium text-neutral-950"
-                      : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950",
+                      ? "bg-primary/10 font-medium text-primary"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -399,8 +399,8 @@ export function ProfileModal({ isOpen, onClose, context, onUpdateContext }: Prof
                   className={cn(
                     "inline-flex h-9 shrink-0 items-center gap-2 rounded-full border px-3 text-sm",
                     activePanel === item.id
-                      ? "border-neutral-950 bg-neutral-950 text-white"
-                      : "border-neutral-200 bg-white text-neutral-700",
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                   )}
                 >
                   <Icon className="h-4 w-4" />

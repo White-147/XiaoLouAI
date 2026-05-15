@@ -46,22 +46,30 @@ import { AuthModal, type AuthRegisterMode, type AuthTab, type ResetStep } from "
 import { demoActors, navItems, type NavItem } from "./navItems";
 import { SidebarShell, type CollapsedNavFlyout } from "./SidebarShell";
 import { ProfileModal } from "./ProfileModal";
+import { loadPlaygroundPage, preloadPlaygroundPage } from "./routePrefetch";
 
 // Lazy-load the canvas shells so users who never open them pay no parse cost.
+const Playground = lazy(loadPlaygroundPage);
 const CanvasCreate = lazy(() => import("../../canvas-agent-canvas/canvas/CanvasCreate"));
 const AgentCanvasCreate = lazy(() => import("../../canvas-agent-canvas/agent-canvas/AgentCanvasCreate"));
 
 const CanvasLoadingFallback = () => (
-  <div className="flex h-full w-full items-center justify-center bg-[#f8f6f1] px-6 text-[#171512]">
-    <div className="w-full max-w-md rounded-[28px] border border-[rgba(23,21,18,0.08)] bg-white/92 p-6 shadow-[0_24px_80px_rgba(17,24,39,0.12)] backdrop-blur-md">
-      <div className="text-xs font-semibold tracking-[0.28em] text-[#8f877a]">CANVAS</div>
-      <div className="mt-3 text-2xl font-semibold text-[#161411]">正在打开画布项目</div>
-      <p className="mt-3 text-sm leading-6 text-[#6c655b]">
-        正在装载画布编辑器并恢复项目节点，这一步在站内跳转和外网环境下都可能稍慢一点。
-      </p>
-      <div className="mt-5 h-2 overflow-hidden rounded-full bg-[#ece7dd]">
-        <div className="h-full w-1/3 animate-pulse rounded-full bg-[#4f46e5]" />
+  <div className="flex h-full w-full items-center justify-center bg-[#f8f6f1] px-6 text-[#171512] dark:bg-background dark:text-foreground">
+    <div className="flex flex-col items-center">
+      <img
+        src="/chuangjing-logo-shell.png"
+        alt="创境AI Logo"
+        className="relative h-11 w-11 animate-[agentCanvasLogoLoad_1.35s_ease-in-out_infinite] object-contain drop-shadow-[0_6px_16px_rgba(212,143,71,0.28)]"
+      />
+      <div className="mt-4 text-xs font-semibold tracking-[0.26em] text-[#8f877a] dark:text-muted-foreground">
+        CANVAS
       </div>
+      <style>
+        {`@keyframes agentCanvasLogoLoad {
+          0%, 100% { transform: translateY(0) scale(0.96); opacity: 0.72; }
+          50% { transform: translateY(-3px) scale(1.05); opacity: 1; }
+        }`}
+      </style>
     </div>
   </div>
 );
@@ -70,6 +78,8 @@ export default function Layout() {
   const actorId = useActorId();
   const location = useLocation();
   const navigate = useNavigate();
+  const isHomeRoute = location.pathname === "/home";
+  const isPlaygroundRoute = location.pathname === "/playground" || location.pathname.startsWith("/playground/");
   const isCanvasRoute = location.pathname === "/create/canvas";
   const isAgentCanvasRoute = location.pathname === "/create/agent-canvas";
   const [isCollapsed, setIsCollapsed] = useState(true);
@@ -94,6 +104,7 @@ export default function Layout() {
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [knownActorsVer, setKnownActorsVer] = useState(0);
+  const [hasMountedPlayground, setHasMountedPlayground] = useState(isPlaygroundRoute);
   const hasMountedCanvas = isCanvasRoute;
   const hasMountedAgentCanvas = isAgentCanvasRoute;
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -141,6 +152,24 @@ export default function Layout() {
     setCurrentActorId("guest");
     navigate("/home");
   }, [actorId, navigate]);
+
+  useEffect(() => {
+    if (isPlaygroundRoute) {
+      setHasMountedPlayground(true);
+      return;
+    }
+
+    if (!isHomeRoute || typeof window === "undefined") return;
+
+    preloadPlaygroundPage();
+    const timeoutId = window.setTimeout(() => {
+      setHasMountedPlayground(true);
+    }, 160);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isHomeRoute, isPlaygroundRoute]);
 
   useEffect(() => {
     let active = true;
@@ -288,7 +317,7 @@ export default function Layout() {
             !item.children?.some((child) => child.path === "/create/image" || child.path === "/create/video"),
         );
     const betaItems = canAccessAgentCanvas
-      ? baseItems.flatMap((item) => (item.path === "/create/canvas" ? [item, agentCanvasNavItem] : [item]))
+      ? baseItems.flatMap((item) => (item.path === "/playground" ? [item, agentCanvasNavItem] : [item]))
       : baseItems;
 
     return betaItems;
@@ -672,7 +701,27 @@ export default function Layout() {
       />
 
       <main className="relative flex h-full flex-1 flex-col overflow-hidden bg-background">
-        {!isCanvasRoute && !isAgentCanvasRoute ? <Outlet /> : null}
+        {!isPlaygroundRoute && !isCanvasRoute && !isAgentCanvasRoute ? <Outlet /> : null}
+
+        {hasMountedPlayground ? (
+          <div
+            className={cn(
+              "absolute inset-0 bg-background",
+              isPlaygroundRoute ? "block" : "pointer-events-none hidden",
+            )}
+            aria-hidden={!isPlaygroundRoute}
+          >
+            <Suspense
+              fallback={
+                <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-background text-sm text-muted-foreground">
+                  页面加载中...
+                </div>
+              }
+            >
+              <Playground />
+            </Suspense>
+          </div>
+        ) : null}
 
         {hasMountedCanvas ? (
           <div
@@ -698,7 +747,7 @@ export default function Layout() {
           >
             {canAccessAgentCanvas ? (
               <Suspense fallback={<CanvasLoadingFallback />}>
-                <AgentCanvasCreate />
+                <AgentCanvasCreate key={actorId || "guest"} />
               </Suspense>
             ) : loadingAccount ? (
               <CanvasLoadingFallback />

@@ -1,164 +1,129 @@
 import {
+  ArrowRight,
+  AudioLines,
   Bot,
   Box,
+  BookOpen,
+  Brush,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Check,
-  Copy,
-  ArrowRight,
+  Clock,
   Film,
+  Globe2,
   ImageIcon,
   LayoutTemplate,
+  Lightbulb,
   LoaderCircle,
   MonitorPlay,
+  Paperclip,
   Plus,
-  RefreshCw,
   Send,
   Sparkles,
   Wand2,
-  Wifi,
+  X,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  type CSSProperties,
+  FormEvent,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  getCurrentActorId,
-  getKnownActors,
-  hasSessionCredentials,
-  isLocalDemoActorId,
-  rememberKnownActor,
-  setAuthToken,
-  setControlApiClientAssertion,
-  useActorId,
-} from "../../lib/actor-session";
+  SKILL_CATEGORIES as HOME_SKILL_CATEGORIES,
+  SKILLS as HOME_SKILLS,
+  type AgentCanvasSkill,
+} from "../canvas-agent-canvas/agent-canvas/runtime/config/agentCanvasSkills";
+import { CANVAS_IMAGE_MODELS } from "../canvas-agent-canvas/agent-canvas/runtime/config/canvasImageModels";
+import { XIAOLOU_IMAGE_TO_VIDEO_MODELS } from "../canvas-agent-canvas/agent-canvas/runtime/config/canvasVideoModels";
+import { getCurrentActorId, useActorId } from "../../lib/actor-session";
 import {
-  ApiRequestError,
-  createProject,
   getMe,
-  getNetworkAccessInfo,
   getToolboxCapabilities,
+  listAgentCanvasProjects,
   listPlaygroundModels,
-  listProjects,
   listWallets,
-  mapStepToComicPath,
-  runToolboxCapability,
   startPlaygroundChatJob,
-  startDemoSession,
-  type NetworkAccessInfo,
+  type AgentCanvasProjectSummary,
   type PermissionContext,
   type PlaygroundModel,
-  type Project,
   type ToolboxCapability,
   type Wallet as WalletInfo,
 } from "../../lib/api";
-import { setCurrentProjectId, useCurrentProjectId } from "../../lib/session";
 import { cn } from "../../lib/utils";
-import {
-  filterWalletsForEntitlement,
-  resolveWalletEntitlement,
-} from "../../lib/wallet-entitlements";
+import { preloadPlaygroundPage } from "./nav-layout/routePrefetch";
 
-const RUNNABLE_TOOLBOX_CODES = [
-  "motion_transfer",
-] as const;
+const HomeScriptBreakdownTool = lazy(() => import("../toolbox/script-breakdown/ScriptBreakdown"));
+const HomeVideoReplaceTool = lazy(() => import("../toolbox/video-replace/VideoReplace"));
+const HomeVideoReverseTool = lazy(() => import("../toolbox/video-reverse/VideoReverse"));
+const HomeStoryboardGrid25Tool = lazy(() => import("../toolbox/storyboard-25/StoryboardGrid25"));
+const HomeWalletRecharge = lazy(
+  () => import("../wallet-payments-api-center/wallet-recharge/WalletRecharge"),
+);
 
-// Local overrides always win over API-returned names/descriptions.
-// `status` override forces a tool card into a specific state (e.g. put
-// motion_transfer into a "coming soon / 待开发" state without needing a
-// backend change).
 const TOOLBOX_LOCAL_OVERRIDES: Partial<
   Record<string, Partial<Pick<ToolboxCapability, "name" | "description" | "status">>>
 > = {
   video_character_replace: {
     name: "剧本拆解提示词",
-    description: "输入剧本或故事大纲，AI 自动拆解为分镜级别的文生视频提示词，大幅提升影视内容的生产效率。",
+    description: "输入剧本或故事大纲，AI 自动拆解为分镜级别的文生视频提示词。",
   },
   character_replace: {
     name: "人物替换",
     description: "在保留镜头构图的前提下替换主角身份、服装与角色特征。",
   },
   motion_transfer: {
-    // 产品要求：首页上动作迁移卡片显示"待开发"胶囊，不能点击进入工具。
-    // 使用 coming_soon 作为 UI 专用状态，区别于 toolbox_reserved 的通用 placeholder。
     status: "coming_soon",
-    description: "把参考动作迁移到指定角色或现有镜头视频。（正在接入）",
+    description: "把参考动作迁移到指定角色或现有镜头视频，能力正在接入。",
   },
   upscale_restore: {
     name: "视频反推提示词",
-    description: "对已有视频逐帧分析，自动反推生成对应画面的文生视频提示词，方便复现镜头或进行二次创作。",
+    description: "对已有视频逐帧分析，反推出可复现镜头的文生视频提示词。",
   },
   storyboard_25: {
     name: "25 格分镜",
-    description: "上传角色参考图并描述剧情，AI 自动生成 25 宫格分镜以及每格对应的提示词，便于快速确立故事节奏。",
+    description: "上传角色参考图并描述剧情，快速生成 25 宫格分镜和对应提示词。",
   },
 };
 
-// 前端独有的工具卡片（后端 capabilities 目前还没有返回它们）。
-// 这样即便 /api/capabilities 没返回，卡片也会出现在工具箱里。
 const EXTRA_FRONTEND_ONLY_TOOLS: ToolboxCapability[] = [
   {
     code: "storyboard_25",
     name: "25 格分镜",
     status: "mock_ready",
     queue: "image-gpu",
-    description: "上传角色参考图并描述剧情，AI 自动生成 25 宫格分镜以及每格对应的提示词，便于快速确立故事节奏。",
+    description: "上传角色参考图并描述剧情，快速生成 25 宫格分镜和对应提示词。",
   },
 ];
 
-function applyLocalOverrides(tools: ToolboxCapability[]): ToolboxCapability[] {
-  const base = tools.map((t) => {
-    const override = TOOLBOX_LOCAL_OVERRIDES[t.code];
-    return override ? { ...t, ...override } : t;
-  });
-
-  // Merge in any frontend-only tools that the backend hasn't returned yet,
-  // so they still appear on the homepage. Existing entries from the API
-  // keep their order; new entries get inserted at the tail, then we
-  // reorder the whole list to match FRONTEND_TOOLBOX_ORDER below.
-  const existing = new Set(base.map((t) => t.code));
-  for (const extra of EXTRA_FRONTEND_ONLY_TOOLS) {
-    if (!existing.has(extra.code)) {
-      base.push({
-        ...extra,
-        ...(TOOLBOX_LOCAL_OVERRIDES[extra.code] ?? {}),
-      });
-    }
+function clearAgentCanvasDraftSession(actorId: string | null | undefined) {
+  try {
+    const normalizedActorId = typeof actorId === "string" && actorId.trim() ? actorId.trim() : null;
+    const sessionScope = normalizedActorId || "guest";
+    const draftScope = normalizedActorId || "default";
+    window.localStorage.removeItem(`xiaolou:agent-canvas-session-project:${sessionScope}`);
+    window.localStorage.removeItem(`xiaolou:agent-canvas:draft:${draftScope}`);
+  } catch {
+    // Local storage can be unavailable in restricted environments.
   }
-
-  // Match the ChuangJingAI homepage order: ready creative tools first,
-  // deferred experiments after the usable entries.
-  const FRONTEND_TOOLBOX_ORDER = [
-    "video_character_replace",
-    "character_replace",
-    "upscale_restore",
-    "storyboard_25",
-    "motion_transfer",
-    "toolbox_reserved",
-  ] as const;
-
-  const orderIndex = (code: string) => {
-    const idx = FRONTEND_TOOLBOX_ORDER.indexOf(code as (typeof FRONTEND_TOOLBOX_ORDER)[number]);
-    return idx === -1 ? FRONTEND_TOOLBOX_ORDER.length + 1 : idx;
-  };
-
-  return base.sort((a, b) => orderIndex(a.code) - orderIndex(b.code));
 }
 
-const TOOLBOX_CACHE_KEY_PREFIX = "xiaolou.home.toolbox-capabilities.v3";
-const GREETING_NAME_CACHE_KEY_PREFIX = "xiaolou.home.greeting-name";
-const TOOLBOX_RETRY_DELAYS_MS = [1200, 3000];
-const LOCAL_DEMO_GREETING_NAMES: Record<string, string> = {
-  user_personal_001: "注册用户",
-  user_demo_001: "企业管理员",
-  user_member_001: "企业成员",
-  ops_demo_001: "运营管理员",
-  root_demo_001: "超级管理员",
-};
 const DEFAULT_TOOLBOX_CAPABILITIES: ToolboxCapability[] = [
   {
     code: "video_character_replace",
     name: "剧本拆解提示词",
     status: "mock_ready",
     queue: "video-gpu",
-    description: "输入剧本或故事大纲，AI 自动拆解为分镜级别的文生视频提示词，大幅提升影视内容的生产效率。",
+    description: "输入剧本或故事大纲，AI 自动拆解为分镜级别的文生视频提示词。",
   },
   {
     code: "character_replace",
@@ -172,21 +137,21 @@ const DEFAULT_TOOLBOX_CAPABILITIES: ToolboxCapability[] = [
     name: "动作迁移",
     status: "coming_soon",
     queue: "video-gpu",
-    description: "把参考动作迁移到指定角色或现有镜头视频。（正在接入）",
+    description: "把参考动作迁移到指定角色或现有镜头视频，能力正在接入。",
   },
   {
     code: "upscale_restore",
     name: "视频反推提示词",
     status: "mock_ready",
     queue: "image-cpu",
-    description: "对已有视频逐帧分析，自动反推生成对应画面的文生视频提示词，方便复现镜头或进行二次创作。",
+    description: "对已有视频逐帧分析，反推出可复现镜头的文生视频提示词。",
   },
   {
     code: "storyboard_25",
     name: "25 格分镜",
     status: "mock_ready",
     queue: "image-gpu",
-    description: "上传角色参考图并描述剧情，AI 自动生成 25 宫格分镜以及每格对应的提示词，便于快速确立故事节奏。",
+    description: "上传角色参考图并描述剧情，快速生成 25 宫格分镜和对应提示词。",
   },
   {
     code: "toolbox_reserved",
@@ -197,22 +162,36 @@ const DEFAULT_TOOLBOX_CAPABILITIES: ToolboxCapability[] = [
   },
 ];
 
-const TOOL_VISUALS: Record<string, { icon: LucideIcon; tone: string }> = {
+const TOOLBOX_CACHE_KEY_PREFIX = "xiaolou.home.toolbox-capabilities.v4";
+const TOOLBOX_ORDER = [
+  "video_character_replace",
+  "character_replace",
+  "upscale_restore",
+  "storyboard_25",
+  "motion_transfer",
+  "toolbox_reserved",
+] as const;
+
+const TOOL_VISUALS: Record<string, { icon: LucideIcon; tone: string; route?: string }> = {
   video_character_replace: {
     icon: Film,
     tone: "bg-violet-500/10 text-violet-700 ring-violet-500/20 dark:text-violet-300",
+    route: "/create/script-breakdown",
   },
   character_replace: {
     icon: ImageIcon,
     tone: "bg-cyan-500/10 text-cyan-700 ring-cyan-500/20 dark:text-cyan-300",
+    route: "/create/video-replace",
   },
   upscale_restore: {
     icon: MonitorPlay,
     tone: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300",
+    route: "/create/video-reverse",
   },
   storyboard_25: {
     icon: LayoutTemplate,
     tone: "bg-amber-500/12 text-amber-700 ring-amber-500/20 dark:text-amber-300",
+    route: "/create/storyboard-25",
   },
   motion_transfer: {
     icon: Wand2,
@@ -220,42 +199,32 @@ const TOOL_VISUALS: Record<string, { icon: LucideIcon; tone: string }> = {
   },
 };
 
-function getToolboxCacheKey(actorId: string) {
-  return `${TOOLBOX_CACHE_KEY_PREFIX}:${actorId || "guest"}`;
-}
+function applyLocalOverrides(tools: ToolboxCapability[]): ToolboxCapability[] {
+  const base = tools.map((tool) => ({
+    ...tool,
+    ...(TOOLBOX_LOCAL_OVERRIDES[tool.code] ?? {}),
+  }));
+  const existing = new Set(base.map((tool) => tool.code));
 
-function getGreetingNameCacheKey(actorId: string) {
-  return `${GREETING_NAME_CACHE_KEY_PREFIX}:${actorId || "guest"}`;
-}
-
-function readCachedGreetingName(actorId: string) {
-  if (!actorId || actorId === "guest") return null;
-
-  if (LOCAL_DEMO_GREETING_NAMES[actorId]) {
-    return LOCAL_DEMO_GREETING_NAMES[actorId];
+  for (const extra of EXTRA_FRONTEND_ONLY_TOOLS) {
+    if (!existing.has(extra.code)) {
+      base.push({
+        ...extra,
+        ...(TOOLBOX_LOCAL_OVERRIDES[extra.code] ?? {}),
+      });
+    }
   }
 
-  const knownActorName =
-    getKnownActors().find((item) => item.id === actorId)?.label?.trim() || null;
-  if (knownActorName) return knownActorName;
+  const orderIndex = (code: string) => {
+    const index = TOOLBOX_ORDER.indexOf(code as (typeof TOOLBOX_ORDER)[number]);
+    return index === -1 ? TOOLBOX_ORDER.length + 1 : index;
+  };
 
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(getGreetingNameCacheKey(actorId))?.trim() || null;
+  return base.sort((left, right) => orderIndex(left.code) - orderIndex(right.code));
 }
 
-function writeCachedGreetingName(actorId: string, displayName: string | null | undefined) {
-  if (typeof window === "undefined" || !actorId || actorId === "guest") return;
-
-  const normalized = displayName?.trim();
-  if (!normalized) return;
-
-  window.localStorage.setItem(getGreetingNameCacheKey(actorId), normalized);
-}
-
-function normalizeGreetingName(displayName: string | null | undefined) {
-  const normalized = displayName?.trim();
-  if (!normalized) return null;
-  return normalized.toLowerCase() === "guest" ? "游客" : normalized;
+function getToolboxCacheKey(actorId: string) {
+  return `${TOOLBOX_CACHE_KEY_PREFIX}:${actorId || "guest"}`;
 }
 
 function readCachedToolboxCapabilities(actorId: string) {
@@ -292,74 +261,63 @@ function writeCachedToolboxCapabilities(actorId: string, tools: ToolboxCapabilit
   try {
     window.localStorage.setItem(getToolboxCacheKey(actorId), JSON.stringify(tools));
   } catch {
-    // Ignore cache write failures so the live response still wins.
+    // Cache failures should never block the live homepage.
   }
 }
 
-function isRunnableToolboxCode(
-  code: string,
-): code is (typeof RUNNABLE_TOOLBOX_CODES)[number] {
-  return RUNNABLE_TOOLBOX_CODES.includes(
-    code as (typeof RUNNABLE_TOOLBOX_CODES)[number],
+function resolveVisibleWallets(wallets: WalletInfo[], me: PermissionContext | null) {
+  if (!me || !wallets.length) return wallets;
+  const isEnterprise =
+    me.currentOrganizationRole === "enterprise_admin" ||
+    me.currentOrganizationRole === "enterprise_member";
+  if (isEnterprise) {
+    const orgWallets = wallets.filter((wallet) => wallet.ownerType === "organization");
+    return orgWallets.length ? orgWallets : wallets;
+  }
+  return wallets.filter((wallet) => wallet.ownerType !== "organization");
+}
+
+function formatCredits(value: number | null | undefined, unlimited?: boolean) {
+  if (unlimited) return "无限";
+  if (typeof value !== "number") return "80";
+  return value.toLocaleString("zh-CN");
+}
+
+function formatAttachmentSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  const megabytes = bytes / 1024 / 1024;
+  return `${megabytes >= 10 ? megabytes.toFixed(0) : megabytes.toFixed(1)} MB`;
+}
+
+function canReadHomeAttachmentAsText(file: File) {
+  const lowerName = file.name.toLowerCase();
+  return (
+    file.type.startsWith("text/") ||
+    file.type === "application/json" ||
+    HOME_TEXT_ATTACHMENT_EXTENSIONS.some((extension) => lowerName.endsWith(extension))
   );
 }
 
-const STEP_LABELS: Record<string, string> = {
-  global: "全局设定",
-  script: "故事叙述",
-  assets: "角色场景",
-  storyboards: "分镜脚本",
-  videos: "分镜视频",
-  dubbing: "配音与口型",
-  preview: "成片预览",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
-  in_production: "制作中",
-  published: "已发布",
-};
-
-function projectCover(project: Project) {
-  if (project.coverUrl && !project.coverUrl.includes("mock.assets.local")) {
-    return project.coverUrl;
-  }
-  return `https://picsum.photos/seed/${project.id}/960/540`;
-}
-
-function formatStep(step: string) {
-  return STEP_LABELS[step] || step || "未开始";
-}
-
-function formatStatus(status: string) {
-  return STATUS_LABELS[status] || status || "未知";
-}
-
-function formatDateTime(value: string) {
-  if (!value) return "--";
-  return new Date(value).toLocaleString("zh-CN", {
+function formatCanvasDate(value: string | null | undefined) {
+  if (!value) return "刚刚更新";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "刚刚更新";
+  return `更新于 ${new Intl.DateTimeFormat("zh-CN", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  });
+  }).format(date)}`;
 }
 
-function formatCredits(value: number | null | undefined, unlimited?: boolean) {
-  if (unlimited) return "无限";
-  if (typeof value !== "number") return "--";
-  return value.toLocaleString("zh-CN");
-}
-
-function formatRole(me: PermissionContext | null) {
-  if (!me) return "--";
-  if (me.currentOrganizationRole === "enterprise_admin") return "企业管理员";
-  if (me.currentOrganizationRole === "enterprise_member") return "企业成员";
-  if (me.platformRole === "ops_admin") return "运营管理员";
-  if (me.platformRole === "super_admin") return "超级管理员";
-  if (me.platformRole === "customer") return "注册用户";
-  return "游客";
+function getCanvasProjectMetric(
+  project: AgentCanvasProjectSummary,
+  key: "nodeCount" | "messageCount",
+) {
+  const value = (project as AgentCanvasProjectSummary & Partial<Record<typeof key, number>>)[key];
+  return typeof value === "number" ? value : null;
 }
 
 function toolStatusLabel(status: string) {
@@ -369,137 +327,524 @@ function toolStatusLabel(status: string) {
   return status;
 }
 
-// Tools in any of these statuses render as visually locked + not clickable.
 function isToolLocked(status: string) {
   return status === "placeholder" || status === "coming_soon";
 }
 
 function getToolVisual(tool: ToolboxCapability) {
+  return TOOL_VISUALS[tool.code] ?? {
+    icon: Sparkles,
+    tone: "bg-primary/10 text-primary ring-primary/20",
+  };
+}
+
+type HomeModelPreferenceTab = "cot" | "image" | "video" | "3d";
+type HomeMediaModelPreferenceTab = Exclude<HomeModelPreferenceTab, "cot">;
+
+type HomeModelLogoInput = {
+  id?: string;
+  name?: string;
+  label?: string;
+  provider?: string;
+};
+
+type OfficialModelLogoMeta = {
+  kind: "qwen" | "gemini";
+  src: string;
+  layout: "wordmark" | "glyph";
+};
+
+type HomeModelPreferenceOption = {
+  id: string;
+  label: string;
+  description: string;
+  provider?: string;
+  icon: LucideIcon;
+  timeLabel?: string;
+};
+
+type HomeAttachment = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  content?: string;
+  contentTruncated?: boolean;
+};
+
+type HomePromptTransitionBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type HomePromptTransitionSnapshot = {
+  message: string;
+  skillTitle: string | null;
+  attachmentsCount: number;
+  modelName: string;
+  durationMs: number;
+  from: HomePromptTransitionBox;
+  to: HomePromptTransitionBox;
+};
+
+const HOME_TEXT_ATTACHMENT_MAX_CHARS = 12000;
+const HOME_TEXT_ATTACHMENT_EXTENSIONS = [
+  ".txt",
+  ".md",
+  ".markdown",
+  ".json",
+  ".csv",
+  ".tsv",
+  ".xml",
+  ".yaml",
+  ".yml",
+  ".js",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".css",
+  ".html",
+];
+
+const HOME_MODEL_PREFERENCE_TABS: Array<{ value: HomeModelPreferenceTab; label: string }> = [
+  { value: "cot", label: "CoT" },
+  { value: "image", label: "Image" },
+  { value: "video", label: "Video" },
+  { value: "3d", label: "3D" },
+];
+
+const HOME_TO_PLAYGROUND_TRANSITION_MS = 780;
+
+const OFFICIAL_MODEL_LOGOS: Record<OfficialModelLogoMeta["kind"], OfficialModelLogoMeta> = {
+  qwen: {
+    kind: "qwen",
+    src: "https://img.alicdn.com/imgextra/i2/O1CN01g0dCMZ261m1aU7qlI_!!6000000007602-55-tps-104-28.svg",
+    layout: "wordmark",
+  },
+  gemini: {
+    kind: "gemini",
+    src: "https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg",
+    layout: "glyph",
+  },
+};
+
+function getOfficialModelLogo(model: HomeModelLogoInput) {
+  const identity = `${model.id ?? ""} ${model.name ?? ""} ${model.label ?? ""} ${model.provider ?? ""}`.toLowerCase();
+  if (identity.includes("qwen")) return OFFICIAL_MODEL_LOGOS.qwen;
+  if (identity.includes("gemini")) return OFFICIAL_MODEL_LOGOS.gemini;
+  return null;
+}
+
+function OfficialModelLogo({
+  logo,
+  variant,
+  className,
+}: {
+  logo: OfficialModelLogoMeta;
+  variant: "chip" | "menu";
+  className?: string;
+}) {
   return (
-    TOOL_VISUALS[tool.code] ?? {
-      icon: Sparkles,
-      tone: "bg-primary/10 text-primary ring-primary/20",
-    }
+    <img
+      src={logo.src}
+      alt=""
+      aria-hidden="true"
+      data-model-logo={logo.kind}
+      loading="lazy"
+      decoding="async"
+      className={cn(
+        "block shrink-0 object-contain",
+        logo.layout === "wordmark"
+          ? "h-3.5 w-[52px]"
+          : variant === "menu"
+            ? "h-4 w-4"
+            : "h-3.5 w-3.5",
+        className,
+      )}
+    />
   );
 }
 
+function homeMediaModelDescription(kind: "image" | "video", label: string) {
+  if (kind === "image") {
+    if (label.includes("Gemini")) return "小楼 Vertex / Gemini 图像生成能力。";
+    if (label.includes("Seedream")) return "豆包图像生成，适合高质量创意图。";
+    if (label.includes("Kling")) return "可灵图像生成工具。";
+    return "图像生成工具。";
+  }
+
+  if (label.includes("Seedance")) return "ByteDance 视频模型，适合图生视频和创意短片。";
+  if (label.includes("Veo")) return "Google Veo 视频模型，适合高质量视频生成。";
+  if (label.includes("PixVerse")) return "PixVerse 视频模型，适合快速生成视频。";
+  if (label.includes("Kling") || label.includes("kling")) return "可灵视频模型，适合多图和元素视频生成。";
+  return "视频生成工具。";
+}
+
+function homeMediaModelTime(kind: "image" | "video", label: string) {
+  if (kind === "image") return "30s";
+  if (label.includes("Fast")) return "200s";
+  if (label.includes("Veo")) return "180s";
+  return "300s";
+}
+
+const HOME_MEDIA_MODEL_OPTIONS: Record<HomeMediaModelPreferenceTab, HomeModelPreferenceOption[]> = {
+  image: CANVAS_IMAGE_MODELS
+    .filter((model) => !model.hiddenUnlessConfigured)
+    .map((model) => ({
+      id: model.id,
+      label: model.name,
+      description: homeMediaModelDescription("image", model.name),
+      provider: model.provider,
+      icon: ImageIcon,
+      timeLabel: homeMediaModelTime("image", model.name),
+    })),
+  video: XIAOLOU_IMAGE_TO_VIDEO_MODELS.map((model) => ({
+    id: model.id,
+    label: model.name,
+    description: homeMediaModelDescription("video", model.name),
+    provider: model.provider,
+    icon: Film,
+    timeLabel: homeMediaModelTime("video", model.name),
+  })),
+  "3d": [],
+};
+
+function isMediaModelPreferenceTab(tab: HomeModelPreferenceTab): tab is HomeMediaModelPreferenceTab {
+  return tab !== "cot";
+}
+
+function getDefaultHomeMediaModelIds(tab: HomeMediaModelPreferenceTab) {
+  return HOME_MEDIA_MODEL_OPTIONS[tab].slice(0, 1).map((option) => option.id);
+}
+
+function normalizeHomeSelectedModelIds(
+  selectedIds: string[],
+  options: Array<{ id: string }>,
+  fallbackIds: string[] = [],
+) {
+  const optionIds = new Set(options.map((option) => option.id));
+  const kept = Array.from(new Set(selectedIds)).filter((id) => optionIds.has(id));
+  if (kept.length) return kept;
+
+  const fallback = fallbackIds.filter((id) => optionIds.has(id));
+  if (fallback.length) return fallback;
+
+  return options.slice(0, 1).map((option) => option.id);
+}
+
+function toggleHomeSelectedModelId(selectedIds: string[], id: string) {
+  if (!id) return selectedIds;
+  const selected = new Set(selectedIds);
+  if (selected.has(id)) {
+    if (selected.size <= 1) return selectedIds;
+    selected.delete(id);
+  } else {
+    selected.add(id);
+  }
+  return Array.from(selected);
+}
+
+function areHomeSelectedModelIdsEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((id) => rightSet.has(id));
+}
+
 function homeModelDisplayName(model: PlaygroundModel) {
-  if (!model.name && !model.id) return "默认模型";
-  if (!model.name) return model.id;
-  if (model.name.length <= 18) return model.name;
-  return model.name.replace(/^(.{16}).+$/, "$1...");
+  const id = model.id.toLowerCase();
+  const name = model.name || model.id;
+  if (id.includes("qwen-plus")) return "Qwen3.6-Plus";
+  if (id.includes("gemini")) return "Gemini 3";
+  return name;
 }
 
-function isAuthBoundaryError(error: unknown) {
-  return error instanceof ApiRequestError && (error.status === 401 || error.status === 403);
+function homeModelDescription(model: PlaygroundModel) {
+  const id = model.id.toLowerCase();
+  if (id.includes("qwen-plus")) {
+    return "文本推理与长任务规划模型，适合复杂 Agent 步骤拆解。";
+  }
+  if (id.includes("qwen-max")) {
+    return "更强的创意生成与上下文推理模型，适合脚本润色和方案扩写。";
+  }
+  if (id.includes("gemini")) {
+    return "多模态上下文理解模型，适合快速规划和多信息整合。";
+  }
+  return model.provider
+    ? `${model.provider} 模型，适合首页创意对话和任务拆解。`
+    : "适合首页创意对话、任务拆解和制作方向规划。";
 }
 
-function isSignedOutDashboardContext(context: PermissionContext | null) {
-  return !hasSessionCredentials() && (!context || context.actor.id === "guest" || context.platformRole === "guest");
+function waitForHomeTransition(durationMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, durationMs);
+  });
 }
 
-function statusTone(status: string) {
-  if (status === "published")
-    return "bg-indigo-500/15 text-indigo-800 ring-indigo-600/40 dark:text-indigo-300 dark:ring-indigo-500/20";
-  if (status === "draft")
-    return "bg-amber-500/15 text-amber-800 ring-amber-600/40 dark:bg-amber-500/12 dark:text-amber-400 dark:ring-amber-500/20";
-  return "bg-sky-500/15 text-sky-800 ring-sky-600/40 dark:bg-sky-500/12 dark:text-sky-400 dark:ring-sky-500/20";
+function createHomePromptTransitionSnapshot({
+  composer,
+  message,
+  skillTitle,
+  attachmentsCount,
+  modelName,
+}: {
+  composer: HTMLElement | null;
+  message: string;
+  skillTitle: string | null;
+  attachmentsCount: number;
+  modelName: string;
+}): HomePromptTransitionSnapshot | null {
+  if (!composer || typeof window === "undefined") return null;
+
+  const sourceRect = composer.getBoundingClientRect();
+  const mainRect = composer.closest("main")?.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const contentLeft = mainRect?.left ?? 0;
+  const contentWidth = mainRect?.width ?? viewportWidth;
+  const horizontalInset = viewportWidth < 640 ? 24 : 40;
+  const bottomGap = viewportWidth < 640 ? 12 : 16;
+  const targetWidth = Math.min(768, Math.max(280, contentWidth - horizontalInset));
+  const targetHeight = Math.min(
+    Math.max(sourceRect.height, 126),
+    Math.max(126, viewportHeight - bottomGap * 2),
+  );
+
+  return {
+    message,
+    skillTitle,
+    attachmentsCount,
+    modelName,
+    durationMs: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? 120
+      : HOME_TO_PLAYGROUND_TRANSITION_MS,
+    from: {
+      x: sourceRect.left,
+      y: sourceRect.top,
+      width: sourceRect.width,
+      height: sourceRect.height,
+    },
+    to: {
+      x: contentLeft + Math.max(0, (contentWidth - targetWidth) / 2),
+      y: Math.max(bottomGap, viewportHeight - bottomGap - targetHeight),
+      width: targetWidth,
+      height: targetHeight,
+    },
+  };
+}
+
+function HomePromptTransitionOverlay({
+  snapshot,
+}: {
+  snapshot: HomePromptTransitionSnapshot | null;
+}) {
+  if (!snapshot) return null;
+
+  const style = {
+    "--home-transition-from-x": `${snapshot.from.x}px`,
+    "--home-transition-from-y": `${snapshot.from.y}px`,
+    "--home-transition-from-width": `${snapshot.from.width}px`,
+    "--home-transition-from-height": `${snapshot.from.height}px`,
+    "--home-transition-to-x": `${snapshot.to.x}px`,
+    "--home-transition-to-y": `${snapshot.to.y}px`,
+    "--home-transition-to-width": `${snapshot.to.width}px`,
+    "--home-transition-to-height": `${snapshot.to.height}px`,
+    "--home-transition-duration": `${snapshot.durationMs}ms`,
+  } as CSSProperties;
+
+  return (
+    <div className="home-playground-transition-layer" aria-hidden="true">
+      <div className="home-playground-transition-card" style={style}>
+        <div className="flex min-h-full flex-col rounded-[22px] border border-neutral-200 bg-white px-3 pb-3 pt-3 shadow-[0_30px_80px_rgba(15,23,42,0.22)] dark:border-border dark:bg-card">
+          {snapshot.skillTitle ? (
+            <div className="mb-2 flex items-center gap-2">
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-200">
+                <BookOpen className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{snapshot.skillTitle}</span>
+              </span>
+            </div>
+          ) : null}
+          <div className="line-clamp-2 min-h-[72px] px-1 text-left text-sm leading-6 text-neutral-950 dark:text-foreground">
+            {snapshot.message}
+          </div>
+          <div className="mt-auto flex items-center justify-between gap-2 pt-2">
+            <div className="flex min-w-0 items-center gap-1.5 text-neutral-600 dark:text-muted-foreground">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-100 dark:bg-accent">
+                <Plus className="h-4 w-4" />
+              </span>
+              <span className="hidden h-8 items-center gap-1 rounded-xl px-2.5 text-sm sm:flex">
+                <BookOpen className="h-3.5 w-3.5" />
+                Skills
+              </span>
+              <span className="flex h-8 items-center gap-1 rounded-xl px-2.5 text-sm">
+                <Bot className="h-3.5 w-3.5" />
+                Agent
+              </span>
+              {snapshot.attachmentsCount ? (
+                <span className="rounded-full bg-neutral-100 px-2 py-1 text-xs dark:bg-accent">
+                  {snapshot.attachmentsCount} 个附件
+                </span>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="hidden max-w-36 truncate rounded-full bg-neutral-100 px-2 py-1 text-xs text-neutral-500 dark:bg-accent dark:text-muted-foreground sm:inline">
+                {snapshot.modelName}
+              </span>
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-950 text-white shadow-sm dark:bg-foreground dark:text-background">
+                <Send className="h-4 w-4" />
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function Home() {
   const navigate = useNavigate();
   const actorId = useActorId();
-  const [currentProjectId] = useCurrentProjectId();
   const [me, setMe] = useState<PermissionContext | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [tools, setTools] = useState<ToolboxCapability[]>(() =>
     getInitialToolboxCapabilities(getCurrentActorId()),
   );
+  const [canvasProjects, setCanvasProjects] = useState<AgentCanvasProjectSummary[]>([]);
   const [models, setModels] = useState<PlaygroundModel[]>([]);
   const [selectedModel, setSelectedModel] = useState("qwen-plus");
+  const [selectedModelPoolIds, setSelectedModelPoolIds] = useState<string[]>(["qwen-plus"]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [homeMoreMenuOpen, setHomeMoreMenuOpen] = useState(false);
+  const [homeSkillMenuOpen, setHomeSkillMenuOpen] = useState(false);
+  const [homeSelectedSkill, setHomeSelectedSkill] = useState<AgentCanvasSkill | null>(null);
+  const [homeActiveSkillCategory, setHomeActiveSkillCategory] = useState(
+    HOME_SKILL_CATEGORIES[0]?.id || "script",
+  );
+  const [homeWebSearchEnabled, setHomeWebSearchEnabled] = useState(false);
+  const [homeThinkingModeEnabled, setHomeThinkingModeEnabled] = useState(false);
+  const [homeAttachments, setHomeAttachments] = useState<HomeAttachment[]>([]);
+  const [autoModelPreference, setAutoModelPreference] = useState(true);
+  const [rechargeModalOpen, setRechargeModalOpen] = useState(false);
+  const [rechargeCurtainOrigin, setRechargeCurtainOrigin] = useState({ x: 0, y: 0 });
+  const [activeToolModal, setActiveToolModal] = useState<ToolboxCapability | null>(null);
+  const [toolModalOrigin, setToolModalOrigin] = useState({ x: 0, y: 0 });
+  const [modelPreferenceTab, setModelPreferenceTab] =
+    useState<HomeModelPreferenceTab>("cot");
+  const [selectedMediaModelIds, setSelectedMediaModelIds] = useState<
+    Record<HomeMediaModelPreferenceTab, string[]>
+  >({
+    image: getDefaultHomeMediaModelIds("image"),
+    video: getDefaultHomeMediaModelIds("video"),
+    "3d": [],
+  });
   const [prompt, setPrompt] = useState("");
   const [promptSending, setPromptSending] = useState(false);
-  const [networkAccess, setNetworkAccess] = useState<NetworkAccessInfo | null>(null);
-  const [networkAccessLoading, setNetworkAccessLoading] = useState(true);
-  const [networkAccessError, setNetworkAccessError] = useState(false);
-  const [copiedAccessKey, setCopiedAccessKey] = useState<string | null>(null);
+  const [homePromptTransition, setHomePromptTransition] =
+    useState<HomePromptTransitionSnapshot | null>(null);
   const [toolboxLoading, setToolboxLoading] = useState(true);
+  const [canvasLoading, setCanvasLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(true);
-  const [pendingCreate, setPendingCreate] = useState(false);
-  const [runningTool, setRunningTool] = useState<string | null>(null);
   const [dashboardIssues, setDashboardIssues] = useState({
     me: false,
-    projects: false,
     wallets: false,
     tools: false,
+    canvas: false,
+    playground: false,
     toolsUsingCache: false,
   });
   const dashboardRequestRef = useRef(0);
-
-  const orderedProjects = useMemo(() => {
-    const next = [...projects].sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-    );
-    const idx = next.findIndex((item) => item.id === currentProjectId);
-    if (idx > 0) {
-      const [active] = next.splice(idx, 1);
-      next.unshift(active);
-    }
-    return next;
-  }, [currentProjectId, projects]);
-
-  const activeProject = orderedProjects.find((p) => p.id === currentProjectId) ?? orderedProjects[0] ?? null;
-  const cachedGreetingName = useMemo(
-    () => readCachedGreetingName(actorId),
-    [actorId],
-  );
-  const guestGreetingName = actorId === "guest" ? "游客" : null;
-  const localDemoGreetingName = LOCAL_DEMO_GREETING_NAMES[actorId] ?? null;
-  const greetingName =
-    guestGreetingName ||
-    localDemoGreetingName ||
-    normalizeGreetingName(me?.actor?.displayName) ||
-    cachedGreetingName ||
-    (hasSessionCredentials() && actorId !== "guest" ? "小楼用户" : null);
-  const visibleNetworkEntries = useMemo(() => {
-    if (!networkAccess) return [];
-    return networkAccess.recommendedEntries.length
-      ? networkAccess.recommendedEntries
-      : networkAccess.additionalEntries;
-  }, [networkAccess]);
-
-  const currentOrg = useMemo(
-    () => me?.organizations.find((o) => o.id === me.currentOrganizationId) ?? null,
-    [me],
-  );
-  const walletEntitlement = useMemo(() => resolveWalletEntitlement(me), [me]);
+  const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  const homeMoreMenuRef = useRef<HTMLDivElement | null>(null);
+  const homeSkillMenuRef = useRef<HTMLDivElement | null>(null);
+  const homeFileInputRef = useRef<HTMLInputElement | null>(null);
+  const homeComposerRef = useRef<HTMLDivElement | null>(null);
+  const canvasCarouselRef = useRef<HTMLDivElement | null>(null);
 
   const primaryWallet = useMemo(() => {
-    const list = filterWalletsForEntitlement(wallets, walletEntitlement);
+    const list = resolveVisibleWallets(wallets, me);
     return list[0] ?? null;
-  }, [wallets, walletEntitlement]);
+  }, [wallets, me]);
 
-  const modelOptions = useMemo<PlaygroundModel[]>(
-    () =>
-      models.length
-        ? models
-        : [
-            {
-              id: "qwen-plus",
-              name: "Qwen Plus",
-              provider: "fallback",
-              configured: true,
-              default: true,
-            },
-          ],
-    [models],
+  const visibleCanvasProjects = useMemo(
+    () => canvasProjects.slice(0, 4),
+    [canvasProjects],
   );
+
+  const modelOptions = useMemo<PlaygroundModel[]>(() => {
+    const configured = models.filter((model) => model.configured !== false);
+    if (configured.length) return configured;
+    if (models.length) return models;
+    return [
+      {
+        id: "qwen-plus",
+        name: "Qwen Plus",
+        provider: "qwen",
+        configured: true,
+        default: true,
+      },
+    ];
+  }, [models]);
+
   const activeModels = useMemo(() => modelOptions.slice(0, 4), [modelOptions]);
-  const selectedModelName = useMemo(() => {
-    const model = modelOptions.find((item) => item.id === selectedModel) ?? modelOptions[0];
-    return model ? homeModelDisplayName(model) : selectedModel;
-  }, [modelOptions, selectedModel]);
+  const defaultHomeTextModelId = useMemo(
+    () => modelOptions.find((model) => model.default)?.id || modelOptions[0]?.id || "qwen-plus",
+    [modelOptions],
+  );
+
+  const selectedModelName = useMemo(
+    () => {
+      const selectedNames = selectedModelPoolIds
+        .map((id) => {
+          const selected = modelOptions.find((model) => model.id === id);
+          return selected ? homeModelDisplayName(selected) : id;
+        })
+        .filter(Boolean);
+      if (selectedNames.length > 1) return `${selectedNames[0]} +${selectedNames.length - 1}`;
+      return selectedNames[0] || selectedModel;
+    },
+    [modelOptions, selectedModel, selectedModelPoolIds],
+  );
+
+  const homeVisibleSkills = useMemo(
+    () => HOME_SKILLS.filter((skill) => skill.category === homeActiveSkillCategory),
+    [homeActiveSkillCategory],
+  );
+
+  const homeActiveSkillCategoryLabel = useMemo(
+    () =>
+      HOME_SKILL_CATEGORIES.find((category) => category.id === homeActiveSkillCategory)?.label ||
+      "Skills",
+    [homeActiveSkillCategory],
+  );
+
+  const modelPreferenceOptions = useMemo<HomeModelPreferenceOption[]>(() => {
+    if (modelPreferenceTab === "cot") {
+      return modelOptions.map((model) => ({
+        id: model.id,
+        label: homeModelDisplayName(model),
+        description: homeModelDescription(model),
+        provider: model.provider,
+        icon: Box,
+      }));
+    }
+    return HOME_MEDIA_MODEL_OPTIONS[modelPreferenceTab];
+  }, [modelOptions, modelPreferenceTab]);
+
+  useEffect(() => {
+    const nextPool = normalizeHomeSelectedModelIds(
+      selectedModelPoolIds,
+      modelOptions,
+      [defaultHomeTextModelId],
+    );
+    if (!areHomeSelectedModelIdsEqual(selectedModelPoolIds, nextPool)) {
+      setSelectedModelPoolIds(nextPool);
+    }
+    if (!nextPool.includes(selectedModel)) {
+      setSelectedModel(nextPool[0] || defaultHomeTextModelId);
+    }
+  }, [defaultHomeTextModelId, modelOptions, selectedModel, selectedModelPoolIds]);
+
   const visibleToolboxTools = useMemo(
     () => (tools.length ? tools : DEFAULT_TOOLBOX_CAPABILITIES).slice(0, 6),
     [tools],
@@ -508,12 +853,31 @@ export default function Home() {
     () => visibleToolboxTools.filter((tool) => !isToolLocked(tool.status)).length,
     [visibleToolboxTools],
   );
+  const selectedModelCountLabel =
+    selectedModelPoolIds.length > 1 ? `${selectedModelPoolIds.length} 个文本模型` : selectedModelName;
+  const canvasProjectCountLabel = canvasProjects.length
+    ? `${canvasProjects.length} 个画布项目`
+    : "画布随时新建";
+  const rechargeCurtainStyle = useMemo(
+    () =>
+      ({
+        "--recharge-origin-x": `${rechargeCurtainOrigin.x}px`,
+        "--recharge-origin-y": `${rechargeCurtainOrigin.y}px`,
+      }) as CSSProperties,
+    [rechargeCurtainOrigin],
+  );
+  const toolCurtainStyle = useMemo(
+    () =>
+      ({
+        "--recharge-origin-x": `${toolModalOrigin.x}px`,
+        "--recharge-origin-y": `${toolModalOrigin.y}px`,
+      }) as CSSProperties,
+    [toolModalOrigin],
+  );
 
   const dashboardNotice = useMemo(() => {
     const notices: string[] = [];
-
     if (dashboardIssues.me) notices.push("账户上下文加载失败");
-    if (dashboardIssues.projects) notices.push("项目列表暂时不可用");
     if (dashboardIssues.wallets) notices.push("钱包服务暂时不可用");
     if (dashboardIssues.tools) {
       notices.push(
@@ -522,8 +886,9 @@ export default function Home() {
           : "工具箱能力加载失败",
       );
     }
-
-    return notices.length ? `${notices.join("，")}。其余可用内容已继续显示。` : null;
+    if (dashboardIssues.canvas) notices.push("智能画布项目暂时不可用");
+    if (dashboardIssues.playground) notices.push("Playground 模型加载失败");
+    return notices.length ? `${notices.join("，")}。其余内容已继续显示。` : null;
   }, [dashboardIssues]);
 
   const loadDashboard = async () => {
@@ -532,16 +897,17 @@ export default function Home() {
     const initialTools = cachedTools.length ? cachedTools : DEFAULT_TOOLBOX_CAPABILITIES;
 
     setRefreshing(true);
+    setToolboxLoading(true);
+    setCanvasLoading(true);
+    setTools(applyLocalOverrides(initialTools));
     setDashboardIssues({
       me: false,
-      projects: false,
       wallets: false,
       tools: false,
+      canvas: false,
+      playground: false,
       toolsUsingCache: false,
     });
-
-    setTools(applyLocalOverrides(initialTools));
-    setToolboxLoading(true);
 
     const commitIfCurrent = (callback: () => void) => {
       if (dashboardRequestRef.current !== requestId) return false;
@@ -549,113 +915,38 @@ export default function Home() {
       return true;
     };
 
-    let permissionContext: PermissionContext | null = null;
-    if (isLocalDemoActorId(actorId) && !hasSessionCredentials()) {
-      try {
-        const demoSession = await startDemoSession(actorId);
-        const sessionCommitted = commitIfCurrent(() => {
-          const demoName = LOCAL_DEMO_GREETING_NAMES[demoSession.actorId] ?? demoSession.displayName;
-          setAuthToken(demoSession.token);
-          setControlApiClientAssertion(demoSession.controlApiClientAssertion);
-          rememberKnownActor({
-            id: demoSession.actorId,
-            label: demoName,
-            detail: demoSession.email,
-            token: demoSession.token,
-            controlApiClientAssertion: demoSession.controlApiClientAssertion,
-          });
-          writeCachedGreetingName(demoSession.actorId, demoName);
-        });
-        if (!sessionCommitted) {
-          return;
-        }
-      } catch {
-        // Let the normal account context loader decide whether this should surface as an issue.
-      }
-    }
-
-    try {
-      const value = await getMe();
-      permissionContext = value;
-      commitIfCurrent(() => {
-        writeCachedGreetingName(value.actor.id, value.actor.displayName);
-        setMe(value);
-        setDashboardIssues((prev) => ({ ...prev, me: false }));
-      });
-    } catch {
-      commitIfCurrent(() => {
-        setMe(null);
-        setDashboardIssues((prev) => ({ ...prev, me: true }));
-      });
-    }
-
-    const useSignedOutFallback = isSignedOutDashboardContext(permissionContext);
-
-    const projectsPromise = useSignedOutFallback
-      ? Promise.resolve(
-          commitIfCurrent(() => {
-            setProjects([]);
-            setDashboardIssues((prev) => ({ ...prev, projects: false }));
-          }),
-        )
-      : listProjects()
-          .then((value) => {
-            commitIfCurrent(() => {
-              setProjects(value.items);
-              setDashboardIssues((prev) => ({ ...prev, projects: false }));
-            });
-          })
-          .catch((error) => {
-            const suppressIssue = isAuthBoundaryError(error) && !hasSessionCredentials();
-            commitIfCurrent(() => {
-              setProjects([]);
-              setDashboardIssues((prev) => ({ ...prev, projects: !suppressIssue }));
-            });
-          });
-    const walletLoadEntitlement = useSignedOutFallback
-      ? null
-      : resolveWalletEntitlement(permissionContext);
-    const shouldLoadWallets = Boolean(
-      walletLoadEntitlement?.ownerType && walletLoadEntitlement.ownerId,
-    );
-    const walletsPromise = useSignedOutFallback || !shouldLoadWallets
-      ? Promise.resolve(
-          commitIfCurrent(() => {
-            setWallets([]);
-            setDashboardIssues((prev) => ({ ...prev, wallets: false }));
-          }),
-        )
-      : listWallets()
-          .then((value) => {
-            commitIfCurrent(() => {
-              setWallets(value.items);
-              setDashboardIssues((prev) => ({ ...prev, wallets: false }));
-            });
-          })
-          .catch((error) => {
-            const suppressIssue = isAuthBoundaryError(error) && !hasSessionCredentials();
-            commitIfCurrent(() => {
-              setWallets([]);
-              setDashboardIssues((prev) => ({ ...prev, wallets: !suppressIssue }));
-            });
-          });
-
-    const loadToolsWithRetry = async (attempt = 0): Promise<void> => {
-      if (useSignedOutFallback) {
+    const mePromise = getMe()
+      .then((value) => {
         commitIfCurrent(() => {
-          setTools(applyLocalOverrides(initialTools));
-          setToolboxLoading(false);
-          setDashboardIssues((prev) => ({
-            ...prev,
-            tools: false,
-            toolsUsingCache: false,
-          }));
+          setMe(value);
+          setDashboardIssues((prev) => ({ ...prev, me: false }));
         });
-        return;
-      }
+        return value;
+      })
+      .catch(() => {
+        commitIfCurrent(() => {
+          setMe(null);
+          setDashboardIssues((prev) => ({ ...prev, me: true }));
+        });
+        return null;
+      });
 
-      try {
-        const value = await getToolboxCapabilities();
+    const walletsPromise = listWallets()
+      .then((value) => {
+        commitIfCurrent(() => {
+          setWallets(value.items);
+          setDashboardIssues((prev) => ({ ...prev, wallets: false }));
+        });
+      })
+      .catch(() => {
+        commitIfCurrent(() => {
+          setWallets([]);
+          setDashboardIssues((prev) => ({ ...prev, wallets: true }));
+        });
+      });
+
+    const toolsPromise = getToolboxCapabilities()
+      .then((value) => {
         const merged = applyLocalOverrides(value.items);
         commitIfCurrent(() => {
           setTools(merged);
@@ -667,43 +958,75 @@ export default function Home() {
             toolsUsingCache: false,
           }));
         });
-      } catch (error) {
+      })
+      .catch(() => {
         const fallbackTools = cachedTools.length
           ? cachedTools
           : readCachedToolboxCapabilities(actorId);
         const resolvedFallbackTools = applyLocalOverrides(
           fallbackTools.length ? fallbackTools : DEFAULT_TOOLBOX_CAPABILITIES,
         );
-        const usingCachedTools = fallbackTools.length > 0;
-        const suppressIssue = isAuthBoundaryError(error) && !hasSessionCredentials();
-
         commitIfCurrent(() => {
           setTools(resolvedFallbackTools);
+          setToolboxLoading(false);
           setDashboardIssues((prev) => ({
             ...prev,
-            tools: !suppressIssue,
-            toolsUsingCache: !suppressIssue && usingCachedTools,
+            tools: true,
+            toolsUsingCache: fallbackTools.length > 0,
           }));
-          setToolboxLoading(!suppressIssue && attempt < TOOLBOX_RETRY_DELAYS_MS.length);
         });
+      });
 
-        if (!suppressIssue && attempt < TOOLBOX_RETRY_DELAYS_MS.length) {
-          await new Promise((resolve) => window.setTimeout(resolve, TOOLBOX_RETRY_DELAYS_MS[attempt]));
-          if (dashboardRequestRef.current === requestId) {
-            return loadToolsWithRetry(attempt + 1);
-          }
+    const canvasPromise = mePromise
+      .then((context) => {
+        if (!context || context.platformRole === "guest") {
+          commitIfCurrent(() => {
+            setCanvasProjects([]);
+            setCanvasLoading(false);
+            setDashboardIssues((prev) => ({ ...prev, canvas: false }));
+          });
+          return null;
         }
-
-        commitIfCurrent(() => {
-          setToolboxLoading(false);
+        return listAgentCanvasProjects().then((value) => {
+          commitIfCurrent(() => {
+            setCanvasProjects(value.items);
+            setCanvasLoading(false);
+            setDashboardIssues((prev) => ({ ...prev, canvas: false }));
+          });
         });
-      }
-    };
+      })
+      .catch(() => {
+        commitIfCurrent(() => {
+          setCanvasProjects([]);
+          setCanvasLoading(false);
+          setDashboardIssues((prev) => ({ ...prev, canvas: true }));
+        });
+      });
+
+    const modelsPromise = listPlaygroundModels()
+      .then((value) => {
+        commitIfCurrent(() => {
+          setModels(value.items);
+          setSelectedModel((current) => {
+            if (current && value.items.some((item) => item.id === current)) return current;
+            return value.defaultModel || value.items[0]?.id || "qwen-plus";
+          });
+          setDashboardIssues((prev) => ({ ...prev, playground: false }));
+        });
+      })
+      .catch(() => {
+        commitIfCurrent(() => {
+          setModels([]);
+          setDashboardIssues((prev) => ({ ...prev, playground: true }));
+        });
+      });
 
     await Promise.allSettled([
-      projectsPromise,
+      mePromise,
       walletsPromise,
-      loadToolsWithRetry(),
+      toolsPromise,
+      canvasPromise,
+      modelsPromise,
     ]);
 
     if (dashboardRequestRef.current === requestId) {
@@ -711,91 +1034,188 @@ export default function Home() {
     }
   };
 
-  useEffect(() => { void loadDashboard(); }, [actorId]);
+  useEffect(() => {
+    void loadDashboard();
+  }, [actorId]);
 
   useEffect(() => {
-    let active = true;
+    if (!modelMenuOpen) return;
 
-    void listPlaygroundModels()
-      .then((response) => {
-        if (!active) return;
-        const items = Array.isArray(response.items) ? response.items : [];
-        setModels(items);
-        setSelectedModel((current) => {
-          if (items.some((model) => model.id === current)) return current;
-          return response.defaultModel || items[0]?.id || current;
-        });
-      })
-      .catch(() => {
-        if (!active) return;
-        setModels([]);
-      });
+    const handlePointerDown = (event: PointerEvent) => {
+      if (modelMenuRef.current?.contains(event.target as Node)) return;
+      setModelMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setModelMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      active = false;
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
-  }, []);
-
-  const loadNetworkAccess = async () => {
-    setNetworkAccessLoading(true);
-    try {
-      const info = await getNetworkAccessInfo();
-      setNetworkAccess(info);
-      setNetworkAccessError(false);
-    } catch {
-      setNetworkAccess(null);
-      setNetworkAccessError(true);
-    } finally {
-      setNetworkAccessLoading(false);
-    }
-  };
+  }, [modelMenuOpen]);
 
   useEffect(() => {
-    void loadNetworkAccess();
-  }, []);
+    if (!homeMoreMenuOpen) return;
 
-  const handleCopyAccess = async (value: string, key: string) => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = value;
-        textarea.setAttribute("readonly", "true");
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
+    const handlePointerDown = (event: PointerEvent) => {
+      if (homeMoreMenuRef.current?.contains(event.target as Node)) return;
+      setHomeMoreMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setHomeMoreMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [homeMoreMenuOpen]);
+
+  useEffect(() => {
+    if (!homeSkillMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (homeSkillMenuRef.current?.contains(event.target as Node)) return;
+      setHomeSkillMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setHomeSkillMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [homeSkillMenuOpen]);
+
+  useEffect(() => {
+    if (!rechargeModalOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setRechargeModalOpen(false);
+        void loadDashboard();
       }
-      setCopiedAccessKey(key);
-      window.setTimeout(() => {
-        setCopiedAccessKey((current) => (current === key ? null : current));
-      }, 1500);
-    } catch {
-      window.alert("复制失败，请手动选择地址。");
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [rechargeModalOpen]);
+
+  useEffect(() => {
+    if (!activeToolModal) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActiveToolModal(null);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [activeToolModal]);
+
+  const handleHomeFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const files = Array.from(input.files ?? []);
+    input.value = "";
+    if (files.length) {
+      const batchId = Date.now();
+      const nextAttachments = await Promise.all(
+        files.map(async (file, index): Promise<HomeAttachment> => {
+          let content: string | undefined;
+          let contentTruncated = false;
+
+          if (canReadHomeAttachmentAsText(file)) {
+            try {
+              const text = await file.text();
+              contentTruncated = text.length > HOME_TEXT_ATTACHMENT_MAX_CHARS;
+              content = text.slice(0, HOME_TEXT_ATTACHMENT_MAX_CHARS);
+            } catch {
+              content = undefined;
+            }
+          }
+
+          return {
+            id: `${batchId}-${index}-${file.name}`,
+            name: file.name,
+            size: file.size,
+            type: file.type || "file",
+            content,
+            contentTruncated,
+          };
+        }),
+      );
+      setHomeAttachments((current) => [...current, ...nextAttachments]);
     }
   };
 
   const handlePromptSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const message = prompt.trim();
-    if (!message || promptSending) return;
+    if (!message || promptSending || homePromptTransition) return;
 
-    if (!hasSessionCredentials()) {
-      window.alert("请先登录或注册账号，再发送到 Playground。");
-      return;
-    }
+    const skillContext = homeSelectedSkill
+      ? [
+          `当前启用 Skill：${homeSelectedSkill.title}`,
+          homeSelectedSkill.hiddenInstruction || homeSelectedSkill.prompt,
+        ].join("\n")
+      : "";
+
+    const transitionSnapshot = createHomePromptTransitionSnapshot({
+      composer: homeComposerRef.current,
+      message,
+      skillTitle: homeSelectedSkill?.title ?? null,
+      attachmentsCount: homeAttachments.length,
+      modelName: selectedModelName,
+    });
 
     setPromptSending(true);
+    setModelMenuOpen(false);
+    setHomeMoreMenuOpen(false);
+    setHomeSkillMenuOpen(false);
+    preloadPlaygroundPage();
+    if (transitionSnapshot) setHomePromptTransition(transitionSnapshot);
+
+    const transitionPromise = transitionSnapshot
+      ? waitForHomeTransition(transitionSnapshot.durationMs)
+      : Promise.resolve();
+
     try {
-      const result = await startPlaygroundChatJob({
+      const chatJobPromise = startPlaygroundChatJob({
         conversationId: null,
         message,
         model: selectedModel,
+        attachments: homeAttachments.map((file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          content: file.content,
+          contentTruncated: file.contentTruncated,
+        })),
+        webSearch: homeWebSearchEnabled,
+        thinkingMode: homeThinkingModeEnabled,
+        mode: "agent",
+        context: skillContext || undefined,
+        preferredImageToolId: selectedMediaModelIds.image[0],
+        allowedImageToolIds: selectedMediaModelIds.image,
       });
-      setPrompt("");
+      const [result] = await Promise.all([chatJobPromise, transitionPromise]);
+      setHomeSelectedSkill(null);
+      setHomeSkillMenuOpen(false);
       const conversationId = result.conversation?.id;
       navigate(
         conversationId
@@ -803,105 +1223,334 @@ export default function Home() {
           : "/playground",
       );
     } catch {
-      window.alert("发送到 Playground 失败，请稍后重试。");
-    } finally {
+      await transitionPromise;
+      setHomePromptTransition(null);
       setPromptSending(false);
+      window.alert("发送到 Playground 失败，请稍后重试。");
     }
   };
 
-  const openProject = (project: Project) => {
-    setCurrentProjectId(project.id);
-    navigate(mapStepToComicPath(project.currentStep));
+  const handleToolbox = (tool: ToolboxCapability, button: HTMLButtonElement) => {
+    if (isToolLocked(tool.status)) return;
+    const rect = button.getBoundingClientRect();
+    setToolModalOrigin({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    });
+    setActiveToolModal(tool);
   };
 
-  const handleCreateProject = async () => {
-    if (!me?.permissions.canCreateProject) {
-      window.alert("当前身份不能创建项目，请先登录或注册账号。");
-      return;
+  const openCanvasProject = (project: AgentCanvasProjectSummary) => {
+    navigate(`/create/agent-canvas?agentCanvasProjectId=${encodeURIComponent(project.id)}`);
+  };
+
+  const openNewCanvas = () => {
+    clearAgentCanvasDraftSession(actorId);
+    navigate("/create/agent-canvas");
+  };
+
+  const scrollCanvasCarousel = (direction: "left" | "right") => {
+    const carousel = canvasCarouselRef.current;
+    if (!carousel) return;
+    carousel.scrollBy({
+      left: direction === "left" ? -carousel.clientWidth * 0.85 : carousel.clientWidth * 0.85,
+      behavior: "smooth",
+    });
+  };
+
+  const enableHomeAutoModelPreference = () => {
+    setAutoModelPreference(true);
+    setSelectedModel(defaultHomeTextModelId);
+    setSelectedModelPoolIds(defaultHomeTextModelId ? [defaultHomeTextModelId] : []);
+    setSelectedMediaModelIds({
+      image: getDefaultHomeMediaModelIds("image"),
+      video: getDefaultHomeMediaModelIds("video"),
+      "3d": [],
+    });
+  };
+
+  const toggleHomeAutoModelPreference = () => {
+    if (autoModelPreference) {
+      setAutoModelPreference(false);
+    } else {
+      enableHomeAutoModelPreference();
     }
-    const isEnterprise = !!me.currentOrganizationId && me.permissions.canManageOrganization;
-    setPendingCreate(true);
-    try {
-      const ts = new Date().toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-      const project = await createProject({
-        title: `漫剧项目 ${ts}`,
-        summary: "从首页直接创建的创作项目。",
-        ownerType: isEnterprise ? "organization" : "personal",
-        organizationId: isEnterprise ? me.currentOrganizationId || undefined : undefined,
+  };
+
+  const selectHomeModelPreference = (option: HomeModelPreferenceOption) => {
+    setAutoModelPreference(false);
+    if (modelPreferenceTab === "cot") {
+      setSelectedModelPoolIds((current) => {
+        const nextPool = toggleHomeSelectedModelId(current, option.id);
+        if (nextPool.includes(option.id)) {
+          setSelectedModel(option.id);
+        } else if (!nextPool.includes(selectedModel)) {
+          setSelectedModel(nextPool[0] || defaultHomeTextModelId);
+        }
+        return nextPool;
       });
-      setCurrentProjectId(project.id);
-      navigate("/comic/global");
-    } catch {
-      window.alert("项目创建失败，请确认已登录后重试。");
-    } finally {
-      setPendingCreate(false);
+    } else if (isMediaModelPreferenceTab(modelPreferenceTab)) {
+      setSelectedMediaModelIds((current) => ({
+        ...current,
+        [modelPreferenceTab]: toggleHomeSelectedModelId(current[modelPreferenceTab] || [], option.id),
+      }));
     }
   };
 
-  const handleToolbox = async (tool: ToolboxCapability) => {
-    // 锁定中的工具（placeholder / coming_soon）不允许点击进入，直接忽略。
-    if (isToolLocked(tool.status)) {
-      return;
-    }
-    if (tool.code === "video_character_replace") {
-      navigate("/create/script-breakdown");
-      return;
-    }
-    if (tool.code === "character_replace") {
-      navigate("/create/video-replace");
-      return;
-    }
-    if (tool.code === "upscale_restore") {
-      navigate("/create/video-reverse");
-      return;
-    }
-    if (tool.code === "storyboard_25") {
-      navigate("/create/storyboard-25");
-      return;
-    }
-    if (!activeProject) return;
-    setRunningTool(tool.code);
-    try {
-      if (isRunnableToolboxCode(tool.code)) {
-        await runToolboxCapability(tool.code, {
-          projectId: activeProject.id,
-          target: activeProject.title,
-          note: `${tool.name} from dashboard`,
-        });
-        await loadDashboard();
-      }
-    } finally {
-      setRunningTool(null);
-    }
+  const closeRechargeModal = () => {
+    setRechargeModalOpen(false);
+    void loadDashboard();
   };
 
-  const shouldShowToolboxSection =
-    toolboxLoading || tools.length > 0 || dashboardIssues.tools || !refreshing;
+  const openRechargeModalFromButton = (button: HTMLButtonElement) => {
+    const rect = button.getBoundingClientRect();
+    setRechargeCurtainOrigin({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    });
+    setRechargeModalOpen(true);
+  };
+
+  const renderActiveToolModal = (tool: ToolboxCapability) => {
+    if (tool.code === "video_character_replace") return <HomeScriptBreakdownTool />;
+    if (tool.code === "character_replace") return <HomeVideoReplaceTool />;
+    if (tool.code === "upscale_restore") return <HomeVideoReverseTool />;
+    if (tool.code === "storyboard_25") return <HomeStoryboardGrid25Tool />;
+
+    return (
+      <div className="flex h-full flex-col items-center justify-center bg-background p-8 text-center">
+        <Sparkles className="h-10 w-10 text-muted-foreground" />
+        <h3 className="mt-4 text-lg font-semibold text-foreground">{tool.name}</h3>
+        <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+          这个工具正在整理成卡片工作台，准备好后会直接在这里打开。
+        </p>
+      </div>
+    );
+  };
+
+  const activeToolVisual = activeToolModal ? getToolVisual(activeToolModal) : null;
+  const ActiveToolIcon = activeToolVisual?.icon ?? Sparkles;
 
   return (
-    <div className="flex-1 overflow-y-auto bg-background custom-scrollbar">
-      <div className="mx-auto max-w-[1280px] space-y-10 px-6 py-10 sm:px-10">
+    <div className="custom-scrollbar flex-1 overflow-y-auto bg-white text-foreground dark:bg-background">
+      <HomePromptTransitionOverlay snapshot={homePromptTransition} />
+      <div className="mx-auto flex min-h-full w-full max-w-[1320px] flex-col px-5 pb-12 pt-5 sm:px-8 lg:px-12">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={(event) => {
+              if (me?.permissions.canRecharge) {
+                openRechargeModalFromButton(event.currentTarget);
+              }
+            }}
+            disabled={!me?.permissions.canRecharge}
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground shadow-sm transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Zap className="h-3.5 w-3.5 text-primary" fill="none" />
+            <span>{formatCredits(primaryWallet?.creditsAvailable, primaryWallet?.unlimitedCredits)}</span>
+            <span className="text-muted-foreground">升级</span>
+          </button>
+        </div>
+
+        {rechargeModalOpen ? (
+          <div
+            className="recharge-curtain-overlay fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/15 px-4 py-8 sm:px-6"
+            style={rechargeCurtainStyle}
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                closeRechargeModal();
+              }
+            }}
+          >
+            <div
+              className="recharge-curtain-panel relative z-10 w-full max-w-6xl overflow-hidden rounded-[28px] border border-white/70 bg-white shadow-[0_32px_90px_rgba(15,23,42,0.32)] dark:border-border/70 dark:bg-background"
+              role="dialog"
+              aria-modal="true"
+              aria-label="充值钱包"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <Suspense
+                fallback={
+                  <div className="flex min-h-[70vh] items-center justify-center gap-2 bg-background text-sm text-muted-foreground">
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    正在打开充值中心...
+                  </div>
+                }
+              >
+                <HomeWalletRecharge
+                  variant="modal"
+                  onClose={closeRechargeModal}
+                  onRechargeComplete={() => void loadDashboard()}
+                />
+              </Suspense>
+            </div>
+          </div>
+        ) : null}
+
+        {activeToolModal ? (
+          <div
+            className="recharge-curtain-overlay fixed inset-0 z-[82] flex items-start justify-center overflow-y-auto bg-slate-950/15 px-3 py-2 sm:px-5 sm:py-3"
+            style={toolCurtainStyle}
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setActiveToolModal(null);
+              }
+            }}
+          >
+            <div
+              className="recharge-curtain-panel relative z-10 flex h-[calc(100dvh-1rem)] w-full max-w-7xl flex-col overflow-hidden rounded-[28px] border border-white/70 bg-white shadow-[0_32px_90px_rgba(15,23,42,0.32)] dark:border-border/70 dark:bg-background sm:h-[calc(100dvh-1.5rem)]"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${activeToolModal.name} 工具卡片`}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-white/86 px-4 backdrop-blur-xl dark:bg-background/86 sm:px-5">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    className={cn(
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1",
+                      activeToolVisual?.tone ?? "bg-primary/10 text-primary ring-primary/20",
+                    )}
+                  >
+                    <ActiveToolIcon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 text-left">
+                    <div className="truncate text-sm font-semibold text-foreground">
+                      {activeToolModal.name}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {activeToolModal.description}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveToolModal(null)}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="关闭工具卡片"
+                  title="关闭"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <Suspense
+                  fallback={
+                    <div className="flex h-full items-center justify-center gap-2 bg-background text-sm text-muted-foreground">
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      正在打开工具卡片...
+                    </div>
+                  }
+                >
+                  {renderActiveToolModal(activeToolModal)}
+                </Suspense>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {dashboardNotice ? (
-          <div className="rounded-xl border border-amber-600/40 bg-amber-500/15 px-5 py-3.5 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/8 dark:text-amber-200/90">
+          <div
+            className="mt-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200"
+            role="status"
+          >
             {dashboardNotice}
           </div>
         ) : null}
 
-        <section className="mx-auto flex min-h-[38rem] w-full max-w-5xl flex-col items-center justify-center px-1 py-10 text-center sm:py-14">
-          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/35 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            {greetingName ? `你好，${greetingName}` : "创境 AI 工作台"}
+        <section className="flex min-h-[300px] flex-col items-center justify-center py-6 text-center sm:min-h-[360px] lg:min-h-[380px]">
+          <div
+            className={cn(
+              "flex flex-col items-center text-center transform-gpu transition-all duration-[820ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              homePromptTransition ? "pointer-events-none -translate-y-10 opacity-0 blur-sm" : "translate-y-0 opacity-100",
+            )}
+          >
+            <div className="flex items-center gap-3">
+              <img
+                src="/chuangjing-logo-shell.png"
+                alt="创境AI Logo"
+                className="h-10 w-10 shrink-0 object-contain drop-shadow-[0_6px_16px_rgba(212,143,71,0.28)] sm:h-11 sm:w-11"
+              />
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                创境AI 让创作更简单
+              </h1>
+            </div>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+              你的创意代理，帮你从一句话进入对话、工具箱和智能画布。
+            </p>
+            <div className="mt-4 flex max-w-3xl flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-flex h-7 items-center rounded-full border border-border bg-background px-3">
+                {readyToolCount} 个工具可用
+              </span>
+              <span className="inline-flex h-7 items-center rounded-full border border-border bg-background px-3">
+                {canvasProjectCountLabel}
+              </span>
+              <span className="inline-flex h-7 items-center rounded-full border border-border bg-background px-3">
+                {autoModelPreference ? "模型自动偏好" : selectedModelCountLabel}
+              </span>
+            </div>
           </div>
 
-          <h1 className="mt-6 max-w-3xl text-3xl font-semibold tracking-tight text-foreground sm:text-5xl">
-            从一句想法开始创作
-          </h1>
-          <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-            输入短片脚本、角色设定或视觉方向，直接发送到 Playground 继续拆解、生成和管理创作任务。
-          </p>
-
-          <form onSubmit={handlePromptSubmit} className="mt-8 w-full max-w-3xl">
-            <div className="rounded-[22px] border border-border bg-card px-3 pb-3 pt-3 text-left shadow-[0_18px_48px_rgba(15,23,42,0.10)] transition focus-within:border-primary/35 focus-within:shadow-[0_22px_60px_rgba(79,70,229,0.16)]">
+          <div
+            className={cn(
+              "mt-6 flex w-full flex-col items-center transform-gpu transition-all duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+              homePromptTransition ? "pointer-events-none translate-y-12 opacity-0 blur-sm" : "translate-y-0 opacity-100",
+            )}
+          >
+          <form onSubmit={handlePromptSubmit} className="w-full max-w-3xl">
+            <div
+              ref={homeComposerRef}
+              className="relative rounded-[22px] border border-neutral-200 bg-white px-3 pb-3 pt-3 text-left shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition focus-within:border-neutral-300 focus-within:shadow-[0_18px_42px_rgba(15,23,42,0.1)] dark:border-border dark:bg-card"
+            >
+              <input
+                ref={homeFileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleHomeFileInputChange}
+              />
+              {homeSelectedSkill ? (
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+                    <BookOpen className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{homeSelectedSkill.title}</span>
+                    <button
+                      type="button"
+                      onClick={() => setHomeSelectedSkill(null)}
+                      className="ml-0.5 rounded-full p-0.5 text-blue-500 transition hover:bg-blue-100 hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label="取消 Skill"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                </div>
+              ) : null}
+              {homeAttachments.length ? (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {homeAttachments.map((file) => (
+                    <span
+                      key={file.id}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs text-neutral-700 dark:border-border dark:bg-muted dark:text-muted-foreground"
+                    >
+                      <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                      <span className="max-w-[13rem] truncate">{file.name}</span>
+                      <span className="shrink-0 text-neutral-400">{formatAttachmentSize(file.size)}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setHomeAttachments((current) => current.filter((item) => item.id !== file.id))
+                        }
+                        className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-200 hover:text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-accent dark:hover:text-foreground"
+                        aria-label={`移除 ${file.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.currentTarget.value)}
@@ -913,414 +1562,598 @@ export default function Home() {
                   }
                 }}
                 placeholder="让创境AI帮你设计一个短片脚本、角色设定或视觉方向"
-                rows={3}
-                className="max-h-[160px] min-h-[88px] w-full resize-none bg-transparent px-1 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+                rows={2}
+                className="max-h-[150px] min-h-[72px] w-full resize-none bg-transparent px-1 text-sm leading-6 text-neutral-950 outline-none placeholder:text-neutral-400 disabled:cursor-not-allowed dark:text-foreground dark:placeholder:text-muted-foreground"
                 aria-label="创意输入"
               />
               <div className="mt-2 flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                  <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl px-2.5 text-sm">
+                <div className="flex min-w-0 items-center gap-1.5 text-neutral-500 dark:text-muted-foreground">
+                  <div ref={homeMoreMenuRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHomeMoreMenuOpen((open) => !open);
+                        setHomeSkillMenuOpen(false);
+                        setModelMenuOpen(false);
+                      }}
+                      className={cn(
+                        "inline-flex h-8 w-8 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        homeMoreMenuOpen
+                          ? "bg-neutral-100 text-neutral-950 dark:bg-accent dark:text-foreground"
+                          : "hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-accent dark:hover:text-foreground",
+                      )}
+                      aria-label="更多"
+                      aria-expanded={homeMoreMenuOpen}
+                      title="更多"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+
+                    {homeMoreMenuOpen ? (
+                      <div className="absolute bottom-11 left-0 z-50 w-60 rounded-xl border border-neutral-100 bg-white p-2 text-neutral-900 shadow-2xl dark:border-border dark:bg-card dark:text-foreground">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHomeMoreMenuOpen(false);
+                            window.setTimeout(() => homeFileInputRef.current?.click(), 0);
+                          }}
+                          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-accent"
+                        >
+                          <Paperclip className="h-4 w-4" />
+                          上传文件
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHomeWebSearchEnabled((value) => !value)}
+                          className={cn(
+                            "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                            homeWebSearchEnabled
+                              ? "bg-neutral-100 dark:bg-accent"
+                              : "hover:bg-neutral-50 dark:hover:bg-accent",
+                          )}
+                          aria-pressed={homeWebSearchEnabled}
+                        >
+                          <span className="flex items-center gap-3">
+                            <Globe2 className="h-4 w-4" />
+                            联网搜索
+                          </span>
+                          <span
+                            className={cn(
+                              "relative h-5 w-9 rounded-full transition-colors",
+                              homeWebSearchEnabled ? "bg-neutral-950 dark:bg-primary" : "bg-neutral-200 dark:bg-muted",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                                homeWebSearchEnabled ? "translate-x-4" : "translate-x-0",
+                              )}
+                            />
+                          </span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div ref={homeSkillMenuRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHomeSkillMenuOpen((open) => !open);
+                        setHomeMoreMenuOpen(false);
+                        setModelMenuOpen(false);
+                      }}
+                      className={cn(
+                        "flex h-8 shrink-0 items-center gap-1 rounded-xl px-2.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        homeSkillMenuOpen || homeSelectedSkill
+                          ? "bg-blue-50 text-blue-700"
+                          : "text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950 dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-foreground",
+                      )}
+                      aria-label="Skills"
+                      aria-expanded={homeSkillMenuOpen}
+                      title="Skills"
+                    >
+                      <BookOpen className="h-3.5 w-3.5 shrink-0" />
+                      <span>Skills</span>
+                      <ChevronDown
+                        className={cn(
+                          "h-3.5 w-3.5 shrink-0 transition",
+                          homeSkillMenuOpen ? "rotate-180" : "",
+                        )}
+                      />
+                    </button>
+                    {homeSkillMenuOpen ? (
+                      <div className="absolute bottom-11 left-0 z-50 flex w-[min(24rem,calc(100vw-2rem))] max-h-[28rem] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white text-left text-neutral-900 shadow-2xl dark:border-border dark:bg-card dark:text-foreground">
+                        <div className="border-b border-neutral-100 px-3 py-2 dark:border-border">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">
+                            Skills
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-neutral-950 dark:text-foreground">
+                            {homeSelectedSkill?.title || homeActiveSkillCategoryLabel}
+                          </div>
+                        </div>
+                        <div className="flex gap-1 overflow-x-auto border-b border-neutral-100 px-2 py-2 dark:border-border">
+                          {HOME_SKILL_CATEGORIES.map((category) => {
+                            const active = homeActiveSkillCategory === category.id;
+                            return (
+                              <button
+                                key={category.id}
+                                type="button"
+                                onClick={() => setHomeActiveSkillCategory(category.id)}
+                                className={cn(
+                                  "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                  active
+                                    ? "bg-neutral-950 text-white dark:bg-foreground dark:text-background"
+                                    : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200 hover:text-neutral-950 dark:bg-muted dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-foreground",
+                                )}
+                              >
+                                {category.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="custom-scrollbar max-h-72 overflow-y-auto p-2">
+                          {homeVisibleSkills.length ? (
+                            homeVisibleSkills.map((skill) => {
+                              const selected = homeSelectedSkill?.id === skill.id;
+                              return (
+                                <button
+                                  key={skill.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setHomeSelectedSkill(skill);
+                                    setPrompt((value) => (value.trim() ? value : skill.prompt));
+                                    setHomeSkillMenuOpen(false);
+                                  }}
+                                  className={cn(
+                                    "flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-accent",
+                                    selected ? "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" : "text-neutral-800 dark:text-foreground",
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                                      selected ? "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300" : "bg-neutral-100 text-neutral-500 dark:bg-muted dark:text-muted-foreground",
+                                    )}
+                                  >
+                                    <Sparkles className="h-4 w-4" />
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-sm font-semibold">
+                                      {skill.title}
+                                    </span>
+                                    <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-neutral-500 dark:text-muted-foreground">
+                                      {skill.description}
+                                    </span>
+                                  </span>
+                                  {selected ? <Check className="mt-2 h-4 w-4 shrink-0" /> : null}
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="px-3 py-6 text-center text-sm text-neutral-500 dark:text-muted-foreground">
+                              当前分类暂无 Skill
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="flex h-8 shrink-0 items-center gap-1 rounded-xl px-2.5 text-sm text-neutral-800 transition hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-foreground"
+                    aria-label="当前模式：Agent"
+                    title="Agent"
+                  >
                     <Bot className="h-3.5 w-3.5 shrink-0" />
-                    Agent
-                  </span>
-                  <span className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-xl px-2.5 text-sm">
-                    <Box className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{selectedModelName}</span>
-                  </span>
+                    <span>Agent</span>
+                  </button>
                 </div>
-                <button
-                  type="submit"
-                  disabled={!prompt.trim() || promptSending}
-                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-sm transition hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
-                  aria-label="发送到 Playground"
-                  title="发送到 Playground"
-                >
-                  {promptSending ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setHomeThinkingModeEnabled((value) => !value)}
+                    aria-pressed={homeThinkingModeEnabled}
+                    className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      homeThinkingModeEnabled
+                        ? "bg-neutral-950 text-white dark:bg-foreground dark:text-background"
+                        : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-950 dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-foreground",
+                    )}
+                    aria-label="思考模式"
+                    title="思考模式"
+                  >
+                    <Lightbulb className="h-4 w-4" />
+                  </button>
+                  <div ref={modelMenuRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModelMenuOpen((open) => !open);
+                        setHomeMoreMenuOpen(false);
+                        setHomeSkillMenuOpen(false);
+                      }}
+                      className={cn(
+                        "inline-flex h-8 w-8 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        modelMenuOpen
+                          ? "bg-neutral-950 text-white dark:bg-foreground dark:text-background"
+                          : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-950 dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-foreground",
+                      )}
+                      aria-label="选择模型"
+                      aria-expanded={modelMenuOpen}
+                      title={`模型：${selectedModelName}`}
+                    >
+                      <Box className="h-4 w-4" />
+                    </button>
+
+                    {modelMenuOpen ? (
+                      <div className="absolute bottom-11 right-[-2.75rem] z-50 w-72 max-w-[calc(100vw-6rem)] rounded-xl border border-neutral-200 bg-white p-2 text-left text-neutral-900 shadow-2xl dark:border-border dark:bg-card dark:text-foreground sm:right-0 sm:w-80 sm:max-w-[min(20rem,calc(100vw-1.5rem))]">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-neutral-950 dark:text-foreground">
+                            模型偏好
+                          </div>
+                          <button
+                            type="button"
+                            onClick={toggleHomeAutoModelPreference}
+                            className="flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-medium text-neutral-700 transition-colors hover:text-neutral-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-muted-foreground dark:hover:text-foreground"
+                            aria-pressed={autoModelPreference}
+                          >
+                            自动
+                            <span
+                              className={cn(
+                                "relative h-5 w-9 rounded-full transition-colors",
+                                autoModelPreference ? "bg-neutral-950" : "bg-neutral-200",
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                                  autoModelPreference ? "translate-x-4" : "translate-x-0",
+                                )}
+                              />
+                            </span>
+                          </button>
+                        </div>
+
+                        <div className="mb-2 grid grid-cols-4 rounded-md bg-neutral-100 p-0.5 dark:bg-muted">
+                          {HOME_MODEL_PREFERENCE_TABS.map((tab) => (
+                            <button
+                              key={tab.value}
+                              type="button"
+                              onClick={() => setModelPreferenceTab(tab.value)}
+                              className={cn(
+                                "h-7 rounded-sm text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                modelPreferenceTab === tab.value
+                                  ? "bg-white text-neutral-950 shadow-sm dark:bg-background dark:text-foreground"
+                                  : "text-neutral-600 hover:text-neutral-950 dark:text-muted-foreground dark:hover:text-foreground",
+                              )}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="mb-1.5 text-xs font-medium text-neutral-500 dark:text-muted-foreground">
+                          {HOME_MODEL_PREFERENCE_TABS.find((tab) => tab.value === modelPreferenceTab)?.label}
+                        </div>
+
+                        <div className="max-h-60 overflow-y-auto pr-0.5">
+                          {modelPreferenceOptions.length > 0 ? (
+                            modelPreferenceOptions.map((option) => {
+                              const Icon = option.icon;
+                              const officialLogo = getOfficialModelLogo(option);
+                              const selected =
+                                modelPreferenceTab === "cot"
+                                  ? selectedModelPoolIds.includes(option.id)
+                                  : isMediaModelPreferenceTab(modelPreferenceTab) &&
+                                    (selectedMediaModelIds[modelPreferenceTab] || []).includes(option.id);
+                              return (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  onClick={() => selectHomeModelPreference(option)}
+                                  aria-pressed={selected}
+                                  className={cn(
+                                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-neutral-800 transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-foreground dark:hover:bg-accent",
+                                    selected ? "bg-neutral-50 dark:bg-accent/70" : "",
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "flex h-8 shrink-0 items-center justify-center text-neutral-700 dark:text-muted-foreground",
+                                      officialLogo?.layout === "wordmark" ? "w-14" : "w-8",
+                                    )}
+                                  >
+                                    {officialLogo ? (
+                                      <OfficialModelLogo logo={officialLogo} variant="menu" />
+                                    ) : (
+                                      <Icon className="h-3.5 w-3.5" />
+                                    )}
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-sm font-medium text-neutral-800 dark:text-foreground">
+                                      {option.label}
+                                      {option.timeLabel ? (
+                                        <span className="ml-1.5 rounded bg-blue-100 px-1 py-0.5 text-[10px] font-medium text-blue-600">
+                                          {option.timeLabel}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                    <span className="mt-0.5 block line-clamp-2 text-xs leading-4 text-neutral-500 dark:text-muted-foreground">
+                                      {option.description}
+                                    </span>
+                                  </span>
+                                  {selected ? (
+                                    <Check className="h-3.5 w-3.5 shrink-0 text-neutral-800 dark:text-foreground" />
+                                  ) : null}
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="rounded-lg bg-neutral-50 px-3 py-5 text-center text-xs text-neutral-500 dark:bg-muted dark:text-muted-foreground">
+                              暂无接入 3D 模型
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!prompt.trim() || promptSending}
+                    className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-neutral-950 text-white shadow-sm transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-neutral-300 dark:bg-foreground dark:text-background dark:hover:bg-foreground/90 dark:disabled:bg-neutral-700 dark:disabled:text-neutral-300"
+                    aria-label="发送到 Playground"
+                    title="发送到 Playground"
+                  >
+                    {promptSending ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : !prompt.trim() ? (
+                      <AudioLines className="h-5 w-5" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </form>
 
           <div className="mt-4 w-full max-w-3xl overflow-hidden">
             <div className="custom-scrollbar -mx-5 flex snap-x gap-2 overflow-x-auto px-5 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0">
-              {activeModels.map((model) => {
-                const selected = model.id === selectedModel;
-                return (
-                  <button
-                    key={model.id}
-                    type="button"
-                    onClick={() => setSelectedModel(model.id)}
-                    className={cn(
-                      "inline-flex h-8 shrink-0 snap-start items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      selected
-                        ? "border-primary/55 bg-primary/10 text-primary"
-                        : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
-                    )}
-                    aria-pressed={selected}
-                  >
-                    {homeModelDisplayName(model)}
-                  </button>
-                );
-              })}
-              {toolboxLoading ? (
-                <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-background px-3 text-xs font-medium text-muted-foreground">
-                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                  同步工具箱
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="mt-6 flex flex-wrap justify-center gap-2 text-xs text-muted-foreground">
-            {[
-              { label: "身份", value: formatRole(me) },
-              { label: "组织", value: currentOrg?.name || "个人" },
-              { label: "项目", value: String(projects.length) },
-              {
-                label: "余额",
-                value: primaryWallet
-                  ? formatCredits(primaryWallet.creditsAvailable, primaryWallet.unlimitedCredits)
-                  : "--",
-              },
-            ].map((chip) => (
-              <span
-                key={chip.label}
-                className="inline-flex h-8 items-center gap-2 rounded-full border border-border bg-background px-3"
-              >
-                <span>{chip.label}</span>
-                <span className="font-medium text-foreground">{chip.value}</span>
-              </span>
-            ))}
-            <button
-              type="button"
-              onClick={() => void handleCreateProject()}
-              disabled={pendingCreate}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-background px-3 font-medium text-foreground transition hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-            >
-              {pendingCreate ? (
+            {activeModels.map((model) => {
+              const officialLogo = getOfficialModelLogo(model);
+              return (
+                <button
+                  key={model.id}
+                  type="button"
+                  onClick={() => {
+                    setAutoModelPreference(false);
+                    setSelectedModelPoolIds((current) => {
+                      const nextPool = toggleHomeSelectedModelId(current, model.id);
+                      if (nextPool.includes(model.id)) {
+                        setSelectedModel(model.id);
+                      } else if (!nextPool.includes(selectedModel)) {
+                        setSelectedModel(nextPool[0] || defaultHomeTextModelId);
+                      }
+                      return nextPool;
+                    });
+                  }}
+                  className={cn(
+                    "inline-flex h-8 shrink-0 snap-start items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    selectedModelPoolIds.includes(model.id)
+                      ? "border-primary/55 bg-primary/10 text-primary"
+                      : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  aria-pressed={selectedModelPoolIds.includes(model.id)}
+                >
+                  {officialLogo ? <OfficialModelLogo logo={officialLogo} variant="chip" /> : null}
+                  {model.name || model.id}
+                </button>
+              );
+            })}
+            {toolboxLoading ? (
+              <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-background px-3 text-xs font-medium text-muted-foreground">
                 <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Plus className="h-3.5 w-3.5" />
-              )}
-              新建项目
-            </button>
-            {walletEntitlement.canRecharge ? (
-              <button
-                type="button"
-                onClick={() => navigate("/wallet/recharge")}
-                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-background px-3 font-medium text-foreground transition hover:bg-accent"
-              >
-                充值
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
+                同步工具箱
+              </span>
             ) : null}
+            </div>
+          </div>
           </div>
         </section>
 
-        {/* ── Toolbox ── */}
-        {shouldShowToolboxSection ? (
-          <section className="mx-auto w-full max-w-5xl">
-            <div className="mb-4 flex items-end justify-between gap-4">
-              <div>
-                <h2 className="text-base font-semibold text-foreground">AI 工具箱</h2>
-              </div>
-              <span className="shrink-0 rounded-full border border-border bg-muted/35 px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                已接入 {readyToolCount}/{visibleToolboxTools.length}
-              </span>
-            </div>
-
-            {visibleToolboxTools.length ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleToolboxTools.map((tool) => {
-                  const visual = getToolVisual(tool);
-                  const Icon = visual.icon;
-                  const isPending = runningTool === tool.code;
-                  const locked = isToolLocked(tool.status);
-                  const requiresProject =
-                    !locked &&
-                    tool.code !== "video_character_replace" &&
-                    tool.code !== "character_replace" &&
-                    tool.code !== "upscale_restore" &&
-                    tool.code !== "storyboard_25";
-                  const disabled = locked || isPending || (requiresProject && !activeProject);
-
-                  return (
-                    <button
-                      key={tool.code}
-                      type="button"
-                      onClick={() => void handleToolbox(tool)}
-                      disabled={disabled}
-                      className={cn(
-                        "group relative flex min-h-[6.75rem] items-start gap-3 rounded-lg border border-border bg-background p-3.5 text-left shadow-sm transition-[transform,box-shadow,border-color,background-color] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        locked
-                          ? "cursor-not-allowed opacity-60"
-                          : "hover:-translate-y-1 hover:border-primary/45 hover:bg-card hover:shadow-[0_20px_45px_rgba(15,23,42,0.14)]",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 transition-transform duration-200 ease-out group-hover:scale-105",
-                          visual.tone,
-                        )}
-                      >
-                        {isPending ? (
-                          <LoaderCircle className="h-5 w-5 animate-spin" />
-                        ) : (
-                          <Icon className="h-5 w-5" />
-                        )}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-start justify-between gap-2">
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-semibold text-foreground">
-                              {tool.name}
-                            </span>
-                            <span className="mt-1 inline-flex rounded-full border border-border bg-muted/35 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                              {isPending ? "处理中…" : toolStatusLabel(tool.status)}
-                            </span>
-                          </span>
-                          {!locked ? (
-                            <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
-                          ) : null}
-                        </span>
-                        <span className="mt-2 line-clamp-2 block text-xs leading-5 text-muted-foreground">
-                          {requiresProject && !activeProject
-                            ? "选择一个项目后可启用该工具。"
-                            : tool.description}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : toolboxLoading ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <div
-                    key={`tool-skeleton-${index}`}
-                    className="min-h-[6.75rem] animate-pulse rounded-lg border border-border bg-muted/30"
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border bg-muted/25 px-6 py-8 text-sm text-muted-foreground">
-                {dashboardIssues.tools
-                  ? "工具箱能力正在恢复，请稍后自动重试或手动刷新。"
-                  : "工具箱能力暂时为空，请确认账号权限或稍后再试。"}
-              </div>
-            )}
-          </section>
-        ) : null}
-
-        {/* ── Projects ── */}
-        <section>
-          <div className="mb-6 flex items-end justify-between gap-4">
+        <section
+          className={cn(
+            "mx-auto mt-3 w-full max-w-5xl transform-gpu transition-all duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+            homePromptTransition ? "pointer-events-none translate-y-12 opacity-0 blur-sm" : "translate-y-0 opacity-100",
+          )}
+        >
+          <div className="mb-4 flex items-end justify-between gap-4">
             <div>
-              <h2 className="text-xl font-bold tracking-tight text-foreground">最近项目</h2>
-              <p className="mt-1 text-sm text-muted-foreground">当前身份可访问的全部项目</p>
+              <h2 className="text-base font-semibold text-foreground">AI 工具箱</h2>
             </div>
-            {orderedProjects.length > 4 ? (
-              <button
-                type="button"
-                onClick={() => void loadDashboard()}
-                disabled={refreshing}
-                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {refreshing ? "刷新中…" : "查看全部"}
-              </button>
-            ) : null}
+            <span className="shrink-0 rounded-full border border-border bg-muted/35 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+              已接入 {readyToolCount}/{visibleToolboxTools.length}
+            </span>
           </div>
 
-          {orderedProjects.length ? (
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {orderedProjects.map((project) => {
-                const isActive = project.id === currentProjectId;
-                return (
-                  <button
-                    key={project.id}
-                    type="button"
-                    onClick={() => openProject(project)}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {visibleToolboxTools.map((tool) => {
+              const visual = getToolVisual(tool);
+              const Icon = visual.icon;
+              const locked = isToolLocked(tool.status);
+              return (
+                <button
+                  key={tool.code}
+                  type="button"
+                  onClick={(event) => handleToolbox(tool, event.currentTarget)}
+                  disabled={locked}
+                  className={cn(
+                    "group relative flex min-h-[6.75rem] transform-gpu items-start gap-3 rounded-lg border border-border bg-background p-3.5 text-left shadow-sm transition-[transform,box-shadow,border-color,background-color] duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    locked
+                      ? "cursor-not-allowed opacity-60"
+                      : "hover:z-20 hover:border-primary/45 hover:bg-white hover:shadow-[0_22px_55px_rgba(15,23,42,0.16)] hover:[transform:perspective(900px)_translateY(-8px)_rotateX(5deg)_rotateY(-2deg)_scale(1.045)] dark:hover:bg-card",
+                  )}
+                >
+                  <span
                     className={cn(
-                      "group relative overflow-hidden rounded-2xl border text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/25",
-                      isActive
-                        ? "border-primary/30 bg-primary/[0.03] shadow-lg shadow-primary/10"
-                        : "border-white/[0.06] bg-white/[0.02]",
+                      "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 transition-transform duration-300 ease-out group-hover:scale-110",
+                      visual.tone,
                     )}
                   >
-                    <div className="relative aspect-[16/10] overflow-hidden bg-muted/30">
-                      <img
-                        src={projectCover(project)}
-                        alt={project.title}
-                        className="h-full w-full object-cover opacity-80 transition-all duration-500 group-hover:scale-105 group-hover:opacity-100"
-                        loading="lazy"
-                        decoding="async"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-
-                      <div className="absolute left-3 top-3 flex gap-2">
-                        <span className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-semibold ring-1 backdrop-blur-sm", statusTone(project.status))}>
-                          {formatStatus(project.status)}
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-start justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-foreground">
+                          {tool.name}
                         </span>
-                        {project.ownerType === "organization" ? (
-                          <span className="rounded-full bg-primary/20 px-2.5 py-0.5 text-[10px] font-semibold text-primary ring-1 ring-primary/20 backdrop-blur-sm">
-                            企业
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="absolute bottom-0 left-0 right-0 p-4">
-                        <h3 className="truncate text-sm font-semibold text-white drop-shadow-md">{project.title}</h3>
-                      </div>
-                    </div>
-
-                    <div className="p-4">
-                      <p className="line-clamp-2 min-h-[2.5rem] text-xs leading-5 text-muted-foreground">
-                        {project.summary || "项目摘要会显示在这里。"}
-                      </p>
-
-                      <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>{formatStep(project.currentStep)}</span>
-                        <span>{formatDateTime(project.updatedAt)}</span>
-                      </div>
-
-                      <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-white/[0.06]">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-primary/80 to-primary transition-[width] duration-500"
-                          style={{ width: `${project.progressPercent}%` }}
-                        />
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-white/[0.04] py-2 text-xs font-medium text-foreground/80 transition-colors group-hover:bg-primary/10 group-hover:text-primary">
-                        继续创作
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-
-              <button
-                type="button"
-                onClick={() => void handleCreateProject()}
-                disabled={pendingCreate}
-                className="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-white/[0.08] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/[0.02] hover:text-primary disabled:pointer-events-none disabled:opacity-50"
-              >
-                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white/[0.04]">
-                  {pendingCreate ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
-                </div>
-                <span className="text-sm font-medium">新建项目</span>
-                <span className="mt-1 text-xs text-muted-foreground">开始新的创作流程</span>
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.08] py-16 text-center">
-              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.04]">
-                <Film className="h-6 w-6 text-muted-foreground" />
-              </div>
-              <h3 className="text-base font-medium text-foreground">还没有项目</h3>
-              <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                点击下方按钮创建你的第一个漫剧项目，或先登录获取完整权限。
-              </p>
-              <button
-                type="button"
-                onClick={() => void handleCreateProject()}
-                disabled={pendingCreate}
-                className="mt-6 inline-flex h-10 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-md shadow-primary/20 transition-all hover:-translate-y-px disabled:pointer-events-none disabled:opacity-50"
-              >
-                {pendingCreate ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                创建第一个项目
-              </button>
-            </div>
-          )}
+                        <span className="mt-1 inline-flex rounded-full border border-border bg-muted/35 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                          {toolStatusLabel(tool.status)}
+                        </span>
+                      </span>
+                      {!locked ? (
+                        <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
+                      ) : null}
+                    </span>
+                    <span className="mt-2 line-clamp-2 block text-xs leading-5 text-muted-foreground">
+                      {tool.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </section>
 
-        <section className="mx-auto w-full max-w-5xl">
-          <details className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-left">
-            <summary className="cursor-pointer list-none text-sm font-medium text-muted-foreground marker:hidden">
-              <span className="inline-flex items-center gap-2">
-                <Wifi className="h-4 w-4" />
-                局域网共享入口
+        <section
+          className={cn(
+            "mx-auto mt-8 w-full max-w-5xl transform-gpu transition-all duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+            homePromptTransition ? "pointer-events-none translate-y-14 opacity-0 blur-sm" : "translate-y-0 opacity-100",
+          )}
+        >
+          <div className="mb-4 flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">智能画布项目</h2>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="rounded-full border border-border bg-muted/35 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                最近 {visibleCanvasProjects.length || 0}
               </span>
-            </summary>
-
-            <div className="mt-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
-                  运维和内测时使用，同一网络的同事可复制地址访问当前项目。
-                </p>
+              <div className="hidden items-center gap-1 sm:flex">
                 <button
                   type="button"
-                  onClick={() => void loadNetworkAccess()}
-                  disabled={networkAccessLoading}
-                  className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                  onClick={() => scrollCanvasCarousel("left")}
+                  disabled={canvasLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45"
+                  aria-label="向左查看画布项目"
+                  title="向左查看"
                 >
-                  <RefreshCw className={cn("h-3.5 w-3.5", networkAccessLoading ? "animate-spin" : "")} />
-                  刷新地址
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollCanvasCarousel("right")}
+                  disabled={canvasLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45"
+                  aria-label="向右查看画布项目"
+                  title="向右查看"
+                >
+                  <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
+            </div>
+          </div>
 
-              {networkAccess ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {visibleNetworkEntries.slice(0, 2).map((entry) => (
-                    <div
-                      key={`${entry.interfaceName}-${entry.address}`}
-                      className="rounded-lg border border-border bg-background p-3"
-                    >
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-                          {entry.interfaceName}
-                        </span>
-                        <span className="text-xs text-muted-foreground">{entry.address}</span>
-                      </div>
-                      {[
-                        { label: "首页", url: entry.homeUrl },
-                        { label: "画布", url: entry.canvasUrl },
-                      ].map((row) => {
-                        const copyKey = `${entry.address}:${row.label}`;
-                        const copied = copiedAccessKey === copyKey;
-                        return (
-                          <div
-                            key={copyKey}
-                            className="flex items-center gap-2 border-t border-border/70 py-2 first:border-t-0 first:pt-0 last:pb-0"
-                          >
-                            <span className="w-8 shrink-0 text-xs text-muted-foreground">{row.label}</span>
-                            <code className="min-w-0 flex-1 truncate text-xs text-foreground">
-                              {row.url}
-                            </code>
-                            <button
-                              type="button"
-                              onClick={() => void handleCopyAccess(row.url, copyKey)}
-                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition hover:text-foreground"
-                              aria-label={`复制${row.label}地址`}
-                            >
-                              {copied ? (
-                                <Check className="h-3.5 w-3.5 text-emerald-500" />
-                              ) : (
-                                <Copy className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
+          <div className="relative -mx-5 overflow-hidden px-5 sm:-mx-2 sm:px-2">
+            <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-gradient-to-r from-white to-transparent dark:from-background" />
+            <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white to-transparent dark:from-background" />
+            <div
+              ref={canvasCarouselRef}
+              className="custom-scrollbar -my-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 py-4"
+              aria-label="智能画布项目走马灯"
+            >
+              {canvasLoading ? (
+                Array.from({ length: 4 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="h-44 w-[14.5rem] shrink-0 snap-start animate-pulse rounded-lg border border-border bg-muted/40 sm:w-64"
+                  />
+                ))
               ) : (
-                <div className="rounded-lg border border-dashed border-border bg-background px-4 py-3 text-xs text-muted-foreground">
-                  {networkAccessLoading
-                    ? "正在检测当前机器可分享的访问地址..."
-                    : networkAccessError
-                      ? "未能读取局域网访问地址，请稍后重试。"
-                      : "暂未检测到可分享的访问地址。"}
-                </div>
+                <>
+                  <button
+                    type="button"
+                    onClick={openNewCanvas}
+                    className="flex h-44 w-[14.5rem] shrink-0 snap-start transform-gpu flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background text-muted-foreground shadow-sm transition-[transform,box-shadow,border-color,background-color,color] duration-300 ease-out hover:z-20 hover:border-primary/40 hover:bg-primary/5 hover:text-primary hover:shadow-[0_20px_45px_rgba(79,70,229,0.18)] hover:[transform:perspective(900px)_translateY(-8px)_rotateX(4deg)_scale(1.05)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-64"
+                  >
+                    <Plus className="h-6 w-6" />
+                    <span className="mt-4 text-sm font-medium">新建智能画布</span>
+                    <span className="mt-1 text-xs text-muted-foreground">从空白画布开始</span>
+                  </button>
+
+                  {visibleCanvasProjects.map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => openCanvasProject(project)}
+                      className="group relative h-44 w-[14.5rem] shrink-0 snap-start overflow-hidden rounded-lg border border-border bg-neutral-950 text-left shadow-sm outline-none transform-gpu transition-[transform,box-shadow,border-color] duration-300 ease-out hover:z-20 hover:border-primary/45 hover:shadow-[0_22px_55px_rgba(15,23,42,0.24)] hover:[transform:perspective(900px)_translateY(-9px)_rotateX(5deg)_rotateY(-3deg)_scale(1.06)] focus-visible:ring-2 focus-visible:ring-ring sm:w-64"
+                    >
+                      {project.thumbnailUrl ? (
+                        <img
+                          src={project.thumbnailUrl}
+                          alt={project.title}
+                          className="absolute inset-0 h-full w-full object-cover object-center transition duration-500 ease-out group-hover:scale-110"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 grid grid-cols-3 gap-px bg-border">
+                          {Array.from({ length: 6 }).map((_, index) => (
+                            <div
+                              key={index}
+                              className={cn(
+                                "bg-background",
+                                index % 3 === 0 ? "bg-primary/8" : "",
+                                index % 4 === 0 ? "bg-muted/70" : "",
+                              )}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/5 transition duration-300 group-hover:from-black/72 group-hover:via-black/12" />
+                      <div className="absolute left-3 top-3 rounded-full bg-white/92 px-2 py-0.5 text-[11px] font-medium text-foreground shadow-sm backdrop-blur dark:bg-card/90">
+                        智能画布
+                      </div>
+                      <div className="absolute inset-x-0 bottom-0 p-3 text-white">
+                        <div className="truncate text-sm font-semibold drop-shadow">
+                          {project.title || "Untitled"}
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-white/78">
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatCanvasDate(project.updatedAt || project.createdAt)}
+                          </span>
+                          {getCanvasProjectMetric(project, "nodeCount") !== null ? (
+                            <span>{getCanvasProjectMetric(project, "nodeCount")} 节点</span>
+                          ) : null}
+                          {getCanvasProjectMetric(project, "messageCount") !== null ? (
+                            <span>{getCanvasProjectMetric(project, "messageCount")} 对话</span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+
+                  {!visibleCanvasProjects.length ? (
+                    <div className="flex h-44 w-[18rem] shrink-0 snap-start flex-col justify-center rounded-lg border border-border bg-muted/25 p-5 text-sm text-muted-foreground sm:w-[28rem]">
+                      <Brush className="mb-3 h-5 w-5" />
+                      还没有保存的智能画布。创建后，最近的画布项目会显示在这里。
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
-          </details>
+          </div>
         </section>
       </div>
     </div>

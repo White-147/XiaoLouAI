@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Upload,
   Wallet,
+  X,
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -226,6 +227,12 @@ function buildQrImageUrl(codeUrl?: string | null) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(codeUrl)}`;
 }
 
+type WalletRechargeProps = {
+  variant?: "page" | "modal";
+  onClose?: () => void;
+  onRechargeComplete?: () => void;
+};
+
 function firstAvailableCapability(
   methods: WalletRechargeMethodCapability[],
   mode: WalletRechargeMode,
@@ -233,9 +240,14 @@ function firstAvailableCapability(
   return methods.find((method) => (mode === "demo_mock" ? method.demoMock.available : method.live.available)) ?? null;
 }
 
-export default function WalletRecharge() {
+export default function WalletRecharge({
+  variant = "page",
+  onClose,
+  onRechargeComplete,
+}: WalletRechargeProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
+  const isModal = variant === "modal";
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("annual");
   const [selectedPlanId, setSelectedPlanId] = useState("studio");
   const [paymentMethod, setPaymentMethod] = useState<WalletRechargePaymentMethod>("wechat_pay");
@@ -486,6 +498,7 @@ export default function WalletRecharge() {
         const ledgerResponse = await listWalletLedger(refreshed.walletId);
         setLedger(ledgerResponse.items.slice(0, 5));
       }
+      if (refreshed.status === "paid") onRechargeComplete?.();
       setNotice(refreshed.status === "paid" ? "支付状态已更新，积分已入账。" : "订单状态已刷新。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "刷新订单状态失败");
@@ -506,6 +519,7 @@ export default function WalletRecharge() {
         const ledgerResponse = await listWalletLedger(paid.walletId);
         setLedger(ledgerResponse.items.slice(0, 5));
       }
+      onRechargeComplete?.();
       setNotice("演示支付已确认，积分已完成 mock 入账。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "确认演示支付失败");
@@ -562,16 +576,17 @@ export default function WalletRecharge() {
   );
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-8 custom-scrollbar sm:px-8">
+    <div className={cn("custom-scrollbar flex-1 overflow-y-auto", isModal ? "px-4 py-5 sm:px-6" : "px-6 py-8 sm:px-8")}>
       <div className="mx-auto max-w-6xl space-y-8">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <button
               type="button"
-              onClick={() => navigate("/home")}
+              onClick={isModal ? onClose : () => navigate("/home")}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-border/70 bg-background/50 text-muted-foreground transition hover:text-foreground"
+              aria-label={isModal ? "关闭充值弹窗" : "返回首页"}
             >
-              <ArrowLeft className="h-4 w-4" />
+              {isModal ? <X className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
             </button>
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">充值钱包</h1>

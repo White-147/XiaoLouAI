@@ -134,6 +134,20 @@ export type PlaygroundChatInput = {
   conversationId?: string | null;
   message: string;
   model?: string;
+  webSearch?: boolean;
+  thinkingMode?: boolean;
+  context?: string;
+  mode?: string;
+  preferredImageToolId?: string;
+  allowedImageToolIds?: string[];
+  preferredImageAspectRatio?: string;
+  attachments?: Array<{
+    name: string;
+    size?: number;
+    type?: string;
+    content?: string;
+    contentTruncated?: boolean;
+  }>;
 };
 
 export type PlaygroundChatJob = {

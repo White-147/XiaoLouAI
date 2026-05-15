@@ -459,6 +459,22 @@ describe("createPlaygroundService", () => {
         conversationId: "synthetic conversation/1",
         message: "  Synthetic prompt  ",
         model: "  ",
+        webSearch: true,
+        thinkingMode: true,
+        context: "Synthetic skill context",
+        mode: "agent",
+        preferredImageToolId: "flux-kontext",
+        allowedImageToolIds: ["flux-kontext", "seedream-v4"],
+        preferredImageAspectRatio: "16:9",
+        attachments: [
+          {
+            name: "synthetic-brief.md",
+            size: 42,
+            type: "text/markdown",
+            content: "Synthetic attachment content",
+            contentTruncated: false,
+          },
+        ],
       }),
     ).resolves.toBe(startResult);
     expect(() => service.startPlaygroundChatJob({ message: "   " })).toThrow(
@@ -487,6 +503,22 @@ describe("createPlaygroundService", () => {
       conversationId: "synthetic conversation/1",
       message: "Synthetic prompt",
       model: "qwen-plus",
+      webSearch: true,
+      thinkingMode: true,
+      context: "Synthetic skill context",
+      mode: "agent",
+      preferredImageToolId: "flux-kontext",
+      allowedImageToolIds: ["flux-kontext", "seedream-v4"],
+      preferredImageAspectRatio: "16:9",
+      attachments: [
+        {
+          name: "synthetic-brief.md",
+          size: 42,
+          type: "text/markdown",
+          content: "Synthetic attachment content",
+          contentTruncated: false,
+        },
+      ],
     });
     expect(calls).toHaveLength(4);
     expect(ownerScopeCalls).toHaveLength(4);
@@ -659,6 +691,22 @@ describe("createPlaygroundService", () => {
           conversationId: "synthetic-stream-conversation",
           message: "  Synthetic streaming prompt  ",
           model: "qwen-plus",
+          webSearch: false,
+          thinkingMode: true,
+          context: "Synthetic stream context",
+          mode: "chat",
+          preferredImageToolId: "seedream-v4",
+          allowedImageToolIds: ["seedream-v4"],
+          preferredImageAspectRatio: "9:16",
+          attachments: [
+            {
+              name: "synthetic-stream.txt",
+              size: 96,
+              type: "text/plain",
+              content: "Synthetic stream attachment",
+              contentTruncated: false,
+            },
+          ],
         },
         (event) => {
           events.push(event);
@@ -690,6 +738,22 @@ describe("createPlaygroundService", () => {
       conversationId: "synthetic-stream-conversation",
       message: "Synthetic streaming prompt",
       model: "qwen-plus",
+      webSearch: false,
+      thinkingMode: true,
+      context: "Synthetic stream context",
+      mode: "chat",
+      preferredImageToolId: "seedream-v4",
+      allowedImageToolIds: ["seedream-v4"],
+      preferredImageAspectRatio: "9:16",
+      attachments: [
+        {
+          name: "synthetic-stream.txt",
+          size: 96,
+          type: "text/plain",
+          content: "Synthetic stream attachment",
+          contentTruncated: false,
+        },
+      ],
     });
     expect(calls[1]).toEqual({
       path: "/api/playground/memories?accountOwnerType=user&accountOwnerId=synthetic-actor",

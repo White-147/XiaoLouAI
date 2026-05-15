@@ -6,8 +6,27 @@ type RoutePrefetchEntry = {
 const pathMatches = (path: string, route: string) =>
   path === route || path.startsWith(`${route}/`);
 
+let playgroundPagePromise: Promise<typeof import("../../playground/Playground")> | null = null;
+
+export function loadPlaygroundPage() {
+  if (!playgroundPagePromise) {
+    playgroundPagePromise = import("../../playground/Playground").catch((error) => {
+      playgroundPagePromise = null;
+      throw error;
+    });
+  }
+
+  return playgroundPagePromise;
+}
+
+export function preloadPlaygroundPage() {
+  void loadPlaygroundPage().catch(() => {
+    // A later route visit can retry the dynamic import.
+  });
+}
+
 const routePrefetchEntries: RoutePrefetchEntry[] = [
-  { matches: (path) => pathMatches(path, "/playground"), loaders: [() => import("../../playground/Playground")] },
+  { matches: (path) => pathMatches(path, "/playground"), loaders: [loadPlaygroundPage] },
   { matches: (path) => pathMatches(path, "/enterprise"), loaders: [() => import("../../account-admin-enterprise/enterprise-console/EnterpriseConsole")] },
   { matches: (path) => pathMatches(path, "/wallet/recharge"), loaders: [() => import("../../wallet-payments-api-center/wallet-recharge/WalletRecharge")] },
   { matches: (path) => pathMatches(path, "/wallet/usage"), loaders: [() => import("../../wallet-payments-api-center/credit-usage/CreditUsage")] },

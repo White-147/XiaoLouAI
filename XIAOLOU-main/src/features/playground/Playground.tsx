@@ -101,19 +101,22 @@ export default function Playground() {
     .map((job) => `${job.id}:${job.status}`)
     .join("|");
   const visibleSkills = playgroundSkills.filter((skill) => skill.category === activeSkillCategory);
+  const isPlaygroundRoute =
+    location.pathname === "/playground" || location.pathname.startsWith("/playground/");
 
   useEffect(() => {
-    if (location.pathname !== "/playground") {
+    if (location.pathname.startsWith("/playground/")) {
       navigate(`/playground${location.search}`, { replace: true });
     }
   }, [location.pathname, location.search, navigate]);
 
   useEffect(() => {
+    if (!isPlaygroundRoute) return;
     const params = new URLSearchParams(location.search);
     const panel = params.get("panel");
     if (panel === "memory") setMemoryPanelOpen(true);
     if (panel === "history") setConversationPanelOpen(true);
-  }, [location.search]);
+  }, [isPlaygroundRoute, location.search]);
 
   const loadModels = useCallback(async () => {
     const response = await listPlaygroundModels();
@@ -146,6 +149,7 @@ export default function Playground() {
   }, []);
 
   useEffect(() => {
+    if (!isPlaygroundRoute) return;
     let active = true;
     setLoading(true);
     Promise.all([loadModels(), loadConversations(), loadMemories(), loadActiveJobs()])
@@ -185,9 +189,10 @@ export default function Playground() {
     return () => {
       active = false;
     };
-  }, [actorId, loadActiveJobs, loadConversations, loadMemories, loadModels, location.search]);
+  }, [actorId, isPlaygroundRoute, loadActiveJobs, loadConversations, loadMemories, loadModels, location.search]);
 
   useEffect(() => {
+    if (!isPlaygroundRoute) return;
     if (!hasActiveJobs) return;
 
     let cancelled = false;
@@ -232,7 +237,7 @@ export default function Playground() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeConversation?.id, activeJobIds, hasActiveJobs, loadActiveJobs, loadConversations, loadMemories]);
+  }, [activeConversation?.id, activeJobIds, hasActiveJobs, isPlaygroundRoute, loadActiveJobs, loadConversations, loadMemories]);
 
   const startNewConversation = () => {
     setActiveConversation(null);
@@ -305,6 +310,8 @@ export default function Playground() {
           conversationId: activeConversation?.id || null,
           message: submittedMessage,
           model: selectedModel,
+          mode: composerMode,
+          thinkingMode: thinkingModeEnabled,
         },
         (chatEvent) => {
           if (chatEvent.type === "conversation") {
@@ -578,7 +585,8 @@ export default function Playground() {
         ) : null}
 
         {messages.length === 0 ? (
-          <section className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
+          <section className="playground-singularity-stage flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
+            <div className="playground-singularity-panel flex w-full flex-col items-center">
             <div className="mb-8 text-center">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-950 text-white shadow-sm dark:bg-primary dark:text-primary-foreground">
                 <Sparkles className="h-6 w-6" />
@@ -604,6 +612,7 @@ export default function Playground() {
                   {prompt}
                 </button>
               ))}
+            </div>
             </div>
           </section>
         ) : (

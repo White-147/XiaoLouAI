@@ -1,5 +1,4 @@
 import {
-  Clock3,
   Download,
   Image as ImageIcon,
   LoaderCircle,
@@ -14,7 +13,6 @@ import {
 import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AssetSyncDialog,
-  AssetSyncDropzone,
   type AssetSyncDraft,
 } from "../../assets-media-projects/asset-sync/AssetSyncControls";
 import { CreateStudioSplitLayout } from "../../create-workbench/studio-layout/CreateStudioSplitLayout";
@@ -52,66 +50,34 @@ import {
   type Task,
 } from "./api/create-image";
 import { useCurrentProjectId } from "../../../lib/session";
-
-type ReferenceImageState = {
-  id: string;
-  url: string;
-  originalName: string;
-  source: "upload" | "asset";
-  assetId?: string | null;
-};
-
-const MAX_REFERENCE_IMAGES = 4;
-const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024;
-const MIN_REFERENCE_IMAGE_DIMENSION = 240;
-const MAX_REFERENCE_IMAGE_DIMENSION = 8000;
-const CREATE_IMAGE_REFERENCE_ACCEPT =
-  "image/jpeg,image/png,image/webp,image/bmp,image/x-ms-bmp,.jpg,.jpeg,.png,.webp,.bmp";
-// Invalid legacy image model IDs are intentionally excluded from the picker.
-// Vertex models use "vertex:" prefix as internalId; labels end with "+" per naming convention.
-// Yunwu-routed models keep their original names (no "+" suffix).
-const FALLBACK_IMAGE_MODELS = [
-  "doubao-seedream-5-0-260128",
-  "gemini-3-pro-image-preview",
-  "gemini-3.1-flash-image-preview",
-  "gemini-2.5-flash-image",
-  "vertex:gemini-3-pro-image-preview",
-  "vertex:gemini-3.1-flash-image-preview",
-] as const;
-
-const FALLBACK_IMAGE_MODEL_LABELS: Record<string, string> = {
-  "doubao-seedream-5-0-260128": "Seedream 5.0 (文/图/多参考)",
-  "gemini-3-pro-image-preview": "Gemini 3 Pro",
-  "gemini-3.1-flash-image-preview": "Gemini 3.1 Flash",
-  "gemini-2.5-flash-image": "Gemini 2.5 Flash",
-  // Vertex AI official models — "+" suffix to distinguish from Yunwu-routed variants
-  "vertex:gemini-3-pro-image-preview": "Gemini 3 Pro Image+",
-  "vertex:gemini-3.1-flash-image-preview": "Gemini 3.1 Flash Image+",
-};
-const FALLBACK_IMAGE_RESOLUTIONS = ["1K", "2K", "4K"] as const;
-const IMAGE_PAGE_SIZE = 9;
-const IMAGE_RECENT_TASK_TYPES = new Set([
-  "create_image_generate",
-  "storyboard_image_generate",
-  "asset_image_generate",
-  "storyboard_grid25_generate",
-  "character_replace",
-  "upscale_restore",
-]);
-
-type CreateImageModel = string;
-type CreateImageReferenceKind = "jpeg" | "png" | "webp" | "bmp" | "gif";
-
-function isImageRecentTask(task: Task) {
-  return IMAGE_RECENT_TASK_TYPES.has(task.type);
-}
-
-type LocalReferenceImageMetadata = {
-  kind: CreateImageReferenceKind;
-  width: number;
-  height: number;
-  hasTransparencyChannel: boolean;
-};
+import {
+  CREATE_IMAGE_REFERENCE_ACCEPT,
+  FALLBACK_IMAGE_MODEL_LABELS,
+  FALLBACK_IMAGE_MODELS,
+  FALLBACK_IMAGE_RESOLUTIONS,
+  IMAGE_PAGE_SIZE,
+  MAX_REFERENCE_IMAGES,
+  STYLE_OPTIONS,
+  buildImageAssetDraft,
+  formatTime,
+  imageModelHint,
+  isImageRecentTask,
+  mergeReferenceImages,
+  resolveEffectiveImageModel,
+  resultImage,
+  resultReferenceImages,
+  taskModel,
+  taskReference,
+  taskReferenceImages,
+  validateCreateImageReferenceFile,
+  type CreateImageModel,
+  type ReferenceImageState,
+} from "./imageCreateHelpers";
+import { ImageCreatePreviewModal } from "./ImageCreatePreviewModal";
+import {
+  ImageCreateClearTasksModal,
+  ImageCreateRecentTasksPanel,
+} from "./ImageCreateRecentTasksPanel";
 
 function ChoiceRadioGroup({
   name,
@@ -148,362 +114,6 @@ function ChoiceRadioGroup({
     </div>
   );
 }
-
-function fileExtension(name: string) {
-  const match = /\.([^.]+)$/.exec(name);
-  return match ? `.${match[1].toLowerCase()}` : "";
-}
-
-function detectCreateImageReferenceKind(
-  file: File,
-  bytes: Uint8Array,
-): CreateImageReferenceKind | null {
-  const normalizedType = file.type.toLowerCase();
-  if (normalizedType.includes("jpeg")) return "jpeg";
-  if (normalizedType.includes("png")) return "png";
-  if (normalizedType.includes("webp")) return "webp";
-  if (normalizedType.includes("bmp")) return "bmp";
-  if (normalizedType.includes("gif")) return "gif";
-
-  const extension = fileExtension(file.name);
-  if (extension === ".jpg" || extension === ".jpeg") return "jpeg";
-  if (extension === ".png") return "png";
-  if (extension === ".webp") return "webp";
-  if (extension === ".bmp") return "bmp";
-  if (extension === ".gif") return "gif";
-
-  if (
-    bytes.length >= 8 &&
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47 &&
-    bytes[4] === 0x0d &&
-    bytes[5] === 0x0a &&
-    bytes[6] === 0x1a &&
-    bytes[7] === 0x0a
-  ) {
-    return "png";
-  }
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return "jpeg";
-  if (
-    bytes.length >= 6 &&
-    (String.fromCharCode(...bytes.slice(0, 6)) === "GIF87a" ||
-      String.fromCharCode(...bytes.slice(0, 6)) === "GIF89a")
-  ) {
-    return "gif";
-  }
-  if (bytes.length >= 2 && String.fromCharCode(bytes[0], bytes[1]) === "BM") return "bmp";
-  if (
-    bytes.length >= 12 &&
-    String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
-    String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
-  ) {
-    return "webp";
-  }
-  return null;
-}
-
-function readUInt24LE(bytes: Uint8Array, offset: number) {
-  if (offset + 3 > bytes.length) return null;
-  return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
-}
-
-function parsePngMetadata(bytes: Uint8Array): LocalReferenceImageMetadata | null {
-  if (bytes.length < 33) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const width = view.getUint32(16);
-  const height = view.getUint32(20);
-  const colorType = bytes[25];
-  let hasTransparencyChannel = colorType === 4 || colorType === 6;
-  let offset = 8;
-
-  while (offset + 12 <= bytes.length) {
-    const chunkLength = view.getUint32(offset);
-    const chunkType = String.fromCharCode(...bytes.slice(offset + 4, offset + 8));
-    const nextOffset = offset + 12 + chunkLength;
-    if (nextOffset > bytes.length) break;
-    if (chunkType === "tRNS") {
-      hasTransparencyChannel = true;
-      break;
-    }
-    if (chunkType === "IEND") break;
-    offset = nextOffset;
-  }
-
-  return { kind: "png", width, height, hasTransparencyChannel };
-}
-
-function parseJpegMetadata(bytes: Uint8Array): LocalReferenceImageMetadata | null {
-  if (bytes.length < 4) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let offset = 2;
-
-  while (offset + 3 < bytes.length) {
-    if (bytes[offset] !== 0xff) {
-      offset += 1;
-      continue;
-    }
-    const marker = bytes[offset + 1];
-    if (marker === 0xd8 || marker === 0x01) {
-      offset += 2;
-      continue;
-    }
-    if (marker >= 0xd0 && marker <= 0xd9) {
-      offset += 2;
-      continue;
-    }
-    if (offset + 4 > bytes.length) break;
-    const segmentLength = view.getUint16(offset + 2);
-    if (segmentLength < 2 || offset + 2 + segmentLength > bytes.length) break;
-    if (
-      (marker >= 0xc0 && marker <= 0xc3) ||
-      (marker >= 0xc5 && marker <= 0xc7) ||
-      (marker >= 0xc9 && marker <= 0xcb) ||
-      (marker >= 0xcd && marker <= 0xcf)
-    ) {
-      if (offset + 9 > bytes.length) break;
-      return {
-        kind: "jpeg",
-        width: view.getUint16(offset + 7),
-        height: view.getUint16(offset + 5),
-        hasTransparencyChannel: false,
-      };
-    }
-    offset += 2 + segmentLength;
-  }
-
-  return null;
-}
-
-function parseWebpMetadata(bytes: Uint8Array): LocalReferenceImageMetadata | null {
-  if (bytes.length < 30) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const chunkType = String.fromCharCode(...bytes.slice(12, 16));
-
-  if (chunkType === "VP8X") {
-    const widthMinusOne = readUInt24LE(bytes, 24);
-    const heightMinusOne = readUInt24LE(bytes, 27);
-    if (widthMinusOne == null || heightMinusOne == null) return null;
-    return {
-      kind: "webp",
-      width: widthMinusOne + 1,
-      height: heightMinusOne + 1,
-      hasTransparencyChannel: false,
-    };
-  }
-
-  if (chunkType === "VP8L") {
-    if (bytes[20] !== 0x2f || bytes.length < 25) return null;
-    const b0 = bytes[21];
-    const b1 = bytes[22];
-    const b2 = bytes[23];
-    const b3 = bytes[24];
-    return {
-      kind: "webp",
-      width: 1 + (((b1 & 0x3f) << 8) | b0),
-      height: 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6)),
-      hasTransparencyChannel: false,
-    };
-  }
-
-  if (chunkType === "VP8 ") {
-    if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return null;
-    return {
-      kind: "webp",
-      width: view.getUint16(26, true) & 0x3fff,
-      height: view.getUint16(28, true) & 0x3fff,
-      hasTransparencyChannel: false,
-    };
-  }
-
-  return null;
-}
-
-function parseBmpMetadata(bytes: Uint8Array): LocalReferenceImageMetadata | null {
-  if (bytes.length < 26) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const dibHeaderSize = view.getUint32(14, true);
-  if (dibHeaderSize === 12) {
-    return {
-      kind: "bmp",
-      width: view.getUint16(18, true),
-      height: view.getUint16(20, true),
-      hasTransparencyChannel: false,
-    };
-  }
-  return {
-    kind: "bmp",
-    width: Math.abs(view.getInt32(18, true)),
-    height: Math.abs(view.getInt32(22, true)),
-    hasTransparencyChannel: false,
-  };
-}
-
-function readLocalReferenceImageMetadata(
-  file: File,
-  bytes: Uint8Array,
-): LocalReferenceImageMetadata | null {
-  const kind = detectCreateImageReferenceKind(file, bytes);
-  if (!kind) return null;
-  if (kind === "png") return parsePngMetadata(bytes);
-  if (kind === "jpeg") return parseJpegMetadata(bytes);
-  if (kind === "webp") return parseWebpMetadata(bytes);
-  if (kind === "bmp") return parseBmpMetadata(bytes);
-  if (kind === "gif") return { kind, width: 1, height: 1, hasTransparencyChannel: false };
-  return null;
-}
-
-async function validateCreateImageReferenceFile(file: File) {
-  if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
-    return `${file.name} 超过 10MB，请压缩后再上传。`;
-  }
-
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const kind = detectCreateImageReferenceKind(file, bytes);
-  if (kind === "gif") {
-    return `${file.name} 是 GIF 格式，当前仅支持 JPG/JPEG、PNG（不支持透明通道）、WEBP、BMP。`;
-  }
-
-  const metadata = readLocalReferenceImageMetadata(file, bytes);
-  if (!metadata) {
-    return `${file.name} 不是受支持的参考图格式，请上传 JPG/JPEG、PNG、WEBP 或 BMP。`;
-  }
-
-  if (metadata.kind === "png" && metadata.hasTransparencyChannel) {
-    return `${file.name} 是带透明通道的 PNG，当前参考图模式不建议透明 PNG，请先去除透明背景。`;
-  }
-
-  if (
-    metadata.width < MIN_REFERENCE_IMAGE_DIMENSION ||
-    metadata.width > MAX_REFERENCE_IMAGE_DIMENSION ||
-    metadata.height < MIN_REFERENCE_IMAGE_DIMENSION ||
-    metadata.height > MAX_REFERENCE_IMAGE_DIMENSION
-  ) {
-    return `${file.name} 的尺寸为 ${metadata.width}x${metadata.height}，宽高都需要在 240 到 8000 像素之间。`;
-  }
-
-  return null;
-}
-
-function resolveEffectiveImageModel(referenceCount: number): string {
-  void referenceCount;
-  return "doubao-seedream-5-0-260128";
-}
-
-function imageModelHint(referenceCount: number) {
-  if (referenceCount > 1) {
-    return "已上传多张参考图，推荐使用 Seedream 5.0 进行多参考融合生成。";
-  }
-  if (referenceCount === 1) {
-    return "已上传 1 张参考图，推荐使用 Seedream 5.0 进行图生图。";
-  }
-  return "推荐使用 Seedream 5.0（火山引擎豆包）进行文生图，支持图生图与多参考生图。";
-}
-
-function resultImage(item: CreateImageResult) {
-  return getGeneratedMediaUrl(item.imageUrl);
-}
-
-function formatTime(value: string) {
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-function taskReferenceImages(task: Task) {
-  const list = Array.isArray(task.metadata?.referenceImageUrls)
-    ? task.metadata.referenceImageUrls.filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
-      )
-    : [];
-  if (list.length) return list.slice(0, MAX_REFERENCE_IMAGES);
-  const value = task.metadata?.referenceImageUrl;
-  return typeof value === "string" && value.trim() ? [value] : [];
-}
-
-function taskReference(task: Task) {
-  return getGeneratedMediaUrl(taskReferenceImages(task)[0]) || null;
-}
-
-function taskModel(task: Task) {
-  const value = task.metadata?.model ?? task.metadata?.imageModel;
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function resultReferenceImages(item: CreateImageResult) {
-  const list = Array.isArray(item.referenceImageUrls)
-    ? item.referenceImageUrls.filter(
-        (value): value is string => typeof value === "string" && value.trim().length > 0,
-      )
-    : [];
-  if (list.length) {
-    return list
-      .slice(0, MAX_REFERENCE_IMAGES)
-      .map((url) => getGeneratedMediaUrl(url))
-      .filter((url): url is string => Boolean(url));
-  }
-  const fallback = getGeneratedMediaUrl(item.referenceImageUrl);
-  return fallback ? [fallback] : [];
-}
-
-function mergeReferenceImages(
-  current: ReferenceImageState[],
-  incoming: ReferenceImageState[],
-) {
-  const merged = [...current];
-
-  for (const next of incoming) {
-    const duplicateIndex = merged.findIndex(
-      (item) => item.url === next.url || (next.assetId && item.assetId === next.assetId),
-    );
-    if (duplicateIndex >= 0) {
-      merged.splice(duplicateIndex, 1);
-    }
-    merged.push(next);
-  }
-
-  return merged.slice(-MAX_REFERENCE_IMAGES);
-}
-
-function summarizePrompt(value: string, fallback: string) {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (!normalized) return fallback;
-  return normalized.length > 18 ? `${normalized.slice(0, 18)}...` : normalized;
-}
-
-function buildImageAssetDraft(item: CreateImageResult): AssetSyncDraft {
-  const imageUrl = resultImage(item);
-
-  return {
-    id: item.id,
-    mediaKind: "image",
-    previewUrl: imageUrl,
-    mediaUrl: imageUrl,
-    prompt: item.prompt,
-    model: item.model,
-    aspectRatio: item.aspectRatio,
-    taskId: item.taskId ?? null,
-    referenceImageUrl: item.referenceImageUrl ?? null,
-    defaultAssetType: "style",
-    sourceModule: "image_create",
-    defaultName: summarizePrompt(item.prompt, `图片素材 ${formatTime(item.createdAt)}`),
-    defaultDescription: [
-      item.prompt,
-      `来源：图片创作`,
-      `模型：${item.model}`,
-      `风格：${item.style}`,
-      `比例：${item.aspectRatio}`,
-      `清晰度：${item.resolution}`,
-    ].join("\n"),
-  };
-}
-
-const STYLE_OPTIONS = ["电影感", "赛博朋克", "古风写意", "写实摄影"];
 
 export default function ImageCreate() {
   const actorId = useActorId();
@@ -1434,271 +1044,45 @@ export default function ImageCreate() {
               ) : null}
             </div>
 
-            <aside className="glass-panel rounded-2xl p-4">
-              <AssetSyncDropzone
-                dragActive={syncDragActive}
-                syncing={syncingAsset}
-                notice={syncNotice}
-                onDragOver={handleSyncDragOver}
-                onDragLeave={handleSyncDragLeave}
-                onDrop={handleSyncDrop}
-              />
-              <div className="mb-4 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Clock3 className="h-4 w-4 text-primary" />
-                  <h3 className="text-sm font-medium">最近任务</h3>
-                </div>
-                {recentTasks.length ? (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmClearTasksOpen(true)}
-                    className="rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    清空
-                  </button>
-                ) : null}
-              </div>
-              <div className="space-y-3">
-                {recentTasks.map((task) => {
-                  const failureReason = getTaskFailureReason(task);
-                  return (
-                  <div
-                    key={task.id}
-                    className={cn(
-                      "rounded-xl border p-3",
-                      failureReason
-                        ? "border-rose-500/30 bg-rose-500/5"
-                        : "border-border bg-muted/20",
-                    )}
-                  >
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-xs font-medium">{task.id}</span>
-                      <div className="flex items-center gap-1">
-                        <span className={getTaskStatusPillClass(task)}>
-                          {formatTaskStatusLabel(task)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => void handleDismissTask(task.id)}
-                          className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          title="从列表中移除此任务"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    </div>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">
-                      {task.inputSummary || "暂无任务描述"}
-                    </p>
-                    {failureReason ? (
-                      <div className="mt-2 rounded-md border border-rose-600/40 bg-rose-500/15 p-2 text-[11px] leading-5 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
-                        <div className="mb-0.5 font-semibold text-rose-800 dark:text-rose-300">失败原因</div>
-                        <div className="whitespace-pre-wrap break-words">{failureReason}</div>
-                      </div>
-                    ) : null}
-                    {taskModel(task) ? (
-                      <div className="mt-2 text-[11px] text-muted-foreground">
-                        模型：{taskModel(task)}
-                      </div>
-                    ) : null}
-                    {taskReferenceImages(task).length > 1 ? (
-                      <div className="mt-2 text-[11px] text-muted-foreground">
-                        参考图：{taskReferenceImages(task).length} 张
-                      </div>
-                    ) : null}
-                    {taskReference(task) ? (
-                      <div className="mt-2 flex items-center gap-2">
-                        <img
-                          src={taskReference(task) || undefined}
-                          alt="reference"
-                          className="h-8 w-8 rounded object-cover"
-                          loading="lazy"
-                          decoding="async"
-                          referrerPolicy="no-referrer"
-                        />
-                        <span className="text-[11px] text-muted-foreground">已关联参考图</span>
-                      </div>
-                    ) : null}
-                    <div className="mt-2 text-[11px] text-muted-foreground">
-                      {formatTime(task.createdAt)}
-                    </div>
-                  </div>
-                  );
-                })}
-                {!recentTasks.length ? (
-                  <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
-                    还没有生成任务
-                  </div>
-                ) : null}
-              </div>
-            </aside>
+            <ImageCreateRecentTasksPanel
+              recentTasks={recentTasks}
+              syncDragActive={syncDragActive}
+              syncingAsset={syncingAsset}
+              syncNotice={syncNotice}
+              onSyncDragOver={handleSyncDragOver}
+              onSyncDragLeave={handleSyncDragLeave}
+              onSyncDrop={handleSyncDrop}
+              onOpenClearTasks={() => setConfirmClearTasksOpen(true)}
+              onDismissTask={handleDismissTask}
+              getTaskFailureReason={getTaskFailureReason}
+              formatTaskStatusLabel={formatTaskStatusLabel}
+              getTaskStatusPillClass={getTaskStatusPillClass}
+              taskModel={taskModel}
+              taskReference={taskReference}
+              taskReferenceImages={taskReferenceImages}
+              formatTime={formatTime}
+            />
           </div>
         </div>
       </section>
 
-      {previewItem ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
-          <div className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <div>
-                <h3 className="text-lg font-semibold">结果预览</h3>
-                <p className="text-xs text-muted-foreground">{previewItem.taskId || previewItem.id}</p>
-              </div>
-              <button
-                onClick={() => setPreviewItem(null)}
-                className="rounded-md p-2 transition-colors hover:bg-accent"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="grid gap-6 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="overflow-hidden rounded-xl border border-border bg-black">
-                {resultImage(previewItem) ? (
-                  <img
-                    src={resultImage(previewItem) || undefined}
-                    alt={previewItem.prompt}
-                    className="h-full w-full object-contain"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <GeneratedMediaPlaceholder
-                    kind="image"
-                    className="h-full min-h-[360px] w-full bg-black text-zinc-300"
-                    description="当前结果还没有生成真实图片"
-                  />
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <div className="mb-1 text-xs text-muted-foreground">提示词</div>
-                  <p className="text-sm leading-6">{previewItem.prompt}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="rounded-lg border border-border p-3">
-                    <div className="text-muted-foreground">模型</div>
-                    <div className="mt-1 font-medium">{previewItem.model}</div>
-                  </div>
-                  <div className="rounded-lg border border-border p-3">
-                    <div className="text-muted-foreground">清晰度</div>
-                    <div className="mt-1 font-medium">{previewItem.resolution}</div>
-                  </div>
-                  <div className="rounded-lg border border-border p-3">
-                    <div className="text-muted-foreground">比例</div>
-                    <div className="mt-1 font-medium">{previewItem.aspectRatio}</div>
-                  </div>
-                  <div className="rounded-lg border border-border p-3">
-                    <div className="text-muted-foreground">风格</div>
-                    <div className="mt-1 font-medium">{previewItem.style}</div>
-                  </div>
-                </div>
-                {previewReferences.length ? (
-                  <div className="space-y-2">
-                    <div className="text-xs text-muted-foreground">{previewReferences.length} 张参考图</div>
-                    {previewReferences.length > 1 ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        {previewReferences.map((url, index) => (
-                          <div
-                            key={`${previewItem.id}_preview_ref_${index}`}
-                            className="overflow-hidden rounded-lg border border-border bg-muted/20"
-                          >
-                            <img
-                              src={url}
-                              alt={`reference-${index + 1}`}
-                              className="aspect-video w-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="flex items-center justify-between px-3 py-2 text-[11px] text-muted-foreground">
-                              <span>参考图 {index + 1}</span>
-                              {index === 0 ? <span className="text-primary">主参考</span> : null}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="text-xs text-muted-foreground">参考图</div>
-                    {previewReferences[0] ? (
-                      <img
-                        src={previewReferences[0]}
-                        alt="reference"
-                        className="w-full rounded-lg border border-border object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : null}
-                  </div>
-                ) : null}
-                {resultImage(previewItem) ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url = resultImage(previewItem);
-                      if (!url) return;
-                      void downloadMediaFile(url, guessMediaFilename(url, previewItem.id, "image"));
-                    }}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                  >
-                    <Download className="h-4 w-4" />
-                    下载到本地
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {confirmClearTasksOpen ? (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl">
-            <h3 className="text-base font-semibold">确认清空最近任务？</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              该操作会删除当前账号下的最近任务记录，且不可恢复。
-            </p>
-            <div className="mt-5 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setConfirmClearTasksOpen(false)}
-                className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleClearTasks()}
-                className="rounded-md bg-destructive px-3 py-1.5 text-sm text-destructive-foreground hover:bg-destructive/90"
-              >
-                确认清空
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {referencePreview ? (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
-          <div className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4">
-              <div>
-                <h3 className="text-lg font-semibold">参考图预览</h3>
-                <p className="text-xs text-muted-foreground">{referencePreview.title}</p>
-              </div>
-              <button
-                onClick={() => setReferencePreview(null)}
-                className="rounded-md p-2 transition-colors hover:bg-accent"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex min-h-[360px] items-center justify-center overflow-auto bg-black p-4">
-              <img
-                src={getGeneratedMediaUrl(referencePreview.url) || undefined}
-                alt={referencePreview.title}
-                className="max-h-[80vh] max-w-full object-contain"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ImageCreatePreviewModal
+        previewItem={previewItem}
+        previewReferences={previewReferences}
+        referencePreview={referencePreview}
+        onClosePreview={() => setPreviewItem(null)}
+        onCloseReferencePreview={() => setReferencePreview(null)}
+        onDownloadPreview={(item) => {
+          const url = resultImage(item);
+          if (!url) return;
+          void downloadMediaFile(url, guessMediaFilename(url, item.id, "image"));
+        }}
+      />
+      <ImageCreateClearTasksModal
+        open={confirmClearTasksOpen}
+        onClose={() => setConfirmClearTasksOpen(false)}
+        onConfirm={handleClearTasks}
+      />
       </CreateStudioSplitLayout>
 
       <AssetSyncDialog

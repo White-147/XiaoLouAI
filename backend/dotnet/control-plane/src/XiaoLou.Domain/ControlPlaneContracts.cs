@@ -315,6 +315,23 @@ public sealed record PlaygroundChatRequest : AccountScope
     public string? ConversationId { get; init; }
     public string? Message { get; init; }
     public string? Model { get; init; }
+    public bool? WebSearch { get; init; }
+    public bool? ThinkingMode { get; init; }
+    public string? Context { get; init; }
+    public string? Mode { get; init; }
+    public string? PreferredImageToolId { get; init; }
+    public IReadOnlyList<string>? AllowedImageToolIds { get; init; }
+    public string? PreferredImageAspectRatio { get; init; }
+    public IReadOnlyList<PlaygroundChatAttachment>? Attachments { get; init; }
+}
+
+public sealed record PlaygroundChatAttachment
+{
+    public string? Name { get; init; }
+    public long? Size { get; init; }
+    public string? Type { get; init; }
+    public string? Content { get; init; }
+    public bool? ContentTruncated { get; init; }
 }
 
 public sealed record PlaygroundMemoryPreferenceRequest : AccountScope
