@@ -169,6 +169,8 @@ if (Test-Path -LiteralPath $loadEnv) {
 
 $cacheRoot = Join-Path $runtimeStateRoot "xiaolou-cache"
 $tempRoot = Join-Path $runtimeStateRoot "xiaolou-temp"
+$sharedCacheRoot = if ($env:XIAOLOU_SHARED_CACHE_ROOT) { $env:XIAOLOU_SHARED_CACHE_ROOT } else { "D:\soft\cache" }
+$sharedProgramRoot = if ($env:XIAOLOU_SHARED_PROGRAM_ROOT) { $env:XIAOLOU_SHARED_PROGRAM_ROOT } else { "D:\soft\program" }
 $controlApiUrls = if ($env:CONTROL_API_URLS) { $env:CONTROL_API_URLS } else { "http://127.0.0.1:4100" }
 $controlApiBaseUrl = if ($env:CONTROL_API_BASE_URL) { $env:CONTROL_API_BASE_URL.TrimEnd("/") } else { Get-FirstHttpUrl $controlApiUrls }
 $dotnetRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($DotnetExe))
@@ -266,6 +268,8 @@ $machineEnv = [ordered]@{
   XIAOLOU_ROOT = $Root
   XIAOLOU_RUNTIME_ROOT = $runtimeStateRoot
   XIAOLOU_REPO_ROOT = $repoRoot
+  XIAOLOU_SHARED_CACHE_ROOT = $sharedCacheRoot
+  XIAOLOU_SHARED_PROGRAM_ROOT = $sharedProgramRoot
   DOTNET_EXE = $DotnetExe
   POWERSHELL_EXE = $Pwsh
   PYTHON_EXE = $PythonExe
@@ -330,35 +334,37 @@ $machineEnv = [ordered]@{
   LOCAL_TEMP_DIR = $tempRoot
   LOG_DIR = (Join-Path $runtimeStateRoot "xiaolou-logs")
   BACKUP_DIR = (Join-Path $runtimeStateRoot "xiaolou-backups")
-  XDG_CACHE_HOME = (Join-Path $cacheRoot "tooling-cache")
+  XDG_CACHE_HOME = (Join-Path $sharedCacheRoot "tooling-cache")
   TMP = $tempRoot
   TEMP = $tempRoot
-  DOTNET_CLI_HOME = (Join-Path $cacheRoot "dotnet-cli-home")
-  DOTNET_BUNDLE_EXTRACT_BASE_DIR = (Join-Path $cacheRoot "dotnet-bundle")
-  NUGET_PACKAGES = (Join-Path $cacheRoot "nuget\packages")
-  NUGET_HTTP_CACHE_PATH = (Join-Path $cacheRoot "nuget\v3-cache")
-  NUGET_PLUGINS_CACHE_PATH = (Join-Path $cacheRoot "nuget\plugins-cache")
+  DOTNET_CLI_HOME = (Join-Path $sharedProgramRoot "dotnet-userhome")
+  DOTNET_BUNDLE_EXTRACT_BASE_DIR = (Join-Path $sharedCacheRoot "dotnet-bundle")
+  NUGET_PACKAGES = (Join-Path $sharedCacheRoot "nuget\packages")
+  NUGET_HTTP_CACHE_PATH = (Join-Path $sharedCacheRoot "nuget\v3-cache")
+  NUGET_PLUGINS_CACHE_PATH = (Join-Path $sharedCacheRoot "nuget\plugins-cache")
   NUGET_SCRATCH = (Join-Path $tempRoot "NuGetScratch")
-  NPM_CONFIG_CACHE = (Join-Path $cacheRoot "npm")
-  NPM_CONFIG_PREFIX = (Join-Path $cacheRoot "node-global")
-  PIP_CACHE_DIR = (Join-Path $cacheRoot "pip")
-  PIP_CONFIG_FILE = (Join-Path $cacheRoot "pip\pip.ini")
-  PYTHONPYCACHEPREFIX = (Join-Path $cacheRoot "python-pycache")
-  PYTHONUSERBASE = (Join-Path $cacheRoot "python-userbase")
-  UV_CACHE_DIR = (Join-Path $cacheRoot "uv")
-  POETRY_CACHE_DIR = (Join-Path $cacheRoot "poetry")
-  PIPENV_CACHE_DIR = (Join-Path $cacheRoot "pipenv")
-  PLAYWRIGHT_BROWSERS_PATH = (Join-Path $cacheRoot "playwright-browsers")
-  MAVEN_USER_HOME = (Join-Path $cacheRoot "maven\.m2")
-  GRADLE_USER_HOME = (Join-Path $cacheRoot "gradle-user-home")
-  COURSIER_CACHE = (Join-Path $cacheRoot "coursier-cache")
-  SBT_OPTS = "-Dsbt.boot.directory=$(Join-Path $cacheRoot 'scala\sbt-boot') -Dsbt.global.base=$(Join-Path $cacheRoot 'scala\sbt-global') -Dsbt.ivy.home=$(Join-Path $cacheRoot 'scala\ivy2')"
-  HF_HOME = (Join-Path $cacheRoot "huggingface")
-  HF_HUB_CACHE = (Join-Path $cacheRoot "huggingface\hub")
-  HUGGINGFACE_HUB_CACHE = (Join-Path $cacheRoot "huggingface\hub")
-  TRANSFORMERS_CACHE = (Join-Path $cacheRoot "huggingface\transformers")
-  TORCH_HOME = (Join-Path $cacheRoot "torch")
-  MODELSCOPE_CACHE = (Join-Path $cacheRoot "modelscope")
+  NPM_CONFIG_CACHE = (Join-Path $sharedCacheRoot "npm")
+  NPM_CONFIG_PREFIX = (Join-Path $sharedProgramRoot "nodejs\node_global")
+  PIP_CACHE_DIR = (Join-Path $sharedCacheRoot "pip")
+  PIP_CONFIG_FILE = (Join-Path $sharedCacheRoot "pip\pip.ini")
+  PYTHONPYCACHEPREFIX = (Join-Path $sharedCacheRoot "python-pycache")
+  PYTHONUSERBASE = (Join-Path $sharedProgramRoot "Python\UserBase")
+  UV_CACHE_DIR = (Join-Path $sharedCacheRoot "uv")
+  POETRY_CACHE_DIR = (Join-Path $sharedCacheRoot "poetry")
+  PIPENV_CACHE_DIR = (Join-Path $sharedCacheRoot "pipenv")
+  PLAYWRIGHT_BROWSERS_PATH = (Join-Path $sharedProgramRoot "ms-playwright")
+  MAVEN_USER_HOME = (Join-Path $sharedCacheRoot "maven\.m2")
+  GRADLE_USER_HOME = (Join-Path $sharedCacheRoot "gradle-user-home")
+  COURSIER_CACHE = (Join-Path $sharedCacheRoot "coursier-cache")
+  SBT_OPTS = "-Dsbt.boot.directory=$(Join-Path $sharedCacheRoot 'scala\sbt-boot') -Dsbt.global.base=$(Join-Path $sharedCacheRoot 'scala\sbt-global') -Dsbt.ivy.home=$(Join-Path $sharedCacheRoot 'scala\ivy2')"
+  HF_HOME = (Join-Path $sharedCacheRoot "huggingface")
+  HF_HUB_CACHE = (Join-Path $sharedCacheRoot "huggingface\hub")
+  HUGGINGFACE_HUB_CACHE = (Join-Path $sharedCacheRoot "huggingface\hub")
+  TRANSFORMERS_CACHE = (Join-Path $sharedCacheRoot "huggingface\transformers")
+  TORCH_HOME = (Join-Path $sharedCacheRoot "torch")
+  MODELSCOPE_CACHE = (Join-Path $sharedCacheRoot "modelscope")
+  CUDA_CACHE_PATH = (Join-Path $sharedCacheRoot "cuda\compute-cache")
+  VR_WEIGHTS_ROOT = (Join-Path $sharedCacheRoot "xiaolou-video-replace-weights")
   PAYMENT_WEBHOOK_SECRET = $paymentWebhookSecret
   PAYMENT_CALLBACK_ALLOWED_PROVIDERS = $paymentCallbackAllowedProviders
   PAYMENT_CALLBACK_REQUIRE_ALLOWED_PROVIDER = $paymentCallbackRequireAllowedProvider
@@ -432,7 +438,17 @@ foreach ($path in @(
   (Join-Path $runtimeStateRoot "xiaolou-backups"),
   (Join-Path $runtimeStateRoot "xiaolou-inputs"),
   (Join-Path $runtimeStateRoot "xiaolou-replay"),
-  (Join-Path $cacheRoot "pip")
+  $sharedCacheRoot,
+  (Join-Path $sharedCacheRoot "pip"),
+  (Join-Path $sharedCacheRoot "cuda\compute-cache"),
+  (Join-Path $sharedCacheRoot "xiaolou-video-replace-weights"),
+  $sharedProgramRoot,
+  (Join-Path $sharedProgramRoot "dotnet-userhome"),
+  (Join-Path $sharedProgramRoot "dotnet-userhome\tools"),
+  (Join-Path $sharedProgramRoot "nodejs\node_global"),
+  (Join-Path $sharedProgramRoot "Python\UserBase"),
+  (Join-Path $sharedProgramRoot "Python\UserBase\Scripts"),
+  (Join-Path $sharedProgramRoot "ms-playwright")
 )) {
   Assert-DDrivePath -Path $path -Name "runtime directory"
   New-Item -ItemType Directory -Force -Path $path | Out-Null

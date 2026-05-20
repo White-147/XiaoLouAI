@@ -2,15 +2,27 @@
 setlocal
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 if not defined XIAOLOU_RUNTIME_ROOT set "XIAOLOU_RUNTIME_ROOT=%ROOT%\.runtime"
+set "XIAOLOU_SHARED_CACHE_ROOT=D:\soft\cache"
+set "XIAOLOU_SHARED_TEMP_ROOT=D:\soft\temp"
+set "TMP=%XIAOLOU_SHARED_TEMP_ROOT%"
+set "TEMP=%XIAOLOU_SHARED_TEMP_ROOT%"
 
-set "CACHE_ROOT=%XIAOLOU_RUNTIME_ROOT%\xiaolou-cache\legacy-cache"
-set "XDG_CACHE_HOME=%CACHE_ROOT%"
+set "CACHE_ROOT=%XIAOLOU_SHARED_CACHE_ROOT%"
+set "VR_WEIGHTS_ROOT=%CACHE_ROOT%\xiaolou-video-replace-weights"
+set "XDG_CACHE_HOME=%CACHE_ROOT%\tooling-cache"
 set "PIP_CACHE_DIR=%CACHE_ROOT%\pip"
+set "UV_CACHE_DIR=%CACHE_ROOT%\uv"
+set "POETRY_CACHE_DIR=%CACHE_ROOT%\poetry"
+set "PIPENV_CACHE_DIR=%CACHE_ROOT%\pipenv"
 set "HF_HOME=%CACHE_ROOT%\huggingface"
 set "HUGGINGFACE_HUB_CACHE=%CACHE_ROOT%\huggingface\hub"
 set "TRANSFORMERS_CACHE=%CACHE_ROOT%\huggingface\transformers"
 set "TORCH_HOME=%CACHE_ROOT%\torch"
+set "MODELSCOPE_CACHE=%CACHE_ROOT%\modelscope"
+set "CUDA_CACHE_PATH=%CACHE_ROOT%\cuda\compute-cache"
 if not exist "%CACHE_ROOT%" mkdir "%CACHE_ROOT%" >nul 2>&1
+if not exist "%VR_WEIGHTS_ROOT%" mkdir "%VR_WEIGHTS_ROOT%" >nul 2>&1
+if not exist "%TEMP%" mkdir "%TEMP%" >nul 2>&1
 
 set "NODE_BIN="
 if exist "D:\soft\program\nodejs\node.exe" set "NODE_BIN=D:\soft\program\nodejs\node.exe"

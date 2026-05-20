@@ -354,6 +354,11 @@ type OfficialModelLogoMeta = {
   layout: "wordmark" | "glyph";
 };
 
+const QWEN_LOGO_DATA_URI =
+  "data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%20104%2028%27%3E%3Crect%20width%3D%27104%27%20height%3D%2728%27%20rx%3D%276%27%20fill%3D%27%23111827%27%2F%3E%3Ctext%20x%3D%2712%27%20y%3D%2719%27%20font-family%3D%27Arial%2Csans-serif%27%20font-size%3D%2714%27%20font-weight%3D%27700%27%20fill%3D%27%23fff%27%3EQwen%3C%2Ftext%3E%3C%2Fsvg%3E";
+const GEMINI_LOGO_DATA_URI =
+  "data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2028%2028%27%3E%3Cpath%20d%3D%27M14%202C15.7%208.4%2019.6%2012.3%2026%2014C19.6%2015.7%2015.7%2019.6%2014%2026C12.3%2019.6%208.4%2015.7%202%2014C8.4%2012.3%2012.3%208.4%2014%202Z%27%20fill%3D%27%238B5CF6%27%2F%3E%3Cpath%20d%3D%27M14%206C15%2010%2018%2013%2022%2014C18%2015%2015%2018%2014%2022C13%2018%2010%2015%206%2014C10%2013%2013%2010%2014%206Z%27%20fill%3D%27%23F8FAFC%27%20fill-opacity%3D%27.92%27%2F%3E%3C%2Fsvg%3E";
+
 type HomeModelPreferenceOption = {
   id: string;
   label: string;
@@ -420,12 +425,12 @@ const HOME_TO_PLAYGROUND_TRANSITION_MS = 780;
 const OFFICIAL_MODEL_LOGOS: Record<OfficialModelLogoMeta["kind"], OfficialModelLogoMeta> = {
   qwen: {
     kind: "qwen",
-    src: "https://img.alicdn.com/imgextra/i2/O1CN01g0dCMZ261m1aU7qlI_!!6000000007602-55-tps-104-28.svg",
+    src: QWEN_LOGO_DATA_URI,
     layout: "wordmark",
   },
   gemini: {
     kind: "gemini",
-    src: "https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg",
+    src: GEMINI_LOGO_DATA_URI,
     layout: "glyph",
   },
 };

@@ -1,4 +1,4 @@
-"""
+r"""
 Download helper for SAM2 + Wan2.1-VACE-1.3B weights.
 
 Idempotent — safely resumes partial downloads. Run standalone:
@@ -21,7 +21,8 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve()
 ROOT = SCRIPT.parent.parent  # .../video-replace-service
-DEFAULT_WEIGHTS = ROOT / "weights"
+DEFAULT_SHARED_CACHE_ROOT = Path(os.environ.get("XIAOLOU_SHARED_CACHE_ROOT", r"D:\soft\cache"))
+DEFAULT_WEIGHTS = DEFAULT_SHARED_CACHE_ROOT / "xiaolou-video-replace-weights"
 
 
 def _hf():

@@ -8,16 +8,31 @@ $ErrorActionPreference = "Continue"
 
 $ROOT = (Split-Path $PSScriptRoot -Parent)
 $runtimeStateRoot = if ($env:XIAOLOU_RUNTIME_ROOT) { $env:XIAOLOU_RUNTIME_ROOT } else { Join-Path $ROOT ".runtime" }
-$CACHE_ROOT = Join-Path $runtimeStateRoot "xiaolou-cache\legacy-cache"
+$CACHE_ROOT = "D:\soft\cache"
+$PROGRAM_ROOT = "D:\soft\program"
+$TEMP_ROOT = "D:\soft\temp"
 $HF_ROOT = Join-Path $CACHE_ROOT "huggingface"
 
-New-Item -ItemType Directory -Force -Path $CACHE_ROOT | Out-Null
-$env:XDG_CACHE_HOME = $CACHE_ROOT
+New-Item -ItemType Directory -Force -Path $CACHE_ROOT, $PROGRAM_ROOT, $TEMP_ROOT, (Join-Path $CACHE_ROOT "npm"), (Join-Path $PROGRAM_ROOT "nodejs\node_global") | Out-Null
+$env:XIAOLOU_SHARED_CACHE_ROOT = $CACHE_ROOT
+$env:XIAOLOU_SHARED_PROGRAM_ROOT = $PROGRAM_ROOT
+$env:XIAOLOU_SHARED_TEMP_ROOT = $TEMP_ROOT
+$env:TMP = $TEMP_ROOT
+$env:TEMP = $TEMP_ROOT
+$env:XDG_CACHE_HOME = Join-Path $CACHE_ROOT "tooling-cache"
+$env:NPM_CONFIG_CACHE = Join-Path $CACHE_ROOT "npm"
+$env:NPM_CONFIG_PREFIX = Join-Path $PROGRAM_ROOT "nodejs\node_global"
 $env:PIP_CACHE_DIR = Join-Path $CACHE_ROOT "pip"
+$env:UV_CACHE_DIR = Join-Path $CACHE_ROOT "uv"
+$env:POETRY_CACHE_DIR = Join-Path $CACHE_ROOT "poetry"
+$env:PIPENV_CACHE_DIR = Join-Path $CACHE_ROOT "pipenv"
 $env:HF_HOME = $HF_ROOT
 $env:HUGGINGFACE_HUB_CACHE = Join-Path $HF_ROOT "hub"
 $env:TRANSFORMERS_CACHE = Join-Path $HF_ROOT "transformers"
 $env:TORCH_HOME = Join-Path $CACHE_ROOT "torch"
+$env:MODELSCOPE_CACHE = Join-Path $CACHE_ROOT "modelscope"
+$env:CUDA_CACHE_PATH = Join-Path $CACHE_ROOT "cuda\compute-cache"
+$env:VR_WEIGHTS_ROOT = Join-Path $CACHE_ROOT "xiaolou-video-replace-weights"
 
 function Resolve-WorkspacePath($path, $fallback) {
     $value = if ($path) { $path } else { $fallback }

@@ -11,18 +11,23 @@ $pathVars = @(
   "XIAOLOU_RUNTIME_ROOT",
   "XIAOLOU_ROOT",
   "XIAOLOU_DATA_ROOT",
+  "XIAOLOU_SHARED_CACHE_ROOT",
+  "XIAOLOU_SHARED_PROGRAM_ROOT",
   "DOTNET_ROOT",
   "DOTNET_EXE",
   "PYTHON_EXE",
   "NODE_EXE",
   "NPM_CMD",
+  "PG_BIN",
   "CONTROL_API_DLL",
   "CLOSED_API_WORKER_DLL",
   "LOCAL_MODEL_WORKER_SERVICE_DLL",
+  "OBJECT_STORAGE_LOCAL_ROOT",
   "LOCAL_CACHE_DIR",
   "LOCAL_TEMP_DIR",
   "LOG_DIR",
   "BACKUP_DIR",
+  "XDG_CACHE_HOME",
   "TMP",
   "TEMP",
   "DOTNET_CLI_HOME",
@@ -49,7 +54,9 @@ $pathVars = @(
   "HUGGINGFACE_HUB_CACHE",
   "TRANSFORMERS_CACHE",
   "TORCH_HOME",
-  "MODELSCOPE_CACHE"
+  "MODELSCOPE_CACHE",
+  "CUDA_CACHE_PATH",
+  "VR_WEIGHTS_ROOT"
 )
 
 $violations = New-Object System.Collections.Generic.List[string]
@@ -60,6 +67,24 @@ if (-not $repoRoot) {
 
 $repoFull = [System.IO.Path]::GetFullPath($repoRoot).TrimEnd("\")
 $repoPrefix = "$repoFull\"
+$sharedCacheRoot = [Environment]::GetEnvironmentVariable("XIAOLOU_SHARED_CACHE_ROOT", "Process")
+if (-not $sharedCacheRoot) {
+  $sharedCacheRoot = "D:\soft\cache"
+}
+$sharedCacheFull = [System.IO.Path]::GetFullPath($sharedCacheRoot).TrimEnd("\")
+$sharedCachePrefix = "$sharedCacheFull\"
+$sharedProgramRoot = [Environment]::GetEnvironmentVariable("XIAOLOU_SHARED_PROGRAM_ROOT", "Process")
+if (-not $sharedProgramRoot) {
+  $sharedProgramRoot = "D:\soft\program"
+}
+$sharedProgramFull = [System.IO.Path]::GetFullPath($sharedProgramRoot).TrimEnd("\")
+$sharedProgramPrefix = "$sharedProgramFull\"
+if ($sharedCacheFull -ine "D:\soft\cache") {
+  $violations.Add("XIAOLOU_SHARED_CACHE_ROOT must be D:\soft\cache: $sharedCacheRoot")
+}
+if ($sharedProgramFull -ine "D:\soft\program") {
+  $violations.Add("XIAOLOU_SHARED_PROGRAM_ROOT must be D:\soft\program: $sharedProgramRoot")
+}
 $workspaceScopedVars = @(
   "XIAOLOU_REPO_ROOT",
   "XIAOLOU_RUNTIME_ROOT",
@@ -68,28 +93,29 @@ $workspaceScopedVars = @(
   "CONTROL_API_DLL",
   "CLOSED_API_WORKER_DLL",
   "LOCAL_MODEL_WORKER_SERVICE_DLL",
+  "OBJECT_STORAGE_LOCAL_ROOT",
   "LOCAL_CACHE_DIR",
   "LOCAL_TEMP_DIR",
   "LOG_DIR",
   "BACKUP_DIR",
   "TMP",
   "TEMP",
-  "DOTNET_CLI_HOME",
+  "NUGET_SCRATCH"
+)
+
+$sharedCacheScopedVars = @(
+  "XDG_CACHE_HOME",
   "DOTNET_BUNDLE_EXTRACT_BASE_DIR",
   "NUGET_PACKAGES",
   "NUGET_HTTP_CACHE_PATH",
   "NUGET_PLUGINS_CACHE_PATH",
-  "NUGET_SCRATCH",
   "NPM_CONFIG_CACHE",
-  "NPM_CONFIG_PREFIX",
   "PIP_CACHE_DIR",
   "PIP_CONFIG_FILE",
   "PYTHONPYCACHEPREFIX",
-  "PYTHONUSERBASE",
   "UV_CACHE_DIR",
   "POETRY_CACHE_DIR",
   "PIPENV_CACHE_DIR",
-  "PLAYWRIGHT_BROWSERS_PATH",
   "MAVEN_USER_HOME",
   "GRADLE_USER_HOME",
   "COURSIER_CACHE",
@@ -98,7 +124,16 @@ $workspaceScopedVars = @(
   "HUGGINGFACE_HUB_CACHE",
   "TRANSFORMERS_CACHE",
   "TORCH_HOME",
-  "MODELSCOPE_CACHE"
+  "MODELSCOPE_CACHE",
+  "CUDA_CACHE_PATH",
+  "VR_WEIGHTS_ROOT"
+)
+
+$sharedProgramScopedVars = @(
+  "DOTNET_CLI_HOME",
+  "NPM_CONFIG_PREFIX",
+  "PYTHONUSERBASE",
+  "PLAYWRIGHT_BROWSERS_PATH"
 )
 
 foreach ($name in $pathVars) {
@@ -115,6 +150,20 @@ foreach ($name in $pathVars) {
     $fullValue = [System.IO.Path]::GetFullPath($value).TrimEnd("\")
     if ($fullValue -ine $repoFull -and -not $fullValue.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
       $violations.Add("${name} must stay under ${repoFull}: ${value}")
+    }
+  }
+
+  if ($sharedCacheScopedVars -contains $name -and $value -match "^[A-Za-z]:\\") {
+    $fullValue = [System.IO.Path]::GetFullPath($value).TrimEnd("\")
+    if ($fullValue -ine $sharedCacheFull -and -not $fullValue.StartsWith($sharedCachePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+      $violations.Add("${name} must stay under ${sharedCacheFull}: ${value}")
+    }
+  }
+
+  if ($sharedProgramScopedVars -contains $name -and $value -match "^[A-Za-z]:\\") {
+    $fullValue = [System.IO.Path]::GetFullPath($value).TrimEnd("\")
+    if ($fullValue -ine $sharedProgramFull -and -not $fullValue.StartsWith($sharedProgramPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+      $violations.Add("${name} must stay under ${sharedProgramFull}: ${value}")
     }
   }
 }
