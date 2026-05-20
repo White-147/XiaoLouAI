@@ -1,6 +1,16 @@
 @echo off
 setlocal
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
+set "XIAOLOU_SHARED_CACHE_ROOT=D:\soft\cache"
+set "XIAOLOU_SHARED_PROGRAM_ROOT=D:\soft\program"
+set "XIAOLOU_SHARED_TEMP_ROOT=D:\soft\temp"
+set "TMP=%XIAOLOU_SHARED_TEMP_ROOT%"
+set "TEMP=%XIAOLOU_SHARED_TEMP_ROOT%"
+set "NPM_CONFIG_CACHE=%XIAOLOU_SHARED_CACHE_ROOT%\npm"
+set "NPM_CONFIG_PREFIX=%XIAOLOU_SHARED_PROGRAM_ROOT%\nodejs\node_global"
+if not exist "%NPM_CONFIG_CACHE%" mkdir "%NPM_CONFIG_CACHE%" >nul 2>&1
+if not exist "%NPM_CONFIG_PREFIX%" mkdir "%NPM_CONFIG_PREFIX%" >nul 2>&1
+if not exist "%TEMP%" mkdir "%TEMP%" >nul 2>&1
 
 set "NPM_CMD="
 if exist "D:\soft\program\nodejs\npm.cmd" set "NPM_CMD=D:\soft\program\nodejs\npm.cmd"

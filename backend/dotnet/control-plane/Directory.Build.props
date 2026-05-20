@@ -4,4 +4,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <XiaoLouSharedCacheRoot Condition="'$(XiaoLouSharedCacheRoot)' == ''">D:\soft\cache</XiaoLouSharedCacheRoot>
+    <RestorePackagesPath Condition="'$(RestorePackagesPath)' == ''">$(XiaoLouSharedCacheRoot)\nuget\packages</RestorePackagesPath>
+  </PropertyGroup>
 </Project>

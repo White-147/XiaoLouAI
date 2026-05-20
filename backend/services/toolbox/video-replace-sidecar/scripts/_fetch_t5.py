@@ -12,7 +12,8 @@ import urllib.request
 from pathlib import Path
 
 URL = "https://huggingface.co/Wan-AI/Wan2.1-VACE-1.3B/resolve/main/models_t5_umt5-xxl-enc-bf16.pth"
-OUT = Path(__file__).resolve().parent.parent / "weights" / "vace-1.3B" / "models_t5_umt5-xxl-enc-bf16.pth"
+SHARED_CACHE_ROOT = Path(os.environ.get("XIAOLOU_SHARED_CACHE_ROOT", r"D:\soft\cache"))
+OUT = SHARED_CACHE_ROOT / "xiaolou-video-replace-weights" / "vace-1.3B" / "models_t5_umt5-xxl-enc-bf16.pth"
 
 
 def main() -> int:

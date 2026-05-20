@@ -6,19 +6,29 @@ for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI"
 
 if not defined LEGACY_CORE_API_ROOT set "LEGACY_CORE_API_ROOT=%ROOT%\legacy\core-api"
 if not defined XIAOLOU_RUNTIME_ROOT set "XIAOLOU_RUNTIME_ROOT=%ROOT%\.runtime"
+set "XIAOLOU_SHARED_CACHE_ROOT=D:\soft\cache"
+set "XIAOLOU_SHARED_TEMP_ROOT=D:\soft\temp"
+set "TMP=%XIAOLOU_SHARED_TEMP_ROOT%"
+set "TEMP=%XIAOLOU_SHARED_TEMP_ROOT%"
 
 set "SERVICE_DIR=%ROOT%\backend\services\toolbox\video-replace-sidecar"
 set "VENV_DIR=%SERVICE_DIR%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "ENV_FILE=%SERVICE_DIR%\.env.local"
 if not defined SKIP_MODEL_DOWNLOAD set "SKIP_MODEL_DOWNLOAD=1"
-set "CACHE_ROOT=%XIAOLOU_RUNTIME_ROOT%\xiaolou-cache\legacy-cache"
-set "XDG_CACHE_HOME=%CACHE_ROOT%"
+set "CACHE_ROOT=%XIAOLOU_SHARED_CACHE_ROOT%"
+set "WEIGHTS_ROOT=%CACHE_ROOT%\xiaolou-video-replace-weights"
+set "XDG_CACHE_HOME=%CACHE_ROOT%\tooling-cache"
 set "PIP_CACHE_DIR=%CACHE_ROOT%\pip"
+set "UV_CACHE_DIR=%CACHE_ROOT%\uv"
+set "POETRY_CACHE_DIR=%CACHE_ROOT%\poetry"
+set "PIPENV_CACHE_DIR=%CACHE_ROOT%\pipenv"
 set "HF_HOME=%CACHE_ROOT%\huggingface"
 set "HUGGINGFACE_HUB_CACHE=%CACHE_ROOT%\huggingface\hub"
 set "TRANSFORMERS_CACHE=%CACHE_ROOT%\huggingface\transformers"
 set "TORCH_HOME=%CACHE_ROOT%\torch"
+set "MODELSCOPE_CACHE=%CACHE_ROOT%\modelscope"
+set "CUDA_CACHE_PATH=%CACHE_ROOT%\cuda\compute-cache"
 
 set "SMALL_LOG=%SERVICE_DIR%\.install-small.log"
 set "TORCH_LOG=%SERVICE_DIR%\.install-torch.log"
@@ -28,9 +38,9 @@ set "VACE_LOG=%SERVICE_DIR%\.install-vace.log"
 set "CUDA124_LOG=%SERVICE_DIR%\.install-cuda124.log"
 set "FLASHATTN_LOG=%SERVICE_DIR%\.install-flash-attn.log"
 
-set "CUDA124_HOME=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
+set "CUDA124_HOME=D:\soft\program\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
 set "CUDA124_URL=https://developer.download.nvidia.com/compute/cuda/12.4.1/network_installers/cuda_12.4.1_windows_network.exe"
-set "CUDA_CACHE_DIR=%XIAOLOU_RUNTIME_ROOT%\xiaolou-cache\cuda"
+set "CUDA_CACHE_DIR=%CACHE_ROOT%\cuda"
 set "CUDA_NET_EXE=%CUDA_CACHE_DIR%\cuda_12.4.1_windows_network.exe"
 set "CUDA_NET_DIR=%TEMP%\cuda124-network-full"
 set "CUDA124_COMPONENTS=thrust_12.4 cudart_12.4 cupti_12.4 nvcc_12.4 nvrtc_12.4 nvrtc_dev_12.4 nvtx_12.4 cublas_12.4 cublas_dev_12.4 cufft_12.4 cufft_dev_12.4 curand_12.4 curand_dev_12.4 cusolver_12.4 cusolver_dev_12.4 cusparse_12.4 cusparse_dev_12.4 npp_12.4 npp_dev_12.4 nvjpeg_12.4 nvjpeg_dev_12.4 nvjitlink_12.4 visual_studio_integration_12.4"
@@ -54,12 +64,15 @@ if not exist "%SERVICE_DIR%\pyproject.toml" (
 )
 
 if not exist "%CACHE_ROOT%" mkdir "%CACHE_ROOT%" >nul 2>&1
+if not exist "%WEIGHTS_ROOT%" mkdir "%WEIGHTS_ROOT%" >nul 2>&1
+if not exist "%TEMP%" mkdir "%TEMP%" >nul 2>&1
 
 echo.
 echo ============================================================
 echo Video Replace setup
 echo Root:    %ROOT%
 echo Cache:   %CACHE_ROOT%
+echo Weights: %WEIGHTS_ROOT%
 echo Service: %SERVICE_DIR%
 echo ============================================================
 
@@ -218,21 +231,29 @@ exit /b 0
 :ensure_sam2_weight
 set "SAM2_SIZE=%~1"
 set "SAM2_FILE=%~2"
-if exist "%SERVICE_DIR%\weights\sam2\%SAM2_FILE%" (
+if exist "%WEIGHTS_ROOT%\sam2\%SAM2_FILE%" (
     echo [ok] SAM2 %SAM2_SIZE% checkpoint already exists.
+    exit /b 0
+)
+if exist "%SERVICE_DIR%\weights\sam2\%SAM2_FILE%" (
+    echo [step] Migrating existing SAM2 %SAM2_SIZE% checkpoint to D: shared cache.
+    if not exist "%WEIGHTS_ROOT%\sam2" mkdir "%WEIGHTS_ROOT%\sam2" >nul 2>&1
+    robocopy "%SERVICE_DIR%\weights\sam2" "%WEIGHTS_ROOT%\sam2" "%SAM2_FILE%" /COPY:DAT /R:2 /W:2 >nul
+    if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
+    echo [ok] SAM2 %SAM2_SIZE% checkpoint available in shared cache.
     exit /b 0
 )
 echo.
 echo [step] Download SAM2 %SAM2_SIZE% checkpoint
 >> "%SAM2_LOG%" echo ============================================================
 >> "%SAM2_LOG%" echo [%DATE% %TIME%] Download SAM2 %SAM2_SIZE% checkpoint
->> "%SAM2_LOG%" echo CMD: pushd "%SERVICE_DIR%" ^& "%VENV_PYTHON%" scripts\download_weights.py --sam2 --sam2-size %SAM2_SIZE%
+>> "%SAM2_LOG%" echo CMD: pushd "%SERVICE_DIR%" ^& "%VENV_PYTHON%" scripts\download_weights.py --weights-dir "%WEIGHTS_ROOT%" --sam2 --sam2-size %SAM2_SIZE%
 pushd "%SERVICE_DIR%"
 if errorlevel 1 (
     echo [error] Failed to enter %SERVICE_DIR%
     exit /b 1
 )
-"%VENV_PYTHON%" scripts\download_weights.py --sam2 --sam2-size %SAM2_SIZE% >> "%SAM2_LOG%" 2>&1
+"%VENV_PYTHON%" scripts\download_weights.py --weights-dir "%WEIGHTS_ROOT%" --sam2 --sam2-size %SAM2_SIZE% >> "%SAM2_LOG%" 2>&1
 set "SAM2_RC=%ERRORLEVEL%"
 popd
 if not "%SAM2_RC%"=="0" (
@@ -242,21 +263,29 @@ if not "%SAM2_RC%"=="0" (
 exit /b 0
 
 :ensure_wan2_repo
-if exist "%SERVICE_DIR%\weights\wan2\Wan2.1\generate.py" (
+if exist "%WEIGHTS_ROOT%\wan2\Wan2.1\generate.py" (
     echo [ok] Wan2.1 repo already exists.
+    exit /b 0
+)
+if exist "%SERVICE_DIR%\weights\wan2\Wan2.1\generate.py" (
+    echo [step] Migrating existing Wan2.1 repo to D: shared cache.
+    if not exist "%WEIGHTS_ROOT%\wan2" mkdir "%WEIGHTS_ROOT%\wan2" >nul 2>&1
+    robocopy "%SERVICE_DIR%\weights\wan2\Wan2.1" "%WEIGHTS_ROOT%\wan2\Wan2.1" /E /COPY:DAT /DCOPY:DAT /R:2 /W:2 >nul
+    if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
+    echo [ok] Wan2.1 repo available in shared cache.
     exit /b 0
 )
 echo.
 echo [step] Clone Wan2.1 repo
 >> "%ML_LOG%" echo ============================================================
 >> "%ML_LOG%" echo [%DATE% %TIME%] Clone Wan2.1 repo
->> "%ML_LOG%" echo CMD: pushd "%SERVICE_DIR%" ^& "%VENV_PYTHON%" scripts\download_weights.py --wan2-repo
+>> "%ML_LOG%" echo CMD: pushd "%SERVICE_DIR%" ^& "%VENV_PYTHON%" scripts\download_weights.py --weights-dir "%WEIGHTS_ROOT%" --wan2-repo
 pushd "%SERVICE_DIR%"
 if errorlevel 1 (
     echo [error] Failed to enter %SERVICE_DIR%
     exit /b 1
 )
-"%VENV_PYTHON%" scripts\download_weights.py --wan2-repo >> "%ML_LOG%" 2>&1
+"%VENV_PYTHON%" scripts\download_weights.py --weights-dir "%WEIGHTS_ROOT%" --wan2-repo >> "%ML_LOG%" 2>&1
 set "WAN2_RC=%ERRORLEVEL%"
 popd
 if not "%WAN2_RC%"=="0" (
@@ -275,12 +304,12 @@ if not exist "%ENV_FILE%" (
     echo [ok] Created %ENV_FILE%
 )
 call :ensure_env_line "%ENV_FILE%" "VR_STORAGE_ROOT" "./data" || exit /b 1
-call :ensure_env_line "%ENV_FILE%" "VR_WEIGHTS_ROOT" "./weights" || exit /b 1
-call :ensure_env_line "%ENV_FILE%" "VR_SAM2_CHECKPOINT_TINY" "./weights/sam2/sam2.1_hiera_tiny.pt" || exit /b 1
-call :ensure_env_line "%ENV_FILE%" "VR_SAM2_CHECKPOINT_BASE_PLUS" "./weights/sam2/sam2.1_hiera_base_plus.pt" || exit /b 1
+call :ensure_env_line "%ENV_FILE%" "VR_WEIGHTS_ROOT" "%WEIGHTS_ROOT%" || exit /b 1
+call :ensure_env_line "%ENV_FILE%" "VR_SAM2_CHECKPOINT_TINY" "%WEIGHTS_ROOT%\sam2\sam2.1_hiera_tiny.pt" || exit /b 1
+call :ensure_env_line "%ENV_FILE%" "VR_SAM2_CHECKPOINT_BASE_PLUS" "%WEIGHTS_ROOT%\sam2\sam2.1_hiera_base_plus.pt" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_SAM2_SIZE_DEFAULT" "base_plus" || exit /b 1
-call :ensure_env_line "%ENV_FILE%" "VR_WAN2_REPO_DIR" "./weights/wan2/Wan2.1" || exit /b 1
-call :ensure_env_line "%ENV_FILE%" "VR_VACE_MODEL_DIR" "./weights/vace-1.3B" || exit /b 1
+call :ensure_env_line "%ENV_FILE%" "VR_WAN2_REPO_DIR" "%WEIGHTS_ROOT%\wan2\Wan2.1" || exit /b 1
+call :ensure_env_line "%ENV_FILE%" "VR_VACE_MODEL_DIR" "%WEIGHTS_ROOT%\vace-1.3B" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_REPLACE_MODE" "lite" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_YOLO_DEVICE" "cpu" || exit /b 1
 call :ensure_env_line "%ENV_FILE%" "VR_VACE_SUBPROCESS_TIMEOUT_S" "10800" || exit /b 1
@@ -303,8 +332,15 @@ if errorlevel 1 (
 exit /b 0
 
 :ensure_vace_weights_background
-if exist "%SERVICE_DIR%\weights\vace-1.3B\config.json" if exist "%SERVICE_DIR%\weights\vace-1.3B\diffusion_pytorch_model.safetensors" (
+if exist "%WEIGHTS_ROOT%\vace-1.3B\config.json" if exist "%WEIGHTS_ROOT%\vace-1.3B\diffusion_pytorch_model.safetensors" (
     echo [ok] VACE 1.3B weights already exist.
+    exit /b 0
+)
+if exist "%SERVICE_DIR%\weights\vace-1.3B\config.json" if exist "%SERVICE_DIR%\weights\vace-1.3B\diffusion_pytorch_model.safetensors" (
+    echo [step] Migrating existing VACE 1.3B weights to D: shared cache.
+    robocopy "%SERVICE_DIR%\weights\vace-1.3B" "%WEIGHTS_ROOT%\vace-1.3B" /E /COPY:DAT /DCOPY:DAT /R:2 /W:2 >nul
+    if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
+    echo [ok] VACE 1.3B weights available in shared cache.
     exit /b 0
 )
 set "VACE_RUNNER=%TEMP%\setup_video_replace_vace_download.cmd"
@@ -313,7 +349,7 @@ set "VACE_RUNNER=%TEMP%\setup_video_replace_vace_download.cmd"
 >> "%VACE_RUNNER%" echo cd /d "%SERVICE_DIR%"
 >> "%VACE_RUNNER%" echo ^>^> "%VACE_LOG%" echo ============================================================
 >> "%VACE_RUNNER%" echo ^>^> "%VACE_LOG%" echo [%%DATE%% %%TIME%%] Background VACE 1.3B download
->> "%VACE_RUNNER%" echo "%VENV_PYTHON%" scripts\download_weights.py --vace --vace-size 1.3B ^>^> "%VACE_LOG%" 2^>^&1
+>> "%VACE_RUNNER%" echo "%VENV_PYTHON%" scripts\download_weights.py --weights-dir "%WEIGHTS_ROOT%" --vace --vace-size 1.3B ^>^> "%VACE_LOG%" 2^>^&1
 start "VACE 1.3B weights" /min cmd /d /c ""%VACE_RUNNER%""
 if errorlevel 1 (
     echo [error] Failed to start the background VACE weights download.
@@ -424,54 +460,10 @@ if exist "%CUDA124_HOME%\bin\nvcc.exe" (
     echo [ok] CUDA 12.4 toolkit already present.
     exit /b 0
 )
-net session >nul 2>&1
-if errorlevel 1 (
-    echo [error] CUDA 12.4 toolkit is missing and needs Administrator rights to install.
-    echo [error] Re-run this script from an elevated Command Prompt.
-    exit /b 1
-)
-if not exist "%CUDA_CACHE_DIR%" mkdir "%CUDA_CACHE_DIR%" >nul 2>&1
-if not exist "%CUDA_NET_EXE%" (
-    echo.
-    echo [step] Download CUDA 12.4.1 network installer
-    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri '%CUDA124_URL%' -OutFile '%CUDA_NET_EXE%'"
-    if errorlevel 1 (
-        echo [error] Failed to download CUDA 12.4.1 network installer.
-        exit /b 1
-    )
-)
-if exist "%CUDA_NET_DIR%" rmdir /s /q "%CUDA_NET_DIR%"
-mkdir "%CUDA_NET_DIR%" >nul 2>&1
-
-echo.
-echo [step] Extract CUDA 12.4.1 installer
->> "%CUDA124_LOG%" echo ============================================================
->> "%CUDA124_LOG%" echo [%DATE% %TIME%] Extract CUDA 12.4.1 installer
-tar -xf "%CUDA_NET_EXE%" -C "%CUDA_NET_DIR%" >> "%CUDA124_LOG%" 2>&1
-if errorlevel 1 (
-    echo [error] Failed to extract CUDA network installer. See %CUDA124_LOG%
-    exit /b 1
-)
-if not exist "%CUDA_NET_DIR%\setup.exe" (
-    echo [error] Extracted CUDA installer is missing setup.exe
-    exit /b 1
-)
-
-echo.
-echo [step] Install CUDA 12.4 toolkit only
->> "%CUDA124_LOG%" echo ============================================================
->> "%CUDA124_LOG%" echo [%DATE% %TIME%] Install CUDA 12.4 toolkit only
-cmd /d /c ""%CUDA_NET_DIR%\setup.exe" -s %CUDA124_COMPONENTS% -n" >> "%CUDA124_LOG%" 2>&1
-if errorlevel 1 (
-    echo [error] CUDA 12.4 toolkit install failed. See %CUDA124_LOG%
-    exit /b 1
-)
-if not exist "%CUDA124_HOME%\bin\nvcc.exe" (
-    echo [error] CUDA 12.4 install completed but nvcc.exe was not found.
-    exit /b 1
-)
-echo [ok] CUDA 12.4 toolkit ready.
-exit /b 0
+echo [error] CUDA 12.4 toolkit is missing at the enforced D: program path:
+echo [error]   %CUDA124_HOME%
+echo [error] Install or extract CUDA Toolkit 12.4 there before building flash-attn.
+exit /b 1
 
 :find_vcvars64
 set "VCVARS64="

@@ -1,9 +1,13 @@
 """Settings loaded from environment / .env.local via pydantic-settings."""
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_SHARED_CACHE_ROOT = Path(os.environ.get("XIAOLOU_SHARED_CACHE_ROOT", r"D:\soft\cache"))
+DEFAULT_WEIGHTS_ROOT = DEFAULT_SHARED_CACHE_ROOT / "xiaolou-video-replace-weights"
 
 
 class Settings(BaseSettings):
@@ -27,7 +31,7 @@ class Settings(BaseSettings):
 
     # ── Storage ────────────────────────────────────────────────────────
     storage_root: Path = Path("./data")
-    weights_root: Path = Path("./weights")
+    weights_root: Path = DEFAULT_WEIGHTS_ROOT
     max_upload_mb: int = 200
 
     # ── Task database ──────────────────────────────────────────────────
