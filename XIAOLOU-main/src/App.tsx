@@ -89,6 +89,7 @@ export default function App() {
               </DeferredRoute>
             }
           />
+          <Route path="admin/login" element={<Placeholder title="管理员登录入口 / Admin access shell" />} />
           <Route
             path="script-plaza"
             element={

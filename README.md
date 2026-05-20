@@ -254,6 +254,13 @@ O 队列已收口：
 - 在已有 synthetic E2E 和 xUnit 基础上，继续评估非必需的覆盖率、安全扫描和性能基线门槛。
 - 按需把 `deploy/records` 中已收口的阶段记录整理成发布说明或 CHANGELOG。
 
+## Final Legacy Surface Positioning
+
+- `backend/dotnet/control-plane/` is the production control plane for the current Windows-native runtime.
+- `core-api/` is retained only as a Node compatibility layer and migration reference under `legacy/core-api`, not as a production API entrypoint.
+- `services/api/` is retained only as a legacy Python API reference; not production control plane under `legacy/services-api`.
+- The `legacy/core-api` and `legacy/services-api` trees are archived legacy references for audit and migration comparison until approved deletion.
+
 ## License
 
 MIT
