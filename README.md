@@ -57,16 +57,16 @@ XiaoLouAI 是一个 Windows 原生 AI 创作平台，面向图片、视频、剧
 ```mermaid
 flowchart LR
     User["用户 / 管理员"] --> Browser["React + Vite 静态前端"]
-    Browser --> Proxy["Caddy / IIS\n静态文件 + public API proxy"]
-    Proxy --> Api[".NET Control API\nASP.NET Core"]
-    Api --> Pg["PostgreSQL\ncanonical state + queues"]
-    Api --> Storage["Object Storage\nmedia primary storage"]
-    Api --> Payment["Payment callbacks\ncanonical ledger"]
-    Pg --> ClosedWorker["ClosedApiWorker\nprovider jobs"]
-    Pg --> LocalWorker["LocalModelWorkerService\nlocal model lane"]
-    ClosedWorker --> Provider["Closed API providers\nVertex / future routes"]
+    Browser --> Proxy["Caddy / IIS static files + public API proxy"]
+    Proxy --> Api[".NET Control API / ASP.NET Core"]
+    Api --> Pg["PostgreSQL canonical state + queues"]
+    Api --> Storage["Object Storage media primary storage"]
+    Api --> Payment["Payment callbacks canonical ledger"]
+    Pg --> ClosedWorker["ClosedApiWorker provider jobs"]
+    Pg --> LocalWorker["LocalModelWorkerService local model lane"]
+    ClosedWorker --> Provider["Closed API providers Vertex / future routes"]
     Provider --> Storage
-    LocalWorker --> Sidecar["Python local model sidecar\nexplicit adapter boundary"]
+    LocalWorker --> Sidecar["Python local model sidecar explicit adapter boundary"]
     Sidecar --> Storage
     Storage --> Browser
 ```
