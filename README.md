@@ -1,4 +1,25 @@
-# XiaoLouAI
+<p align="center">
+  <img src="./XIAOLOU-main/public/chuangjing-logo-shell.png" alt="XiaoLouAI logo" width="180">
+</p>
+
+<h1 align="center">XiaoLouAI</h1>
+
+<p align="center">Windows 原生 AI 创作平台，面向图片、视频、剧本、分镜、素材库、画布编排和企业管理等内容生产场景。</p>
+
+<p align="center">
+  <a href="./README.md">简体中文</a> | <a href="./README.en.md">English</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/White-147/XiaoLouAI/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/White-147/XiaoLouAI/ci.yml?branch=main&style=for-the-badge&label=CI"></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge">
+  <img alt="Stack" src="https://img.shields.io/badge/stack-React%20%2B%20.NET%20%2B%20PostgreSQL-2E7D32?style=for-the-badge">
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge"></a>
+</p>
+
+<p align="center">
+  <img src="./docs/assets/screenshots/overview.png" alt="XiaoLouAI 前端界面截图" width="900">
+</p>
 
 XiaoLouAI 是一个 Windows 原生 AI 创作平台，面向图片、视频、剧本、分镜、素材库、画布编排、Playground 调试和企业管理等内容生产场景。项目采用 React 前端、.NET Control API、PostgreSQL canonical 数据库、Windows Service workers 和对象存储组成一套可部署、可审计、可继续扩展的工程链路。
 
@@ -225,6 +246,10 @@ O 队列已收口：
 - O4：`/home` 不再隐藏挂载 Playground；只在焦点、输入、附件和发送等交互中预取 lazy route chunk。
 - O5：只对稳定 JSON metadata routes 启用动态压缩、private `max-age=30` 和 weak ETag；SSE、range media、auth/payment/provider/operational 和账号态 reads 不进入该策略。
 - O6：新增 `scripts/windows/verify-public-access-capacity.ps1`，默认离线核算 PostgreSQL pool、worker lease 吞吐、active-job polling 和 body caps；`-RunHttp` 可验证公网入口 cache/compression/range/p95/429。
+
+## 运行记录
+
+- [运行记录索引](./docs/run-records/README.md)
 
 ## 项目亮点
 
