@@ -281,7 +281,7 @@ export function SidebarShell({
           >
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-transparent">
               <img
-                src="/chuangjing-logo-shell.png"
+                src={`${import.meta.env.BASE_URL}chuangjing-logo-shell.png`}
                 alt="创境AI Logo"
                 className="h-8 w-8 object-contain"
               />

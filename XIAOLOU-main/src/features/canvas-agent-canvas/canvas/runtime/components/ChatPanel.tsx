@@ -367,7 +367,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                             <div className={`rounded-2xl p-4 mb-4 ${isDark ? 'bg-neutral-800/50' : 'bg-neutral-100'}`}>
                                 <div className={`rounded-xl overflow-hidden mb-3 flex items-center justify-center ${isDark ? 'bg-neutral-700/50' : 'bg-neutral-200'}`}>
                                     <img
-                                        src="/chat-preview.gif"
+                                        src={`${import.meta.env.BASE_URL}chat-preview.gif`}
                                         alt="Drag and drop preview"
                                         className="w-full h-auto object-cover rounded-xl"
                                     />

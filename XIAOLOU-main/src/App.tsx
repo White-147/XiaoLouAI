@@ -49,9 +49,17 @@ function DeferredRoute(props: { children: ReactNode }) {
   );
 }
 
+// 子路径部署适配（如 GitHub Pages /jyl-site/preview/...）：basename 由当前路径推导；
+// 根路径或本地开发（pathname 为 "/"）时退化为无 basename，行为与之前完全一致。
+function resolveBasename(pathname: string): string | undefined {
+  const stripped = pathname.replace(/\/+$/, '');
+  return stripped || undefined;
+}
+
 export default function App() {
+  const basename = resolveBasename(window.location.pathname);
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/home" replace />} />

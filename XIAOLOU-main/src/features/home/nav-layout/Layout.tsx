@@ -57,7 +57,7 @@ const CanvasLoadingFallback = () => (
   <div className="flex h-full w-full items-center justify-center bg-[#f8f6f1] px-6 text-[#171512] dark:bg-background dark:text-foreground">
     <div className="flex flex-col items-center">
       <img
-        src="/chuangjing-logo-shell.png"
+        src={`${import.meta.env.BASE_URL}chuangjing-logo-shell.png`}
         alt="创境AI Logo"
         className="relative h-11 w-11 animate-[agentCanvasLogoLoad_1.35s_ease-in-out_infinite] object-contain drop-shadow-[0_6px_16px_rgba(212,143,71,0.28)]"
       />

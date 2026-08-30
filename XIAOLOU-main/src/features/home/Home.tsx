@@ -1480,7 +1480,7 @@ export default function Home() {
           >
             <div className="flex items-center gap-3">
               <img
-                src="/chuangjing-logo-shell.png"
+                src={`${import.meta.env.BASE_URL}chuangjing-logo-shell.png`}
                 alt="创境AI Logo"
                 className="h-10 w-10 shrink-0 object-contain drop-shadow-[0_6px_16px_rgba(212,143,71,0.28)] sm:h-11 sm:w-11"
               />
