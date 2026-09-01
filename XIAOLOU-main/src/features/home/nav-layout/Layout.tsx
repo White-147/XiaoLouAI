@@ -603,7 +603,7 @@ export default function Layout() {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="flex h-screen supports-[height:100dvh]:h-[100dvh] w-full overflow-hidden bg-background">
       <SidebarShell
         actorId={actorId}
         isCollapsed={isCollapsed}
